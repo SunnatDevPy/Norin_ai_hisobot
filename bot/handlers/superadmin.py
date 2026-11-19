@@ -234,6 +234,21 @@ async def cb_subscription_paid_notify(cb: CallbackQuery) -> None:
 # ---------------------------------------------------------------------------
 
 
+@router.message(F.text.in_({"❌ Bekor qilish", "/cancel"}), F.chat.type == "private")
+async def cancel_superadmin_or_any_state(message: Message, state: FSMContext) -> None:
+    """Cancel any active FSM state (including SuperAdminStates) at highest priority."""
+    uid = message.from_user.id if message.from_user else None
+    async with async_session_maker() as db:
+        if not await is_user_authorized(db, uid):
+            return
+    cur = await state.get_state()
+    await state.clear()
+    await message.answer("❌ Amal bekor qilindi.", reply_markup=main_menu_keyboard())
+    if is_super_admin(uid) and cur and cur.startswith("SuperAdminStates:"):
+        text, kb = await _superadmin_panel(uid)
+        await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
 @router.message(Command("superadmin"), F.chat.type == "private")
 async def cmd_superadmin(message: Message, state: FSMContext) -> None:
     """Open Super Admin subscription control panel."""
@@ -311,7 +326,12 @@ async def cb_superadmin_new_tenant_prompt(cb: CallbackQuery, state: FSMContext) 
     await cb.answer()
 
 
-@router.message(SuperAdminStates.waiting_new_tenant_name, F.chat.type == "private")
+@router.message(
+    SuperAdminStates.waiting_new_tenant_name,
+    F.chat.type == "private",
+    ~F.text.startswith("/"),
+    F.text != "❌ Bekor qilish",
+)
 async def process_superadmin_new_tenant(message: Message, state: FSMContext) -> None:
     uid = message.from_user.id if message.from_user else None
     if not is_super_admin(uid):
@@ -372,7 +392,12 @@ async def cb_superadmin_extend_custom_prompt(cb: CallbackQuery, state: FSMContex
     await cb.answer()
 
 
-@router.message(SuperAdminStates.waiting_custom_extend_days, F.chat.type == "private")
+@router.message(
+    SuperAdminStates.waiting_custom_extend_days,
+    F.chat.type == "private",
+    ~F.text.startswith("/"),
+    F.text != "❌ Bekor qilish",
+)
 async def process_superadmin_custom_days(message: Message, state: FSMContext) -> None:
     uid = message.from_user.id if message.from_user else 0
     if not is_super_admin(uid):
@@ -417,7 +442,12 @@ async def cb_superadmin_edit_price(cb: CallbackQuery, state: FSMContext) -> None
     await cb.answer()
 
 
-@router.message(SuperAdminStates.waiting_monthly_price, F.chat.type == "private")
+@router.message(
+    SuperAdminStates.waiting_monthly_price,
+    F.chat.type == "private",
+    ~F.text.startswith("/"),
+    F.text != "❌ Bekor qilish",
+)
 async def process_superadmin_price(message: Message, state: FSMContext) -> None:
     uid = message.from_user.id if message.from_user else None
     if not is_super_admin(uid):
@@ -449,7 +479,12 @@ async def cb_superadmin_edit_tenant(cb: CallbackQuery, state: FSMContext) -> Non
     await cb.answer()
 
 
-@router.message(SuperAdminStates.waiting_tenant_name, F.chat.type == "private")
+@router.message(
+    SuperAdminStates.waiting_tenant_name,
+    F.chat.type == "private",
+    ~F.text.startswith("/"),
+    F.text != "❌ Bekor qilish",
+)
 async def process_superadmin_tenant(message: Message, state: FSMContext) -> None:
     uid = message.from_user.id if message.from_user else None
     if not is_super_admin(uid):
@@ -484,7 +519,12 @@ async def cb_superadmin_edit_contact(cb: CallbackQuery, state: FSMContext) -> No
     await cb.answer()
 
 
-@router.message(SuperAdminStates.waiting_owner_contact, F.chat.type == "private")
+@router.message(
+    SuperAdminStates.waiting_owner_contact,
+    F.chat.type == "private",
+    ~F.text.startswith("/"),
+    F.text != "❌ Bekor qilish",
+)
 async def process_superadmin_contact(message: Message, state: FSMContext) -> None:
     uid = message.from_user.id if message.from_user else None
     if not is_super_admin(uid):
@@ -582,7 +622,12 @@ async def cb_superadmin_add_user_prompt(cb: CallbackQuery, state: FSMContext) ->
     await cb.answer()
 
 
-@router.message(SuperAdminStates.waiting_add_user_id, F.chat.type == "private")
+@router.message(
+    SuperAdminStates.waiting_add_user_id,
+    F.chat.type == "private",
+    ~F.text.startswith("/"),
+    F.text != "❌ Bekor qilish",
+)
 async def process_superadmin_add_user_new_tenant(
     message: Message, state: FSMContext
 ) -> None:
@@ -641,7 +686,12 @@ async def process_superadmin_add_user_new_tenant(
     )
 
 
-@router.message(SuperAdminStates.waiting_add_user_same_tenant_id, F.chat.type == "private")
+@router.message(
+    SuperAdminStates.waiting_add_user_same_tenant_id,
+    F.chat.type == "private",
+    ~F.text.startswith("/"),
+    F.text != "❌ Bekor qilish",
+)
 async def process_superadmin_add_user_same_tenant(
     message: Message, state: FSMContext
 ) -> None:
@@ -659,12 +709,12 @@ async def process_superadmin_add_user_same_tenant(
     tg_id = int(parts[0])
     full_name = parts[1].strip() if len(parts) > 1 else f"Xodim {tg_id}"
     tid = _get_sa_tenant(uid)
+    await state.clear()
     async with async_session_maker() as db:
         await add_authorized_user(
             db, telegram_id=tg_id, full_name=full_name, role="staff", tenant_id=tid
         )
         users = await list_authorized_users(db, active_only=True, tenant_id=tid)
-    await state.clear()
     await message.answer(
         f"✅ Filial #{tid} ga qo'shildi: <b>{html.escape(full_name)}</b> (<code>{tg_id}</code>)",
         parse_mode="HTML",
