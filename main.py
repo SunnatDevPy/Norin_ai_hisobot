@@ -22,6 +22,7 @@ from database.crud import (
     evaluate_subscription_status,
     format_local_dt,
     list_authorized_users,
+    list_tenants,
     mark_reminder_sent,
     today_iso,
 )
@@ -45,34 +46,45 @@ class IPv4AiohttpSession(AiohttpSession):
 
 
 async def subscription_watcher(bot: Bot) -> None:
-    """Periodically check subscription expiry and send daily reminders when 3, 1, or 0 days remain."""
+    """Periodically check each tenant's subscription expiry and send daily reminders."""
     settings = get_settings()
     while True:
         try:
             today = today_iso()
+            notifications = []
             async with async_session_maker() as db:
-                sub_status = await evaluate_subscription_status(db)
-                sub = sub_status.state
-                should_remind = (
-                    not sub.is_suspended
-                    and sub.last_reminder_date != today
-                    and (
-                        (sub_status.status in ("active", "expiring") and sub_status.days_left in (3, 1, 0))
-                        or sub_status.status == "grace"
+                tenants = await list_tenants(db)
+                for tenant in tenants:
+                    sub_status = await evaluate_subscription_status(db, tenant_id=tenant.id)
+                    sub = sub_status.state
+                    should_remind = (
+                        not sub.is_suspended
+                        and sub.last_reminder_date != today
+                        and (
+                            (
+                                sub_status.status in ("active", "expiring")
+                                and sub_status.days_left in (3, 1, 0)
+                            )
+                            or sub_status.status == "grace"
+                        )
                     )
-                )
-                if should_remind:
-                    db_users = await list_authorized_users(db, active_only=True)
-                    recipients = set(settings.admin_id_list) | {u.telegram_id for u in db_users}
-                    await mark_reminder_sent(db, today)
-                else:
-                    recipients = set()
+                    if not should_remind:
+                        continue
+                    db_users = await list_authorized_users(
+                        db, active_only=True, tenant_id=sub.id
+                    )
+                    recipients = {u.telegram_id for u in db_users}
+                    if sub.id == 1:
+                        recipients |= set(settings.admin_id_list)
+                    if recipients:
+                        await mark_reminder_sent(db, today, tenant_id=sub.id)
+                        notifications.append((sub, recipients))
 
-            if recipients:
+            for sub, recipients in notifications:
                 exp_str = format_local_dt(sub.expires_at, "%d.%m.%Y")
                 msg = (
                     "🔔 <b>Obuna muddati yaqinlashmoqda!</b>\n\n"
-                    f"🏢 Sex: <b>{html.escape(sub.tenant_name)}</b>\n"
+                    f"🏢 Sex: <b>{html.escape(sub.tenant_name)}</b> (#{sub.id})\n"
                     f"📦 Tarif: <b>{html.escape(sub.plan_name)}</b>\n"
                     f"💳 Oylik to'lov: <b>{format_uzs(sub.monthly_price)} so'm</b>\n"
                     f"📅 Tugash sanasi: <b>{exp_str}</b>\n\n"
@@ -117,6 +129,7 @@ async def run_bot() -> None:
     sub_mw = SubscriptionMiddleware()
     dp.message.middleware(sub_mw)
     dp.callback_query.middleware(sub_mw)
+    dp.my_chat_member.middleware(sub_mw)
 
     dp.include_router(get_main_router())
 

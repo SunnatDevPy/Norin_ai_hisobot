@@ -20,6 +20,7 @@ from database.models import (
     DailyCashSession,
     Product,
     Sale,
+    SubscriptionState,
 )
 from services.gemini_ai import format_kg, format_uzs
 
@@ -847,8 +848,12 @@ def subscription_status_kb() -> InlineKeyboardMarkup:
     )
 
 
-def superadmin_menu_kb(is_suspended: bool) -> InlineKeyboardMarkup:
-    """Super Admin subscription & user access control panel."""
+def superadmin_menu_kb(
+    is_suspended: bool,
+    tenant_label: str = "Filiallar",
+    tenant_id: int = 1,
+) -> InlineKeyboardMarkup:
+    """Super Admin subscription & multi-tenant user access control panel."""
     suspend_btn = (
         InlineKeyboardButton(text="▶️ Botni faollashtirish", callback_data="sa:toggle_suspend")
         if is_suspended
@@ -856,6 +861,10 @@ def superadmin_menu_kb(is_suspended: bool) -> InlineKeyboardMarkup:
     )
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [
+                InlineKeyboardButton(text=f"🏢 {tenant_label}", callback_data="sa:tenants"),
+                InlineKeyboardButton(text="➕ Yangi mijoz (Filial)", callback_data="sa:add_user_new"),
+            ],
             [
                 InlineKeyboardButton(text="➕ +7 kun", callback_data="sa:ext:7"),
                 InlineKeyboardButton(text="➕ +30 kun", callback_data="sa:ext:30"),
@@ -870,17 +879,52 @@ def superadmin_menu_kb(is_suspended: bool) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="📞 Kontakt", callback_data="sa:edit_contact"),
             ],
             [
-                InlineKeyboardButton(text="👥 Foydalanuvchilar (ID)", callback_data="sa:users"),
+                InlineKeyboardButton(text="👥 Xodim/Mijozlar", callback_data="sa:users"),
                 InlineKeyboardButton(text="📜 To'lovlar tarixi", callback_data="sa:payments"),
             ],
             [
                 suspend_btn,
                 InlineKeyboardButton(text="🔔 Eslatma yuborish", callback_data="sa:send_reminder"),
             ],
-            [InlineKeyboardButton(text="🧹 Bazani tozalash (/clear)", callback_data="sa:clear_menu")],
+            [
+                InlineKeyboardButton(
+                    text=f"🧹 Bazani tozalash (#{tenant_id})",
+                    callback_data="sa:clear_menu",
+                )
+            ],
             [InlineKeyboardButton(text="⬅️ Sozlamalar", callback_data="set:back")],
         ]
     )
+
+
+def superadmin_tenants_kb(
+    tenants: Sequence[SubscriptionState],
+    selected_id: int = 1,
+) -> InlineKeyboardMarkup:
+    """List all SaaS tenants (branches) so Super Admin can switch or add new ones."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for t in tenants:
+        prefix = "✅" if t.id == selected_id else ("⏸" if t.is_suspended else "🏢")
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{prefix} #{t.id} {t.tenant_name}",
+                    callback_data=f"sa:sel_ten:{t.id}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(text="🆕 Yangi mijoz + yangi filial", callback_data="sa:add_user_new"),
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(text="➕ Bo'sh filial ochish", callback_data="sa:new_tenant"),
+            InlineKeyboardButton(text="⬅️ Super Admin menyu", callback_data="sa:menu"),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def superadmin_clear_confirm_kb() -> InlineKeyboardMarkup:
@@ -904,8 +948,10 @@ def superadmin_clear_confirm_kb() -> InlineKeyboardMarkup:
     )
 
 
-def superadmin_users_kb(users: Sequence[AuthorizedUser]) -> InlineKeyboardMarkup:
-    """AuthorizedUser list with remove buttons."""
+def superadmin_users_kb(
+    users: Sequence[AuthorizedUser], tenant_id: int = 1
+) -> InlineKeyboardMarkup:
+    """AuthorizedUser list for the selected tenant with add/remove buttons."""
     rows = []
     for u in users:
         rows.append(
@@ -918,31 +964,44 @@ def superadmin_users_kb(users: Sequence[AuthorizedUser]) -> InlineKeyboardMarkup
         )
     rows.append(
         [
-            InlineKeyboardButton(text="➕ Yangi ID qo'shish", callback_data="sa:add_user"),
+            InlineKeyboardButton(
+                text="🆕 Yangi mijoz + yangi filial",
+                callback_data="sa:add_user_new",
+            ),
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=f"➕ Shu filialga xodim (#{tenant_id})",
+                callback_data="sa:add_user",
+            ),
             InlineKeyboardButton(text="⬅️ Super Admin", callback_data="sa:menu"),
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def superadmin_renewal_request_kb(requester_id: int) -> InlineKeyboardMarkup:
+def superadmin_renewal_request_kb(
+    requester_id: int, tenant_id: int = 1
+) -> InlineKeyboardMarkup:
     """One-tap renewal approval buttons sent to Super Admin when a client notifies payment."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="✅ +30 kun tasdiqlash",
-                    callback_data=f"sa:approve:{requester_id}:30",
+                    callback_data=f"sa:approve:{tenant_id}:{requester_id}:30",
                 ),
                 InlineKeyboardButton(
                     text="✅ +7 kun",
-                    callback_data=f"sa:approve:{requester_id}:7",
+                    callback_data=f"sa:approve:{tenant_id}:{requester_id}:7",
                 ),
             ],
             [
                 InlineKeyboardButton(
                     text="❌ Rad etish",
-                    callback_data=f"sa:reject:{requester_id}",
+                    callback_data=f"sa:reject:{tenant_id}:{requester_id}",
                 )
             ],
         ]

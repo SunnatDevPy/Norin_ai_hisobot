@@ -24,7 +24,21 @@ from database.crud import (
     create_pending_sale,
     delete_client_payment,
     delete_sale,
+    add_authorized_user,
+    bind_client_group,
     evaluate_subscription_status,
+    get_app_setting,
+    list_clients,
+    list_products,
+    list_recent_sales,
+    list_tenants,
+    remove_authorized_user,
+    reset_full_database,
+    reset_test_transactions,
+    resolve_user_tenant_id,
+    set_app_setting,
+    tenant_scope,
+    update_subscription_settings,
     extend_subscription,
     get_or_create_open_session,
     is_user_authorized,
@@ -557,6 +571,92 @@ def test_admin_id_name_parsing():
         (5649321700, "Asad"),
         (12345, ""),
     ]
+
+
+def test_multitenant_isolation_between_superadmin_and_other_clients(tmp_path: Path):
+    """Verify Super Admin uses Test Filial #1 while added clients get isolated Tenant #2+."""
+
+    async def _logic(db):
+        # 1. Super Admin always routes to personal/test Filial #1
+        assert await resolve_user_tenant_id(db, 5649321700) == 1
+        sub1 = await evaluate_subscription_status(db, tenant_id=1)
+        assert sub1.state.id == 1
+
+        # Add data inside Tenant #1
+        with tenant_scope(1):
+            prods1 = await list_products(db)
+            assert len(prods1) == 2
+            cli1 = await create_client(db, "OKA GO'SHT", opening_debt=100_000)
+            await bind_client_group(db, cli1.id, -100111111, "T1 Oka Guruh")
+            sale1 = await create_pending_sale(
+                db,
+                client_id=cli1.id,
+                items_spec=[{"product_id": prods1[0].id, "weight_kg": 10.0}],
+            )
+            await confirm_sale(db, sale1.id)
+            await set_app_setting(db, "round_mode", "floor_1000")
+
+        # 2. Onboarding another user via /superadmin opens Tenant #2 automatically
+        user2 = await add_authorized_user(
+            db,
+            telegram_id=888000111,
+            full_name="Sardor",
+            role="owner",
+            create_new_tenant=True,
+            new_tenant_name="Chorsu Sexi",
+        )
+        assert user2.tenant_id == 2
+        assert await resolve_user_tenant_id(db, 888000111) == 2
+
+        # 3. Tenant #2 starts completely empty of clients/sales and has own default products
+        with tenant_scope(2):
+            assert await is_user_authorized(db, 888000111) is True
+            assert await list_clients(db) == []
+            prods2 = await list_products(db)
+            assert len(prods2) == 2
+            assert prods2[0].tenant_id == 2
+
+            # Same client name allowed across separate tenants without unique collision
+            cli2 = await create_client(db, "OKA GO'SHT", opening_debt=50_000)
+            assert cli2.tenant_id == 2
+            await bind_client_group(db, cli2.id, -100222222, "T2 Oka Guruh")
+            sale2 = await create_pending_sale(
+                db,
+                client_id=cli2.id,
+                items_spec=[{"product_id": prods2[0].id, "weight_kg": 5.0}],
+            )
+            await confirm_sale(db, sale2.id)
+            await set_app_setting(db, "round_mode", "nearest_1000")
+
+        # Bound Telegram groups route directly to the owning tenant
+        assert await resolve_user_tenant_id(db, None, -100111111, "supergroup") == 1
+        assert await resolve_user_tenant_id(db, None, -100222222, "supergroup") == 2
+
+        # Tenant #2 user is NOT authorized inside Tenant #1 scope
+        with tenant_scope(1):
+            assert await is_user_authorized(db, 888000111) is False
+            assert await get_app_setting(db, "round_mode") == "floor_1000"
+            assert len(await list_recent_sales(db)) == 1
+            assert len(await list_clients(db)) == 1
+
+        # Per-tenant subscription suspension & full /clear isolation
+        await update_subscription_settings(db, is_suspended=True, tenant_id=2)
+        assert (await evaluate_subscription_status(db, tenant_id=2)).is_allowed is False
+        assert (await evaluate_subscription_status(db, tenant_id=1)).is_allowed is True
+
+        await reset_full_database(db, tenant_id=2)
+        with tenant_scope(2):
+            assert await list_clients(db) == []
+            assert await list_recent_sales(db) == []
+            assert len(await list_products(db)) == 2
+        with tenant_scope(1):
+            assert len(await list_clients(db)) == 1
+            assert len(await list_recent_sales(db)) == 1
+
+        tenants = await list_tenants(db)
+        assert [t.id for t in tenants] == [1, 2]
+
+    asyncio.run(_run_with_db(tmp_path, _logic))
 
 
 def test_app_imports_and_router_assembly():

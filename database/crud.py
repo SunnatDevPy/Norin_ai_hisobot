@@ -30,7 +30,38 @@ from database.models import (
 )
 
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 ANONYMOUS_ADMIN_BOT_ID = 1087968824
+CURRENT_TENANT_ID: ContextVar[int] = ContextVar("norin_current_tenant_id", default=1)
+
+
+def get_current_tenant_id(tenant_id: Optional[int] = None) -> int:
+    """Return explicit tenant_id or the active tenant_id from ContextVar (defaults to 1)."""
+    if tenant_id is not None:
+        return int(tenant_id)
+    return int(CURRENT_TENANT_ID.get() or 1)
+
+
+def set_current_tenant_id(tenant_id: int):
+    """Set the active tenant_id in ContextVar and return reset token."""
+    return CURRENT_TENANT_ID.set(int(tenant_id or 1))
+
+
+def reset_current_tenant_id(token) -> None:
+    """Restore previous tenant_id ContextVar token."""
+    CURRENT_TENANT_ID.reset(token)
+
+
+@contextmanager
+def tenant_scope(tenant_id: int):
+    """Context manager scoping CRUD operations cleanly to a specific tenant_id."""
+    token = set_current_tenant_id(tenant_id)
+    try:
+        yield int(tenant_id or 1)
+    finally:
+        reset_current_tenant_id(token)
 
 
 # ---------------------------------------------------------------------------
@@ -158,18 +189,33 @@ class SubscriptionStatus:
 # ---------------------------------------------------------------------------
 
 
-async def list_products(db: AsyncSession, active_only: bool = True) -> List[Product]:
-    """List products ordered by order_num and id."""
-    stmt = select(Product)
+async def list_products(
+    db: AsyncSession, active_only: bool = True, tenant_id: Optional[int] = None
+) -> List[Product]:
+    """List products for the active tenant, auto-seeding defaults if empty."""
+    tid = get_current_tenant_id(tenant_id)
+    any_prod = await db.scalar(select(Product.id).where(Product.tenant_id == tid).limit(1))
+    if any_prod is None:
+        from database.session import seed_default_products
+
+        await seed_default_products(db, tenant_id=tid)
+
+    stmt = select(Product).where(Product.tenant_id == tid)
     if active_only:
         stmt = stmt.where(Product.is_active.is_(True))
     stmt = stmt.order_by(Product.order_num, Product.id)
     return list((await db.scalars(stmt)).all())
 
 
-async def get_product(db: AsyncSession, product_id: int) -> Optional[Product]:
-    """Fetch a product by id."""
-    return await db.get(Product, product_id)
+async def get_product(
+    db: AsyncSession, product_id: int, tenant_id: Optional[int] = None
+) -> Optional[Product]:
+    """Fetch a product by id within the active tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    prod = await db.get(Product, product_id)
+    if prod is None or prod.tenant_id != tid:
+        return None
+    return prod
 
 
 async def create_product(
@@ -180,10 +226,14 @@ async def create_product(
     aliases: str = "",
     unit: str = "kg",
     order_num: Optional[int] = None,
+    tenant_id: Optional[int] = None,
 ) -> Product:
-    """Create a new product or reactivate/update an existing one with the same name."""
+    """Create a new product or reactivate/update an existing one with the same name in this tenant."""
+    tid = get_current_tenant_id(tenant_id)
     clean_name = name.strip()
-    existing = await db.scalar(select(Product).where(Product.name == clean_name))
+    existing = await db.scalar(
+        select(Product).where(Product.tenant_id == tid, Product.name == clean_name)
+    )
     if existing is not None:
         existing.cost_price = float(cost_price)
         existing.default_sell_price = float(default_sell_price)
@@ -196,11 +246,12 @@ async def create_product(
         return existing
 
     if order_num is None:
-        current = await list_products(db, active_only=False)
+        current = await list_products(db, active_only=False, tenant_id=tid)
         order_num = max((p.order_num for p in current), default=0) + 1
 
     alias_str = aliases.strip().upper() or clean_name.upper()
     prod = Product(
+        tenant_id=tid,
         order_num=order_num,
         name=clean_name,
         aliases=alias_str,
@@ -222,9 +273,10 @@ async def update_product(
     cost_price: Optional[float] = None,
     default_sell_price: Optional[float] = None,
     aliases: Optional[str] = None,
+    tenant_id: Optional[int] = None,
 ) -> Optional[Product]:
-    """Update product fields."""
-    prod = await db.get(Product, product_id)
+    """Update product fields within the active tenant."""
+    prod = await get_product(db, product_id, tenant_id=tenant_id)
     if prod is None:
         return None
     if name is not None and name.strip():
@@ -241,10 +293,10 @@ async def update_product(
 
 
 async def append_product_alias(
-    db: AsyncSession, product_id: int, new_alias: str
+    db: AsyncSession, product_id: int, new_alias: str, tenant_id: Optional[int] = None
 ) -> Optional[Product]:
-    """Append an uppercase synonym/alias to a product."""
-    prod = await db.get(Product, product_id)
+    """Append an uppercase synonym/alias to a product within the active tenant."""
+    prod = await get_product(db, product_id, tenant_id=tenant_id)
     if prod is None:
         return None
     alias_clean = new_alias.strip().upper()
@@ -259,9 +311,11 @@ async def append_product_alias(
     return prod
 
 
-async def delete_product(db: AsyncSession, product_id: int) -> bool:
+async def delete_product(
+    db: AsyncSession, product_id: int, tenant_id: Optional[int] = None
+) -> bool:
     """Soft-deactivate a product so historical SaleItems keep their reference."""
-    prod = await db.get(Product, product_id)
+    prod = await get_product(db, product_id, tenant_id=tenant_id)
     if prod is None:
         return False
     prod.is_active = False
@@ -325,25 +379,41 @@ def match_product(hint: Optional[str], products: Sequence[Product]) -> Optional[
 # ---------------------------------------------------------------------------
 
 
-async def list_clients(db: AsyncSession, active_only: bool = True) -> List[Client]:
-    """List clients ordered alphabetically by name."""
-    stmt = select(Client)
+async def list_clients(
+    db: AsyncSession, active_only: bool = True, tenant_id: Optional[int] = None
+) -> List[Client]:
+    """List clients ordered alphabetically by name for the active tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    stmt = select(Client).where(Client.tenant_id == tid)
     if active_only:
         stmt = stmt.where(Client.is_active.is_(True))
     stmt = stmt.order_by(Client.name, Client.id)
     return list((await db.scalars(stmt)).all())
 
 
-async def get_client(db: AsyncSession, client_id: int) -> Optional[Client]:
-    """Fetch a client by id."""
-    return await db.get(Client, client_id)
+async def get_client(
+    db: AsyncSession, client_id: int, tenant_id: Optional[int] = None
+) -> Optional[Client]:
+    """Fetch a client by id within the active tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    cli = await db.get(Client, client_id)
+    if cli is None or cli.tenant_id != tid:
+        return None
+    return cli
 
 
-async def get_client_by_group(db: AsyncSession, chat_id: int) -> Optional[Client]:
-    """Find an active client bound to a Telegram group chat_id."""
+async def get_client_by_group(
+    db: AsyncSession, chat_id: int, tenant_id: Optional[int] = None
+) -> Optional[Client]:
+    """Find an active client bound to a Telegram group chat_id within the active tenant."""
+    tid = get_current_tenant_id(tenant_id)
     stmt = (
         select(Client)
-        .where(Client.group_chat_id == chat_id, Client.is_active.is_(True))
+        .where(
+            Client.tenant_id == tid,
+            Client.group_chat_id == chat_id,
+            Client.is_active.is_(True),
+        )
         .limit(1)
     )
     return await db.scalar(stmt)
@@ -355,10 +425,14 @@ async def create_client(
     phone: str = "",
     opening_debt: float = 0.0,
     aliases: str = "",
+    tenant_id: Optional[int] = None,
 ) -> Client:
-    """Create a new client or reactivate an existing inactive one with the same name."""
+    """Create a new client or reactivate an existing inactive one with the same name in this tenant."""
+    tid = get_current_tenant_id(tenant_id)
     clean_name = name.strip()
-    existing = await db.scalar(select(Client).where(Client.name == clean_name))
+    existing = await db.scalar(
+        select(Client).where(Client.tenant_id == tid, Client.name == clean_name)
+    )
     if existing is not None:
         if phone.strip():
             existing.phone = phone.strip()
@@ -372,6 +446,7 @@ async def create_client(
         return existing
 
     client = Client(
+        tenant_id=tid,
         name=clean_name,
         aliases=(aliases.strip() or clean_name).upper(),
         phone=phone.strip(),
@@ -391,9 +466,10 @@ async def update_client(
     phone: Optional[str] = None,
     opening_debt: Optional[float] = None,
     aliases: Optional[str] = None,
+    tenant_id: Optional[int] = None,
 ) -> Optional[Client]:
-    """Update client profile fields."""
-    client = await db.get(Client, client_id)
+    """Update client profile fields within the active tenant."""
+    client = await get_client(db, client_id, tenant_id=tenant_id)
     if client is None:
         return None
     if name is not None and name.strip():
@@ -410,14 +486,18 @@ async def update_client(
 
 
 async def bind_client_group(
-    db: AsyncSession, client_id: int, chat_id: int, title: str = ""
+    db: AsyncSession,
+    client_id: int,
+    chat_id: int,
+    title: str = "",
+    tenant_id: Optional[int] = None,
 ) -> Optional[Client]:
     """Bind a Telegram group chat_id to a client (detaching any other client from the same group)."""
-    client = await db.get(Client, client_id)
+    client = await get_client(db, client_id, tenant_id=tenant_id)
     if client is None:
         return None
 
-    # Ensure 1-to-1 group chat -> client mapping
+    # Ensure 1-to-1 group chat -> client mapping across all tenants
     others = (
         await db.scalars(
             select(Client).where(Client.group_chat_id == chat_id, Client.id != client_id)
@@ -434,9 +514,11 @@ async def bind_client_group(
     return client
 
 
-async def unbind_client_group(db: AsyncSession, client_id: int) -> Optional[Client]:
-    """Detach Telegram group from a client."""
-    client = await db.get(Client, client_id)
+async def unbind_client_group(
+    db: AsyncSession, client_id: int, tenant_id: Optional[int] = None
+) -> Optional[Client]:
+    """Detach Telegram group from a client within the active tenant."""
+    client = await get_client(db, client_id, tenant_id=tenant_id)
     if client is None:
         return None
     client.group_chat_id = None
@@ -446,9 +528,11 @@ async def unbind_client_group(db: AsyncSession, client_id: int) -> Optional[Clie
     return client
 
 
-async def delete_client(db: AsyncSession, client_id: int) -> bool:
-    """Soft-deactivate a client and unbind its Telegram group."""
-    client = await db.get(Client, client_id)
+async def delete_client(
+    db: AsyncSession, client_id: int, tenant_id: Optional[int] = None
+) -> bool:
+    """Soft-deactivate a client and unbind its Telegram group within the active tenant."""
+    client = await get_client(db, client_id, tenant_id=tenant_id)
     if client is None:
         return False
     client.is_active = False
@@ -490,9 +574,19 @@ def match_client(hint: Optional[str], clients: Sequence[Client]) -> Optional[Cli
 
 
 async def set_client_product_price(
-    db: AsyncSession, client_id: int, product_id: int, sell_price: Optional[float]
+    db: AsyncSession,
+    client_id: int,
+    product_id: int,
+    sell_price: Optional[float],
+    tenant_id: Optional[int] = None,
 ) -> Optional[ClientProductPrice]:
     """Set or clear (when sell_price is None or <=0) a client-specific product price."""
+    tid = get_current_tenant_id(tenant_id)
+    cli = await get_client(db, client_id, tenant_id=tid)
+    prod = await get_product(db, product_id, tenant_id=tid)
+    if cli is None or prod is None:
+        return None
+
     stmt = select(ClientProductPrice).where(
         ClientProductPrice.client_id == client_id,
         ClientProductPrice.product_id == product_id,
@@ -518,8 +612,13 @@ async def set_client_product_price(
     return existing
 
 
-async def get_client_prices_map(db: AsyncSession, client_id: int) -> Dict[int, float]:
-    """Return {product_id: custom_sell_price} for a client."""
+async def get_client_prices_map(
+    db: AsyncSession, client_id: int, tenant_id: Optional[int] = None
+) -> Dict[int, float]:
+    """Return {product_id: custom_sell_price} for a client within the active tenant."""
+    cli = await get_client(db, client_id, tenant_id=tenant_id)
+    if cli is None:
+        return {}
     rows = (
         await db.scalars(
             select(ClientProductPrice).where(ClientProductPrice.client_id == client_id)
@@ -550,10 +649,14 @@ async def resolve_sell_price(
 
 
 async def compute_client_debt(
-    db: AsyncSession, client_id: int, history_limit: int = 15
+    db: AsyncSession,
+    client_id: int,
+    history_limit: int = 15,
+    tenant_id: Optional[int] = None,
 ) -> ClientDebtSummary:
     """Compute opening debt + confirmed sales - non-deleted payments for a client."""
-    client = await db.get(Client, client_id)
+    tid = get_current_tenant_id(tenant_id)
+    client = await get_client(db, client_id, tenant_id=tid)
     if client is None:
         raise ValueError(f"Client {client_id} not found")
 
@@ -562,7 +665,11 @@ async def compute_client_debt(
             await db.scalars(
                 select(Sale)
                 .options(selectinload(Sale.items))
-                .where(Sale.client_id == client_id, Sale.status == "confirmed")
+                .where(
+                    Sale.tenant_id == tid,
+                    Sale.client_id == client_id,
+                    Sale.status == "confirmed",
+                )
                 .order_by(desc(Sale.id))
             )
         ).all()
@@ -572,6 +679,7 @@ async def compute_client_debt(
             await db.scalars(
                 select(ClientPayment)
                 .where(
+                    ClientPayment.tenant_id == tid,
                     ClientPayment.client_id == client_id,
                     ClientPayment.is_deleted.is_(False),
                 )
@@ -598,9 +706,12 @@ async def compute_client_debt(
     )
 
 
-async def list_all_client_debts(db: AsyncSession) -> List[ClientDebtSummary]:
-    """Return ClientDebtSummary for all active clients sorted by highest debt first."""
-    clients = await list_clients(db, active_only=True)
+async def list_all_client_debts(
+    db: AsyncSession, tenant_id: Optional[int] = None
+) -> List[ClientDebtSummary]:
+    """Return ClientDebtSummary for all active clients of this tenant sorted by highest debt."""
+    tid = get_current_tenant_id(tenant_id)
+    clients = await list_clients(db, active_only=True, tenant_id=tid)
     if not clients:
         return []
 
@@ -609,7 +720,11 @@ async def list_all_client_debts(db: AsyncSession) -> List[ClientDebtSummary]:
             await db.scalars(
                 select(Sale)
                 .options(selectinload(Sale.items))
-                .where(Sale.status == "confirmed", Sale.client_id.is_not(None))
+                .where(
+                    Sale.tenant_id == tid,
+                    Sale.status == "confirmed",
+                    Sale.client_id.is_not(None),
+                )
                 .order_by(desc(Sale.id))
             )
         ).all()
@@ -618,7 +733,10 @@ async def list_all_client_debts(db: AsyncSession) -> List[ClientDebtSummary]:
         (
             await db.scalars(
                 select(ClientPayment)
-                .where(ClientPayment.is_deleted.is_(False))
+                .where(
+                    ClientPayment.tenant_id == tid,
+                    ClientPayment.is_deleted.is_(False),
+                )
                 .order_by(desc(ClientPayment.id))
             )
         ).all()
@@ -689,9 +807,10 @@ async def create_pending_sale(
     note: Optional[str] = None,
     source_channel: str = "dm",
     session_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
 ) -> Sale:
     """
-    Create a pending Sale with itemized Norin rows.
+    Create a pending Sale with itemized Norin rows for the active tenant.
 
     Each entry in `items_spec` should provide:
         - product_id (int) OR product (Product)
@@ -699,17 +818,25 @@ async def create_pending_sale(
         - optional weights_detail (str)
         - optional unit_sell_price (float override)
     """
+    tid = get_current_tenant_id(tenant_id)
     if session_id is None:
-        sess = await get_or_create_open_session(db)
+        sess = await get_or_create_open_session(db, tenant_id=tid)
         session_id = sess.id
     else:
         sess = await db.get(DailyCashSession, session_id)
-        if sess is None:
+        if sess is None or sess.tenant_id != tid:
             raise ValueError(f"Session {session_id} not found")
 
-    custom_prices = await get_client_prices_map(db, client_id) if client_id else {}
+    if client_id is not None:
+        cli = await get_client(db, client_id, tenant_id=tid)
+        if cli is None:
+            raise ValueError(f"Client {client_id} not found")
+        custom_prices = await get_client_prices_map(db, client_id, tenant_id=tid)
+    else:
+        custom_prices = {}
 
     sale = Sale(
+        tenant_id=tid,
         session_id=session_id,
         client_id=client_id,
         report_date=sess.report_date,
@@ -722,8 +849,10 @@ async def create_pending_sale(
     sale_items: List[SaleItem] = []
     for spec in items_spec:
         prod: Optional[Product] = spec.get("product")
+        if prod is not None and prod.tenant_id != tid:
+            prod = None
         if prod is None and spec.get("product_id") is not None:
-            prod = await db.get(Product, int(spec["product_id"]))
+            prod = await get_product(db, int(spec["product_id"]), tenant_id=tid)
         if prod is None:
             raise ValueError("Mahsulot topilmadi")
 
@@ -749,17 +878,20 @@ async def create_pending_sale(
     _recalc_sale_totals(sale)
     db.add(sale)
     await db.commit()
-    loaded = await get_sale(db, sale.id)
+    loaded = await get_sale(db, sale.id, tenant_id=tid)
     assert loaded is not None
     return loaded
 
 
-async def get_sale(db: AsyncSession, sale_id: int) -> Optional[Sale]:
-    """Fetch a Sale eager-loading its items and client."""
+async def get_sale(
+    db: AsyncSession, sale_id: int, tenant_id: Optional[int] = None
+) -> Optional[Sale]:
+    """Fetch a Sale eager-loading its items and client within the active tenant."""
+    tid = get_current_tenant_id(tenant_id)
     stmt = (
         select(Sale)
         .options(selectinload(Sale.items), selectinload(Sale.client))
-        .where(Sale.id == sale_id)
+        .where(Sale.id == sale_id, Sale.tenant_id == tid)
     )
     return await db.scalar(stmt)
 
@@ -769,9 +901,11 @@ async def confirm_sale(
     sale_id: int,
     group_chat_id: Optional[int] = None,
     group_message_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
 ) -> Optional[Sale]:
     """Confirm a pending sale and attach optional group message metadata."""
-    sale = await get_sale(db, sale_id)
+    tid = get_current_tenant_id(tenant_id)
+    sale = await get_sale(db, sale_id, tenant_id=tid)
     if sale is None or sale.status == "deleted":
         return None
     sale.status = "confirmed"
@@ -780,8 +914,8 @@ async def confirm_sale(
     if group_message_id is not None:
         sale.group_message_id = group_message_id
     await db.commit()
-    await compute_session_summary(db, sale.session_id)
-    return await get_sale(db, sale_id)
+    await compute_session_summary(db, sale.session_id, tenant_id=tid)
+    return await get_sale(db, sale_id, tenant_id=tid)
 
 
 async def set_sale_group_message(
@@ -789,37 +923,47 @@ async def set_sale_group_message(
     sale_id: int,
     group_chat_id: Optional[int],
     group_message_id: Optional[int],
+    tenant_id: Optional[int] = None,
 ) -> Optional[Sale]:
     """Store or clear Telegram group chat_id and message_id for a Sale."""
-    sale = await get_sale(db, sale_id)
+    tid = get_current_tenant_id(tenant_id)
+    sale = await get_sale(db, sale_id, tenant_id=tid)
     if sale is None:
         return None
     sale.group_chat_id = group_chat_id
     sale.group_message_id = group_message_id
     await db.commit()
-    return await get_sale(db, sale_id)
+    return await get_sale(db, sale_id, tenant_id=tid)
 
 
 async def update_sale_client(
-    db: AsyncSession, sale_id: int, new_client_id: Optional[int]
+    db: AsyncSession,
+    sale_id: int,
+    new_client_id: Optional[int],
+    tenant_id: Optional[int] = None,
 ) -> Optional[Sale]:
     """Reassign a Sale's client and recalculate item sell prices using the new client's prices."""
-    sale = await get_sale(db, sale_id)
+    tid = get_current_tenant_id(tenant_id)
+    sale = await get_sale(db, sale_id, tenant_id=tid)
     if sale is None or sale.status == "deleted":
         return None
+    if new_client_id is not None and await get_client(db, new_client_id, tenant_id=tid) is None:
+        return None
     sale.client_id = new_client_id
-    custom_prices = await get_client_prices_map(db, new_client_id) if new_client_id else {}
+    custom_prices = (
+        await get_client_prices_map(db, new_client_id, tenant_id=tid) if new_client_id else {}
+    )
 
     for item in sale.items:
         if item.product_id is not None:
-            prod = await db.get(Product, item.product_id)
+            prod = await get_product(db, item.product_id, tenant_id=tid)
             if prod is not None:
                 item.unit_sell_price = custom_prices.get(prod.id, float(prod.default_sell_price))
     _recalc_sale_totals(sale)
     await db.commit()
     if sale.status == "confirmed":
-        await compute_session_summary(db, sale.session_id)
-    return await get_sale(db, sale_id)
+        await compute_session_summary(db, sale.session_id, tenant_id=tid)
+    return await get_sale(db, sale_id, tenant_id=tid)
 
 
 async def update_sale_item(
@@ -829,18 +973,20 @@ async def update_sale_item(
     unit_sell_price: Optional[float] = None,
     product_id: Optional[int] = None,
     weights_detail: Optional[str] = None,
+    tenant_id: Optional[int] = None,
 ) -> Optional[Sale]:
     """Update a SaleItem and recalculate its parent Sale totals and session summary."""
+    tid = get_current_tenant_id(tenant_id)
     item = await db.get(SaleItem, item_id)
     if item is None:
         return None
-    sale = await get_sale(db, item.sale_id)
+    sale = await get_sale(db, item.sale_id, tenant_id=tid)
     if sale is None or sale.status == "deleted":
         return None
 
     target_item = next((i for i in sale.items if i.id == item_id), item)
     if product_id is not None:
-        prod = await db.get(Product, product_id)
+        prod = await get_product(db, product_id, tenant_id=tid)
         if prod is not None:
             target_item.product_id = prod.id
             target_item.product_name = prod.name
@@ -859,21 +1005,24 @@ async def update_sale_item(
     _recalc_sale_totals(sale)
     await db.commit()
     if sale.status == "confirmed":
-        await compute_session_summary(db, sale.session_id)
-    return await get_sale(db, sale.id)
+        await compute_session_summary(db, sale.session_id, tenant_id=tid)
+    return await get_sale(db, sale.id, tenant_id=tid)
 
 
-async def delete_sale(db: AsyncSession, sale_id: int) -> Optional[Sale]:
+async def delete_sale(
+    db: AsyncSession, sale_id: int, tenant_id: Optional[int] = None
+) -> Optional[Sale]:
     """Soft-delete a Sale and recalculate daily session summary."""
-    sale = await get_sale(db, sale_id)
+    tid = get_current_tenant_id(tenant_id)
+    sale = await get_sale(db, sale_id, tenant_id=tid)
     if sale is None or sale.status == "deleted":
         return None
     was_confirmed = sale.status == "confirmed"
     sale.status = "deleted"
     await db.commit()
     if was_confirmed:
-        await compute_session_summary(db, sale.session_id)
-    return await get_sale(db, sale_id)
+        await compute_session_summary(db, sale.session_id, tenant_id=tid)
+    return await get_sale(db, sale_id, tenant_id=tid)
 
 
 async def find_duplicate_confirmed_sale(
@@ -882,14 +1031,17 @@ async def find_duplicate_confirmed_sale(
     client_id: Optional[int],
     total_weight_kg: float,
     exclude_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
 ) -> Optional[Sale]:
     """Check if a confirmed sale with same client and weight already exists in this session."""
     if client_id is None:
         return None
+    tid = get_current_tenant_id(tenant_id)
     stmt = (
         select(Sale)
         .options(selectinload(Sale.items), selectinload(Sale.client))
         .where(
+            Sale.tenant_id == tid,
             Sale.session_id == session_id,
             Sale.client_id == client_id,
             Sale.status == "confirmed",
@@ -909,12 +1061,14 @@ async def list_recent_sales(
     limit: int = 30,
     offset: int = 0,
     client_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
 ) -> List[Sale]:
-    """Return recent confirmed sales ordered newest first."""
+    """Return recent confirmed sales ordered newest first for this tenant."""
+    tid = get_current_tenant_id(tenant_id)
     stmt = (
         select(Sale)
         .options(selectinload(Sale.items), selectinload(Sale.client))
-        .where(Sale.status == "confirmed")
+        .where(Sale.tenant_id == tid, Sale.status == "confirmed")
     )
     if client_id is not None:
         stmt = stmt.where(Sale.client_id == client_id)
@@ -934,13 +1088,24 @@ async def add_client_payment(
     payment_method: str = "cash",
     note: str = "",
     session_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
 ) -> ClientPayment:
     """Record a payment received from a client and update session expected cash."""
+    tid = get_current_tenant_id(tenant_id)
+    cli = await get_client(db, client_id, tenant_id=tid)
+    if cli is None:
+        raise ValueError(f"Client {client_id} not found")
     if session_id is None:
-        sess = await get_or_create_open_session(db)
+        sess = await get_or_create_open_session(db, tenant_id=tid)
         session_id = sess.id
+    else:
+        sess = await db.get(DailyCashSession, session_id)
+        if sess is None or sess.tenant_id != tid:
+            raise ValueError(f"Session {session_id} not found")
+
     method = payment_method if payment_method in ("cash", "card", "transfer") else "cash"
     pay = ClientPayment(
+        tenant_id=tid,
         session_id=session_id,
         client_id=client_id,
         amount=float(amount),
@@ -950,18 +1115,21 @@ async def add_client_payment(
     )
     db.add(pay)
     await db.commit()
-    await compute_session_summary(db, session_id)
-    loaded = await get_client_payment(db, pay.id)
+    await compute_session_summary(db, session_id, tenant_id=tid)
+    loaded = await get_client_payment(db, pay.id, tenant_id=tid)
     assert loaded is not None
     return loaded
 
 
-async def get_client_payment(db: AsyncSession, payment_id: int) -> Optional[ClientPayment]:
-    """Fetch a ClientPayment eager-loading its client."""
+async def get_client_payment(
+    db: AsyncSession, payment_id: int, tenant_id: Optional[int] = None
+) -> Optional[ClientPayment]:
+    """Fetch a ClientPayment eager-loading its client within the active tenant."""
+    tid = get_current_tenant_id(tenant_id)
     stmt = (
         select(ClientPayment)
         .options(selectinload(ClientPayment.client))
-        .where(ClientPayment.id == payment_id)
+        .where(ClientPayment.id == payment_id, ClientPayment.tenant_id == tid)
     )
     return await db.scalar(stmt)
 
@@ -971,15 +1139,17 @@ async def set_client_payment_group_message(
     payment_id: int,
     group_chat_id: Optional[int],
     group_message_id: Optional[int],
+    tenant_id: Optional[int] = None,
 ) -> Optional[ClientPayment]:
     """Store group receipt message reference on ClientPayment."""
-    pay = await db.get(ClientPayment, payment_id)
+    tid = get_current_tenant_id(tenant_id)
+    pay = await get_client_payment(db, payment_id, tenant_id=tid)
     if pay is None:
         return None
     pay.group_chat_id = group_chat_id
     pay.group_message_id = group_message_id
     await db.commit()
-    return await get_client_payment(db, payment_id)
+    return await get_client_payment(db, payment_id, tenant_id=tid)
 
 
 async def update_client_payment(
@@ -988,9 +1158,11 @@ async def update_client_payment(
     new_amount: Optional[float] = None,
     payment_method: Optional[str] = None,
     note: Optional[str] = None,
+    tenant_id: Optional[int] = None,
 ) -> Optional[ClientPayment]:
     """Edit a ClientPayment and recalculate daily cash session."""
-    pay = await db.get(ClientPayment, payment_id)
+    tid = get_current_tenant_id(tenant_id)
+    pay = await get_client_payment(db, payment_id, tenant_id=tid)
     if pay is None or pay.is_deleted:
         return None
     if new_amount is not None:
@@ -1000,19 +1172,22 @@ async def update_client_payment(
     if note is not None:
         pay.note = note.strip()
     await db.commit()
-    await compute_session_summary(db, pay.session_id)
-    return await get_client_payment(db, payment_id)
+    await compute_session_summary(db, pay.session_id, tenant_id=tid)
+    return await get_client_payment(db, payment_id, tenant_id=tid)
 
 
-async def delete_client_payment(db: AsyncSession, payment_id: int) -> Optional[ClientPayment]:
+async def delete_client_payment(
+    db: AsyncSession, payment_id: int, tenant_id: Optional[int] = None
+) -> Optional[ClientPayment]:
     """Soft-delete a ClientPayment and recalculate daily cash session."""
-    pay = await db.get(ClientPayment, payment_id)
+    tid = get_current_tenant_id(tenant_id)
+    pay = await get_client_payment(db, payment_id, tenant_id=tid)
     if pay is None or pay.is_deleted:
         return None
     pay.is_deleted = True
     await db.commit()
-    await compute_session_summary(db, pay.session_id)
-    return await get_client_payment(db, payment_id)
+    await compute_session_summary(db, pay.session_id, tenant_id=tid)
+    return await get_client_payment(db, payment_id, tenant_id=tid)
 
 
 async def list_recent_client_payments(
@@ -1020,12 +1195,14 @@ async def list_recent_client_payments(
     limit: int = 30,
     offset: int = 0,
     client_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
 ) -> List[ClientPayment]:
-    """Return recent non-deleted client payments ordered newest first."""
+    """Return recent non-deleted client payments ordered newest first for this tenant."""
+    tid = get_current_tenant_id(tenant_id)
     stmt = (
         select(ClientPayment)
         .options(selectinload(ClientPayment.client))
-        .where(ClientPayment.is_deleted.is_(False))
+        .where(ClientPayment.tenant_id == tid, ClientPayment.is_deleted.is_(False))
     )
     if client_id is not None:
         stmt = stmt.where(ClientPayment.client_id == client_id)
@@ -1038,22 +1215,28 @@ async def list_recent_client_payments(
 # ---------------------------------------------------------------------------
 
 
-async def get_open_session(db: AsyncSession) -> Optional[DailyCashSession]:
-    """Fetch the most recent open DailyCashSession."""
+async def get_open_session(
+    db: AsyncSession, tenant_id: Optional[int] = None
+) -> Optional[DailyCashSession]:
+    """Fetch the most recent open DailyCashSession for this tenant."""
+    tid = get_current_tenant_id(tenant_id)
     stmt = (
         select(DailyCashSession)
-        .where(DailyCashSession.status == "open")
+        .where(DailyCashSession.tenant_id == tid, DailyCashSession.status == "open")
         .order_by(desc(DailyCashSession.id))
         .limit(1)
     )
     return await db.scalar(stmt)
 
 
-async def get_last_closed_session(db: AsyncSession) -> Optional[DailyCashSession]:
-    """Fetch the most recent closed DailyCashSession."""
+async def get_last_closed_session(
+    db: AsyncSession, tenant_id: Optional[int] = None
+) -> Optional[DailyCashSession]:
+    """Fetch the most recent closed DailyCashSession for this tenant."""
+    tid = get_current_tenant_id(tenant_id)
     stmt = (
         select(DailyCashSession)
-        .where(DailyCashSession.status == "closed")
+        .where(DailyCashSession.tenant_id == tid, DailyCashSession.status == "closed")
         .order_by(desc(DailyCashSession.id))
         .limit(1)
     )
@@ -1061,17 +1244,19 @@ async def get_last_closed_session(db: AsyncSession) -> Optional[DailyCashSession
 
 
 async def get_or_create_open_session(
-    db: AsyncSession, report_date: Optional[str] = None
+    db: AsyncSession, report_date: Optional[str] = None, tenant_id: Optional[int] = None
 ) -> DailyCashSession:
     """Return active open session or create one carrying over last closed counted cash."""
-    open_sess = await get_open_session(db)
+    tid = get_current_tenant_id(tenant_id)
+    open_sess = await get_open_session(db, tenant_id=tid)
     if open_sess is not None:
         return open_sess
 
-    last_closed = await get_last_closed_session(db)
+    last_closed = await get_last_closed_session(db, tenant_id=tid)
     opening_balance = float(last_closed.actual_counted_cash or 0.0) if last_closed else 0.0
 
     new_sess = DailyCashSession(
+        tenant_id=tid,
         report_date=report_date or today_iso(),
         status="open",
         opening_balance=opening_balance,
@@ -1083,11 +1268,15 @@ async def get_or_create_open_session(
     return new_sess
 
 
-async def get_outstanding_kassa_debt(db: AsyncSession) -> float:
-    """Compute cumulative unpaid debt borrowed from Kassa across all non-deleted records."""
+async def get_outstanding_kassa_debt(
+    db: AsyncSession, tenant_id: Optional[int] = None
+) -> float:
+    """Compute cumulative unpaid debt borrowed from Kassa for this tenant."""
+    tid = get_current_tenant_id(tenant_id)
     txs = (
         await db.scalars(
             select(CashTransaction).where(
+                CashTransaction.tenant_id == tid,
                 CashTransaction.is_deleted.is_(False),
                 CashTransaction.source_type.in_(["kassa_debt", "kassa_repay"]),
             )
@@ -1098,13 +1287,17 @@ async def get_outstanding_kassa_debt(db: AsyncSession) -> float:
     return debt - repaid
 
 
-async def get_kassa_debt_stats(db: AsyncSession, limit: int = 10) -> dict:
-    """Return kassa debt totals and recent kassa debt/repay movements."""
+async def get_kassa_debt_stats(
+    db: AsyncSession, limit: int = 10, tenant_id: Optional[int] = None
+) -> dict:
+    """Return kassa debt totals and recent kassa debt/repay movements for this tenant."""
+    tid = get_current_tenant_id(tenant_id)
     txs = list(
         (
             await db.scalars(
                 select(CashTransaction)
                 .where(
+                    CashTransaction.tenant_id == tid,
                     CashTransaction.is_deleted.is_(False),
                     CashTransaction.source_type.in_(["kassa_debt", "kassa_repay"]),
                 )
@@ -1122,9 +1315,12 @@ async def get_kassa_debt_stats(db: AsyncSession, limit: int = 10) -> dict:
     }
 
 
-async def get_total_all_clients_debt(db: AsyncSession) -> float:
-    """Quickly compute total unpaid debt across all active clients."""
-    clients = await list_clients(db, active_only=True)
+async def get_total_all_clients_debt(
+    db: AsyncSession, tenant_id: Optional[int] = None
+) -> float:
+    """Quickly compute total unpaid debt across all active clients of this tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    clients = await list_clients(db, active_only=True, tenant_id=tid)
     if not clients:
         return 0.0
     opening = sum(float(c.opening_debt or 0.0) for c in clients)
@@ -1132,12 +1328,17 @@ async def get_total_all_clients_debt(db: AsyncSession) -> float:
 
     sales_rows = (
         await db.scalars(
-            select(Sale).where(Sale.status == "confirmed", Sale.client_id.in_(active_ids))
+            select(Sale).where(
+                Sale.tenant_id == tid,
+                Sale.status == "confirmed",
+                Sale.client_id.in_(active_ids),
+            )
         )
     ).all()
     pay_rows = (
         await db.scalars(
             select(ClientPayment).where(
+                ClientPayment.tenant_id == tid,
                 ClientPayment.is_deleted.is_(False),
                 ClientPayment.client_id.in_(active_ids),
             )
@@ -1150,15 +1351,16 @@ async def get_total_all_clients_debt(db: AsyncSession) -> float:
 
 
 async def compute_session_summary(
-    db: AsyncSession, session_id: Optional[int] = None
+    db: AsyncSession, session_id: Optional[int] = None, tenant_id: Optional[int] = None
 ) -> DailyReportSummary:
     """Compute live cash balance, sales kg, cost, profit, and client payments for a session."""
+    tid = get_current_tenant_id(tenant_id)
     if session_id is None:
-        sess = await get_or_create_open_session(db)
+        sess = await get_or_create_open_session(db, tenant_id=tid)
         session_id = sess.id
     else:
         sess = await db.get(DailyCashSession, session_id)
-        if sess is None:
+        if sess is None or sess.tenant_id != tid:
             raise ValueError(f"Session {session_id} not found")
 
     sales = list(
@@ -1166,7 +1368,11 @@ async def compute_session_summary(
             await db.scalars(
                 select(Sale)
                 .options(selectinload(Sale.items), selectinload(Sale.client))
-                .where(Sale.session_id == session_id, Sale.status == "confirmed")
+                .where(
+                    Sale.tenant_id == tid,
+                    Sale.session_id == session_id,
+                    Sale.status == "confirmed",
+                )
                 .order_by(Sale.id)
             )
         ).all()
@@ -1177,6 +1383,7 @@ async def compute_session_summary(
                 select(ClientPayment)
                 .options(selectinload(ClientPayment.client))
                 .where(
+                    ClientPayment.tenant_id == tid,
                     ClientPayment.session_id == session_id,
                     ClientPayment.is_deleted.is_(False),
                 )
@@ -1189,6 +1396,7 @@ async def compute_session_summary(
             await db.scalars(
                 select(CashTransaction)
                 .where(
+                    CashTransaction.tenant_id == tid,
                     CashTransaction.session_id == session_id,
                     CashTransaction.is_deleted.is_(False),
                 )
@@ -1233,8 +1441,8 @@ async def compute_session_summary(
     total_profit = round(total_revenue - total_cost, 2)
     margin_pct = (total_profit / total_revenue * 100.0) if total_revenue > 0 else 0.0
 
-    outstanding_kassa = await get_outstanding_kassa_debt(db)
-    total_clients_debt = await get_total_all_clients_debt(db)
+    outstanding_kassa = await get_outstanding_kassa_debt(db, tenant_id=tid)
+    total_clients_debt = await get_total_all_clients_debt(db, tenant_id=tid)
 
     return DailyReportSummary(
         session=sess,
@@ -1262,8 +1470,11 @@ async def compute_session_summary(
     )
 
 
-async def compute_period_summary(db: AsyncSession, days: int = 30) -> PeriodReportSummary:
+async def compute_period_summary(
+    db: AsyncSession, days: int = 30, tenant_id: Optional[int] = None
+) -> PeriodReportSummary:
     """Compute aggregated Norin sales, profit, collections, and expenses over the last N days."""
+    tid = get_current_tenant_id(tenant_id)
     end_dt = now_local().date()
     start_dt = end_dt - timedelta(days=max(0, days - 1))
     start_iso = start_dt.strftime("%Y-%m-%d")
@@ -1273,6 +1484,7 @@ async def compute_period_summary(db: AsyncSession, days: int = 30) -> PeriodRepo
         (
             await db.scalars(
                 select(DailyCashSession).where(
+                    DailyCashSession.tenant_id == tid,
                     DailyCashSession.report_date >= start_iso,
                     DailyCashSession.report_date <= end_iso,
                 )
@@ -1291,7 +1503,11 @@ async def compute_period_summary(db: AsyncSession, days: int = 30) -> PeriodRepo
                 await db.scalars(
                     select(Sale)
                     .options(selectinload(Sale.items))
-                    .where(Sale.session_id.in_(sess_ids), Sale.status == "confirmed")
+                    .where(
+                        Sale.tenant_id == tid,
+                        Sale.session_id.in_(sess_ids),
+                        Sale.status == "confirmed",
+                    )
                 )
             ).all()
         )
@@ -1299,6 +1515,7 @@ async def compute_period_summary(db: AsyncSession, days: int = 30) -> PeriodRepo
             (
                 await db.scalars(
                     select(ClientPayment).where(
+                        ClientPayment.tenant_id == tid,
                         ClientPayment.session_id.in_(sess_ids),
                         ClientPayment.is_deleted.is_(False),
                     )
@@ -1309,6 +1526,7 @@ async def compute_period_summary(db: AsyncSession, days: int = 30) -> PeriodRepo
             (
                 await db.scalars(
                     select(CashTransaction).where(
+                        CashTransaction.tenant_id == tid,
                         CashTransaction.session_id.in_(sess_ids),
                         CashTransaction.is_deleted.is_(False),
                     )
@@ -1336,7 +1554,7 @@ async def compute_period_summary(db: AsyncSession, days: int = 30) -> PeriodRepo
         float(p.amount) for p in payments if p.payment_method == "transfer"
     )
     total_expenses = sum(float(t.amount) for t in txs if t.source_type == "expense")
-    total_clients_debt = await get_total_all_clients_debt(db)
+    total_clients_debt = await get_total_all_clients_debt(db, tenant_id=tid)
 
     return PeriodReportSummary(
         days=days,
@@ -1363,17 +1581,24 @@ async def add_cash_transaction(
     source_type: str = "main_in",
     note: str = "",
     session_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
 ) -> CashTransaction:
     """Record a cash-in, expense, kassa debt, or kassa repayment transaction."""
+    tid = get_current_tenant_id(tenant_id)
     if session_id is None:
-        sess = await get_or_create_open_session(db)
+        sess = await get_or_create_open_session(db, tenant_id=tid)
         session_id = sess.id
+    else:
+        sess = await db.get(DailyCashSession, session_id)
+        if sess is None or sess.tenant_id != tid:
+            raise ValueError(f"Session {session_id} not found")
     valid_type = (
         source_type
         if source_type in ("main_in", "expense", "kassa_debt", "kassa_repay")
         else "main_in"
     )
     tx = CashTransaction(
+        tenant_id=tid,
         session_id=session_id,
         amount=float(amount),
         source_type=valid_type,
@@ -1383,7 +1608,7 @@ async def add_cash_transaction(
     db.add(tx)
     await db.commit()
     await db.refresh(tx)
-    await compute_session_summary(db, session_id)
+    await compute_session_summary(db, session_id, tenant_id=tid)
     return tx
 
 
@@ -1392,10 +1617,12 @@ async def update_cash_transaction(
     tx_id: int,
     new_amount: Optional[float] = None,
     new_note: Optional[str] = None,
+    tenant_id: Optional[int] = None,
 ) -> Optional[CashTransaction]:
     """Edit an existing cash/expense transaction and recalculate session balance."""
+    tid = get_current_tenant_id(tenant_id)
     tx = await db.get(CashTransaction, tx_id)
-    if tx is None or tx.is_deleted:
+    if tx is None or tx.is_deleted or tx.tenant_id != tid:
         return None
     if new_amount is not None:
         tx.amount = float(new_amount)
@@ -1403,27 +1630,34 @@ async def update_cash_transaction(
         tx.note = new_note.strip()
     await db.commit()
     await db.refresh(tx)
-    await compute_session_summary(db, tx.session_id)
+    await compute_session_summary(db, tx.session_id, tenant_id=tid)
     return tx
 
 
-async def delete_cash_transaction(db: AsyncSession, tx_id: int) -> Optional[CashTransaction]:
+async def delete_cash_transaction(
+    db: AsyncSession, tx_id: int, tenant_id: Optional[int] = None
+) -> Optional[CashTransaction]:
     """Soft-delete a cash/expense transaction and recalculate session balance."""
+    tid = get_current_tenant_id(tenant_id)
     tx = await db.get(CashTransaction, tx_id)
-    if tx is None or tx.is_deleted:
+    if tx is None or tx.is_deleted or tx.tenant_id != tid:
         return None
     tx.is_deleted = True
     await db.commit()
     await db.refresh(tx)
-    await compute_session_summary(db, tx.session_id)
+    await compute_session_summary(db, tx.session_id, tenant_id=tid)
     return tx
 
 
 async def close_cash_session(
-    db: AsyncSession, session_id: int, actual_counted_cash: float
+    db: AsyncSession,
+    session_id: int,
+    actual_counted_cash: float,
+    tenant_id: Optional[int] = None,
 ) -> DailyReportSummary:
     """Close a cash session with actual counted cash, recording discrepancy into history."""
-    summary = await compute_session_summary(db, session_id)
+    tid = get_current_tenant_id(tenant_id)
+    summary = await compute_session_summary(db, session_id, tenant_id=tid)
     sess = summary.session
     sess.actual_counted_cash = float(actual_counted_cash)
     sess.expected_cash = summary.expected_cash
@@ -1432,16 +1666,20 @@ async def close_cash_session(
     sess.closed_at = now_utc()
     await db.commit()
     await db.refresh(sess)
-    return await compute_session_summary(db, session_id)
+    return await compute_session_summary(db, session_id, tenant_id=tid)
 
 
 async def reopen_cash_session(
-    db: AsyncSession, session_id: int
+    db: AsyncSession, session_id: int, tenant_id: Optional[int] = None
 ) -> Optional[DailyCashSession]:
     """Reopen a closed session if admin wants to correct entries."""
-    current_open = await get_open_session(db)
+    tid = get_current_tenant_id(tenant_id)
+    sess = await db.get(DailyCashSession, session_id)
+    if sess is None or sess.tenant_id != tid:
+        return None
+    current_open = await get_open_session(db, tenant_id=tid)
     if current_open is not None and current_open.id != session_id:
-        current_summary = await compute_session_summary(db, current_open.id)
+        current_summary = await compute_session_summary(db, current_open.id, tenant_id=tid)
         if (
             not current_summary.confirmed_sales
             and not current_summary.client_payments
@@ -1450,7 +1688,7 @@ async def reopen_cash_session(
             await db.delete(current_open)
             await db.commit()
     sess = await db.get(DailyCashSession, session_id)
-    if sess is None:
+    if sess is None or sess.tenant_id != tid:
         return None
     sess.status = "open"
     sess.closed_at = None
@@ -1460,12 +1698,13 @@ async def reopen_cash_session(
 
 
 async def list_closed_sessions(
-    db: AsyncSession, limit: int = 10
+    db: AsyncSession, limit: int = 10, tenant_id: Optional[int] = None
 ) -> List[DailyCashSession]:
-    """Return recent closed sessions ordered newest first."""
+    """Return recent closed sessions ordered newest first for this tenant."""
+    tid = get_current_tenant_id(tenant_id)
     stmt = (
         select(DailyCashSession)
-        .where(DailyCashSession.status == "closed")
+        .where(DailyCashSession.tenant_id == tid, DailyCashSession.status == "closed")
         .order_by(desc(DailyCashSession.id))
         .limit(limit)
     )
@@ -1473,10 +1712,16 @@ async def list_closed_sessions(
 
 
 async def list_all_sessions(
-    db: AsyncSession, limit: int = 15
+    db: AsyncSession, limit: int = 15, tenant_id: Optional[int] = None
 ) -> List[DailyCashSession]:
-    """Return recent open and closed daily sessions ordered newest first."""
-    stmt = select(DailyCashSession).order_by(desc(DailyCashSession.id)).limit(limit)
+    """Return recent open and closed daily sessions ordered newest first for this tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    stmt = (
+        select(DailyCashSession)
+        .where(DailyCashSession.tenant_id == tid)
+        .order_by(desc(DailyCashSession.id))
+        .limit(limit)
+    )
     return list((await db.scalars(stmt)).all())
 
 
@@ -1486,13 +1731,18 @@ async def list_all_sessions(
 
 
 async def set_group_config(
-    db: AsyncSession, role: str, chat_id: int, title: str
+    db: AsyncSession,
+    role: str,
+    chat_id: int,
+    title: str,
+    tenant_id: Optional[int] = None,
 ) -> GroupConfig:
-    """Bind or update a system Telegram group chat_id for a given role."""
-    stmt = select(GroupConfig).where(GroupConfig.role == role)
+    """Bind or update a system Telegram group chat_id for a given role in this tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    stmt = select(GroupConfig).where(GroupConfig.tenant_id == tid, GroupConfig.role == role)
     obj = await db.scalar(stmt)
     if obj is None:
-        obj = GroupConfig(role=role, chat_id=chat_id, title=title)
+        obj = GroupConfig(tenant_id=tid, role=role, chat_id=chat_id, title=title)
         db.add(obj)
     else:
         obj.chat_id = chat_id
@@ -1502,28 +1752,48 @@ async def set_group_config(
     return obj
 
 
-async def get_group_config(db: AsyncSession, role: str) -> Optional[GroupConfig]:
-    """Return configured system group for a role."""
-    return await db.scalar(select(GroupConfig).where(GroupConfig.role == role))
+async def get_group_config(
+    db: AsyncSession, role: str, tenant_id: Optional[int] = None
+) -> Optional[GroupConfig]:
+    """Return configured system group for a role within the active tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    return await db.scalar(
+        select(GroupConfig).where(GroupConfig.tenant_id == tid, GroupConfig.role == role)
+    )
 
 
-async def get_all_group_configs(db: AsyncSession) -> Dict[str, GroupConfig]:
-    """Return all configured system groups keyed by role."""
-    rows = (await db.scalars(select(GroupConfig))).all()
+async def get_all_group_configs(
+    db: AsyncSession, tenant_id: Optional[int] = None
+) -> Dict[str, GroupConfig]:
+    """Return all configured system groups keyed by role for the active tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    rows = (await db.scalars(select(GroupConfig).where(GroupConfig.tenant_id == tid))).all()
     return {row.role: row for row in rows}
 
 
-async def get_app_setting(db: AsyncSession, key: str, default: str = "") -> str:
-    """Read a bot preference value from app_settings."""
-    obj = await db.get(AppSetting, key)
+def _scoped_setting_key(key: str, tenant_id: Optional[int] = None) -> str:
+    """Namespace AppSetting keys cleanly per tenant while keeping Tenant #1 keys clean."""
+    tid = get_current_tenant_id(tenant_id)
+    return key if tid == 1 else f"t{tid}:{key}"
+
+
+async def get_app_setting(
+    db: AsyncSession, key: str, default: str = "", tenant_id: Optional[int] = None
+) -> str:
+    """Read a bot preference value from app_settings for the active tenant."""
+    scoped_key = _scoped_setting_key(key, tenant_id=tenant_id)
+    obj = await db.get(AppSetting, scoped_key)
     return obj.value if obj is not None else default
 
 
-async def set_app_setting(db: AsyncSession, key: str, value: str) -> AppSetting:
-    """Persist a bot preference value in app_settings."""
-    obj = await db.get(AppSetting, key)
+async def set_app_setting(
+    db: AsyncSession, key: str, value: str, tenant_id: Optional[int] = None
+) -> AppSetting:
+    """Persist a bot preference value in app_settings for the active tenant."""
+    scoped_key = _scoped_setting_key(key, tenant_id=tenant_id)
+    obj = await db.get(AppSetting, scoped_key)
     if obj is None:
-        obj = AppSetting(key=key, value=value)
+        obj = AppSetting(key=scoped_key, value=value)
         db.add(obj)
     else:
         obj.value = value
@@ -1556,34 +1826,84 @@ def round_amount(amount: float, mode: str = "nearest_1000") -> float:
 # ---------------------------------------------------------------------------
 
 
-async def get_subscription_state(db: AsyncSession) -> SubscriptionState:
-    """Fetch singleton SubscriptionState (id=1), creating a default trial record if missing."""
-    sub = await db.get(SubscriptionState, 1)
-    if sub is None:
-        settings = get_settings()
-        trial_days = max(1, int(settings.DEFAULT_TRIAL_DAYS))
-        sub = SubscriptionState(
-            id=1,
-            tenant_name="Norin Sexi",
-            plan_name="Pro Oylik",
-            monthly_price=float(settings.DEFAULT_MONTHLY_PRICE),
-            expires_at=now_utc() + timedelta(days=trial_days),
-            grace_days=3,
-            is_suspended=False,
-            owner_contact=settings.OWNER_CONTACT,
-            last_reminder_date="",
-        )
-        db.add(sub)
-        await db.commit()
-        await db.refresh(sub)
+async def get_subscription_state(
+    db: AsyncSession, tenant_id: Optional[int] = None
+) -> SubscriptionState:
+    """Fetch SubscriptionState for the given tenant_id (creating Tenant #1 default if missing)."""
+    tid = get_current_tenant_id(tenant_id)
+    sub = await db.get(SubscriptionState, tid)
+    if sub is not None:
+        return sub
+
+    sub_one = await db.get(SubscriptionState, 1)
+    if tid != 1 and sub_one is not None:
+        return sub_one
+    if sub_one is not None:
+        return sub_one
+
+    settings = get_settings()
+    trial_days = max(1, int(settings.DEFAULT_TRIAL_DAYS))
+    sub = SubscriptionState(
+        tenant_name="Test Filial (Asad)",
+        plan_name="Pro Oylik",
+        monthly_price=float(settings.DEFAULT_MONTHLY_PRICE),
+        expires_at=now_utc() + timedelta(days=trial_days),
+        grace_days=3,
+        is_suspended=False,
+        owner_contact=settings.OWNER_CONTACT,
+        last_reminder_date="",
+    )
+    db.add(sub)
+    await db.commit()
+    await db.refresh(sub)
+    return sub
+
+
+async def list_tenants(db: AsyncSession) -> List[SubscriptionState]:
+    """List all SaaS tenants (ensuring Tenant #1 always exists)."""
+    await get_subscription_state(db, tenant_id=1)
+    return list((await db.scalars(select(SubscriptionState).order_by(SubscriptionState.id))).all())
+
+
+async def create_tenant(
+    db: AsyncSession,
+    tenant_name: str,
+    trial_days: Optional[int] = None,
+    monthly_price: Optional[float] = None,
+    owner_contact: Optional[str] = None,
+) -> SubscriptionState:
+    """Create a brand-new isolated SaaS tenant and seed its default products."""
+    from database.session import seed_default_products
+
+    await get_subscription_state(db, tenant_id=1)
+    settings = get_settings()
+    days = max(1, int(trial_days if trial_days is not None else settings.DEFAULT_TRIAL_DAYS))
+    price = float(monthly_price if monthly_price is not None else settings.DEFAULT_MONTHLY_PRICE)
+    contact = (owner_contact or settings.OWNER_CONTACT).strip()
+    sub = SubscriptionState(
+        tenant_name=tenant_name.strip() or "Yangi Filial",
+        plan_name="Pro Oylik",
+        monthly_price=price,
+        expires_at=now_utc() + timedelta(days=days),
+        grace_days=3,
+        is_suspended=False,
+        owner_contact=contact,
+        last_reminder_date="",
+    )
+    db.add(sub)
+    await db.commit()
+    await db.refresh(sub)
+    await seed_default_products(db, tenant_id=sub.id)
     return sub
 
 
 async def evaluate_subscription_status(
-    db: AsyncSession, current_time: Optional[datetime] = None
+    db: AsyncSession,
+    current_time: Optional[datetime] = None,
+    tenant_id: Optional[int] = None,
 ) -> SubscriptionStatus:
     """Evaluate active/expiring/grace/expired/suspended status safely with UTC normalization."""
-    sub = await get_subscription_state(db)
+    sub = await get_subscription_state(db, tenant_id=tenant_id)
     now = to_utc_dt(current_time) if current_time else now_utc()
     exp = to_utc_dt(sub.expires_at)
 
@@ -1636,9 +1956,10 @@ async def extend_subscription(
     recorded_by: int,
     note: str = "",
     plan_name: Optional[str] = None,
+    tenant_id: Optional[int] = None,
 ) -> SubscriptionState:
     """Extend subscription from current expiry (if active) or from now (if already expired)."""
-    sub = await get_subscription_state(db)
+    sub = await get_subscription_state(db, tenant_id=tenant_id)
     now = now_utc()
     current_exp = to_utc_dt(sub.expires_at)
     base_dt = current_exp if current_exp > now else now
@@ -1648,6 +1969,7 @@ async def extend_subscription(
         sub.plan_name = plan_name.strip()
 
     payment = SubscriptionPayment(
+        tenant_id=sub.id,
         amount=float(amount),
         days_added=int(days),
         plan_name=sub.plan_name,
@@ -1667,9 +1989,10 @@ async def update_subscription_settings(
     tenant_name: Optional[str] = None,
     is_suspended: Optional[bool] = None,
     grace_days: Optional[int] = None,
+    tenant_id: Optional[int] = None,
 ) -> SubscriptionState:
-    """Update subscription configuration fields."""
-    sub = await get_subscription_state(db)
+    """Update subscription configuration fields for this tenant."""
+    sub = await get_subscription_state(db, tenant_id=tenant_id)
     if monthly_price is not None:
         sub.monthly_price = float(monthly_price)
     if owner_contact is not None and owner_contact.strip():
@@ -1685,19 +2008,23 @@ async def update_subscription_settings(
     return sub
 
 
-async def mark_reminder_sent(db: AsyncSession, date_iso: str) -> None:
-    """Record the local date when expiry reminder was sent to avoid duplicate alerts."""
-    sub = await get_subscription_state(db)
+async def mark_reminder_sent(
+    db: AsyncSession, date_iso: str, tenant_id: Optional[int] = None
+) -> None:
+    """Record the local date when expiry reminder was sent for this tenant."""
+    sub = await get_subscription_state(db, tenant_id=tenant_id)
     sub.last_reminder_date = date_iso
     await db.commit()
 
 
 async def list_subscription_payments(
-    db: AsyncSession, limit: int = 15
+    db: AsyncSession, limit: int = 15, tenant_id: Optional[int] = None
 ) -> List[SubscriptionPayment]:
-    """Return recent SaaS subscription payment entries."""
+    """Return recent SaaS subscription payment entries for the target tenant."""
+    tid = get_current_tenant_id(tenant_id)
     stmt = (
         select(SubscriptionPayment)
+        .where(SubscriptionPayment.tenant_id == tid)
         .order_by(desc(SubscriptionPayment.id))
         .limit(limit)
     )
@@ -1705,10 +2032,11 @@ async def list_subscription_payments(
 
 
 async def list_authorized_users(
-    db: AsyncSession, active_only: bool = True
+    db: AsyncSession, active_only: bool = True, tenant_id: Optional[int] = None
 ) -> List[AuthorizedUser]:
-    """List dynamically added AuthorizedUsers."""
-    stmt = select(AuthorizedUser)
+    """List dynamically added AuthorizedUsers belonging to the target tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    stmt = select(AuthorizedUser).where(AuthorizedUser.tenant_id == tid)
     if active_only:
         stmt = stmt.where(AuthorizedUser.is_active.is_(True))
     stmt = stmt.order_by(AuthorizedUser.id)
@@ -1720,12 +2048,30 @@ async def add_authorized_user(
     telegram_id: int,
     full_name: str = "",
     role: str = "staff",
+    tenant_id: Optional[int] = None,
+    create_new_tenant: bool = False,
+    new_tenant_name: Optional[str] = None,
 ) -> AuthorizedUser:
-    """Add or reactivate an authorized Telegram user."""
+    """Add or reactivate an authorized Telegram user, optionally creating a dedicated new tenant."""
+    tid_int = int(telegram_id)
     existing = await db.scalar(
-        select(AuthorizedUser).where(AuthorizedUser.telegram_id == int(telegram_id))
+        select(AuthorizedUser).where(AuthorizedUser.telegram_id == tid_int)
     )
+
+    if create_new_tenant:
+        if existing is not None and existing.tenant_id != 1 and existing.is_active:
+            target_tid = int(existing.tenant_id)
+        else:
+            label = (new_tenant_name or "").strip() or (
+                f"{full_name.strip()} Filiali" if full_name.strip() else f"Filial {tid_int}"
+            )
+            sub = await create_tenant(db, tenant_name=label)
+            target_tid = sub.id
+    else:
+        target_tid = get_current_tenant_id(tenant_id)
+
     if existing is not None:
+        existing.tenant_id = target_tid
         existing.is_active = True
         if full_name.strip():
             existing.full_name = full_name.strip()
@@ -1735,8 +2081,9 @@ async def add_authorized_user(
         return existing
 
     user = AuthorizedUser(
-        telegram_id=int(telegram_id),
-        full_name=full_name.strip() or f"User {telegram_id}",
+        tenant_id=target_tid,
+        telegram_id=tid_int,
+        full_name=full_name.strip() or f"User {tid_int}",
         role=role,
         is_active=True,
     )
@@ -1746,11 +2093,14 @@ async def add_authorized_user(
     return user
 
 
-async def remove_authorized_user(db: AsyncSession, telegram_id: int) -> bool:
+async def remove_authorized_user(
+    db: AsyncSession, telegram_id: int, tenant_id: Optional[int] = None
+) -> bool:
     """Deactivate/remove a dynamically added AuthorizedUser."""
-    existing = await db.scalar(
-        select(AuthorizedUser).where(AuthorizedUser.telegram_id == int(telegram_id))
-    )
+    stmt = select(AuthorizedUser).where(AuthorizedUser.telegram_id == int(telegram_id))
+    if tenant_id is not None:
+        stmt = stmt.where(AuthorizedUser.tenant_id == int(tenant_id))
+    existing = await db.scalar(stmt)
     if existing is None:
         return False
     await db.delete(existing)
@@ -1758,17 +2108,63 @@ async def remove_authorized_user(db: AsyncSession, telegram_id: int) -> bool:
     return True
 
 
+async def resolve_user_tenant_id(
+    db: AsyncSession,
+    user_id: Optional[int],
+    chat_id: Optional[int] = None,
+    chat_type: str = "private",
+) -> int:
+    """Resolve the SaaS tenant_id for an incoming Telegram event (by bound group first, then user)."""
+    if chat_id is not None and chat_type in ("group", "supergroup"):
+        client_tid = await db.scalar(
+            select(Client.tenant_id)
+            .where(Client.group_chat_id == int(chat_id), Client.is_active.is_(True))
+            .limit(1)
+        )
+        if client_tid is not None:
+            return int(client_tid)
+
+        grp_tid = await db.scalar(
+            select(GroupConfig.tenant_id)
+            .where(GroupConfig.chat_id == int(chat_id))
+            .limit(1)
+        )
+        if grp_tid is not None:
+            return int(grp_tid)
+
+    if user_id is None:
+        return 1
+
+    settings = get_settings()
+    if int(user_id) in settings.super_admin_id_list:
+        return 1
+
+    db_tid = await db.scalar(
+        select(AuthorizedUser.tenant_id).where(
+            AuthorizedUser.telegram_id == int(user_id),
+            AuthorizedUser.is_active.is_(True),
+        )
+    )
+    if db_tid is not None:
+        return int(db_tid)
+
+    if int(user_id) in settings.admin_id_list:
+        return 1
+
+    return 1
+
+
 async def is_user_authorized(
     db: AsyncSession,
     user_id: Optional[int],
     allow_group_anon: bool = False,
+    tenant_id: Optional[int] = None,
 ) -> bool:
     """
-    Check if a Telegram user is authorized to operate the bot.
+    Check if a Telegram user is authorized to operate the bot within the active tenant.
 
     Super admins (SUPER_ADMIN_IDS) are always authorized.
-    If both ADMIN_IDS (.env) and AuthorizedUser table are empty, private usage is open.
-    Otherwise user_id must be in SUPER_ADMIN_IDS, ADMIN_IDS, or active AuthorizedUser rows.
+    ADMIN_IDS apply to Tenant #1. AuthorizedUsers belong to their assigned tenant_id.
     """
     if user_id is None:
         return False
@@ -1778,12 +2174,14 @@ async def is_user_authorized(
     if allow_group_anon and user_id == ANONYMOUS_ADMIN_BOT_ID:
         return True
 
+    tid = get_current_tenant_id(tenant_id)
     env_admins = settings.admin_id_list
-    if user_id in env_admins:
+    if tid == 1 and user_id in env_admins:
         return True
 
     active_db_user = await db.scalar(
         select(AuthorizedUser.id).where(
+            AuthorizedUser.tenant_id == tid,
             AuthorizedUser.telegram_id == int(user_id),
             AuthorizedUser.is_active.is_(True),
         )
@@ -1791,10 +2189,11 @@ async def is_user_authorized(
     if active_db_user is not None:
         return True
 
-    if not env_admins:
+    if tid == 1 and not env_admins:
         any_db_user = await db.scalar(
             select(sa_func.count(AuthorizedUser.id)).where(
-                AuthorizedUser.is_active.is_(True)
+                AuthorizedUser.tenant_id == 1,
+                AuthorizedUser.is_active.is_(True),
             )
         )
         if not any_db_user:
@@ -1808,22 +2207,43 @@ async def is_user_authorized(
 # ---------------------------------------------------------------------------
 
 
-async def reset_test_transactions(db: AsyncSession) -> dict:
+async def reset_test_transactions(
+    db: AsyncSession, tenant_id: Optional[int] = None
+) -> dict:
     """
     Clear all transactional test data (sales, payments, cash sessions, opening debts)
-    while preserving Products, Clients, Custom Prices, Bound Groups, and Subscriptions.
+    for the target tenant while preserving its Products, Clients, Custom Prices, Bound Groups, and Subscriptions.
     """
-    sales_cnt = int(await db.scalar(select(sa_func.count(Sale.id))) or 0)
-    pays_cnt = int(await db.scalar(select(sa_func.count(ClientPayment.id))) or 0)
-    txs_cnt = int(await db.scalar(select(sa_func.count(CashTransaction.id))) or 0)
-    sess_cnt = int(await db.scalar(select(sa_func.count(DailyCashSession.id))) or 0)
+    tid = get_current_tenant_id(tenant_id)
+    sales_cnt = int(
+        await db.scalar(select(sa_func.count(Sale.id)).where(Sale.tenant_id == tid)) or 0
+    )
+    pays_cnt = int(
+        await db.scalar(
+            select(sa_func.count(ClientPayment.id)).where(ClientPayment.tenant_id == tid)
+        )
+        or 0
+    )
+    txs_cnt = int(
+        await db.scalar(
+            select(sa_func.count(CashTransaction.id)).where(CashTransaction.tenant_id == tid)
+        )
+        or 0
+    )
+    sess_cnt = int(
+        await db.scalar(
+            select(sa_func.count(DailyCashSession.id)).where(DailyCashSession.tenant_id == tid)
+        )
+        or 0
+    )
 
-    await db.execute(delete(SaleItem))
-    await db.execute(delete(Sale))
-    await db.execute(delete(ClientPayment))
-    await db.execute(delete(CashTransaction))
-    await db.execute(delete(DailyCashSession))
-    await db.execute(update(Client).values(opening_debt=0.0))
+    sale_ids_sub = select(Sale.id).where(Sale.tenant_id == tid)
+    await db.execute(delete(SaleItem).where(SaleItem.sale_id.in_(sale_ids_sub)))
+    await db.execute(delete(Sale).where(Sale.tenant_id == tid))
+    await db.execute(delete(ClientPayment).where(ClientPayment.tenant_id == tid))
+    await db.execute(delete(CashTransaction).where(CashTransaction.tenant_id == tid))
+    await db.execute(delete(DailyCashSession).where(DailyCashSession.tenant_id == tid))
+    await db.execute(update(Client).where(Client.tenant_id == tid).values(opening_debt=0.0))
     await db.commit()
 
     return {
@@ -1834,32 +2254,62 @@ async def reset_test_transactions(db: AsyncSession) -> dict:
     }
 
 
-async def reset_full_database(db: AsyncSession) -> dict:
+async def reset_full_database(
+    db: AsyncSession, tenant_id: Optional[int] = None
+) -> dict:
     """
-    Completely wipe operational data (sales, payments, cash, clients, groups, products, settings),
-    re-seed default Norin products, and strictly preserve SubscriptionState/Payments & AuthorizedUser.
+    Completely wipe operational data for the target tenant (sales, payments, cash, clients,
+    groups, products, settings), re-seed its default Norin products, and strictly preserve
+    SubscriptionState/Payments & AuthorizedUser.
     """
     from database.session import seed_default_products
 
-    sales_cnt = int(await db.scalar(select(sa_func.count(Sale.id))) or 0)
-    pays_cnt = int(await db.scalar(select(sa_func.count(ClientPayment.id))) or 0)
-    txs_cnt = int(await db.scalar(select(sa_func.count(CashTransaction.id))) or 0)
-    sess_cnt = int(await db.scalar(select(sa_func.count(DailyCashSession.id))) or 0)
-    clients_cnt = int(await db.scalar(select(sa_func.count(Client.id))) or 0)
+    tid = get_current_tenant_id(tenant_id)
+    sales_cnt = int(
+        await db.scalar(select(sa_func.count(Sale.id)).where(Sale.tenant_id == tid)) or 0
+    )
+    pays_cnt = int(
+        await db.scalar(
+            select(sa_func.count(ClientPayment.id)).where(ClientPayment.tenant_id == tid)
+        )
+        or 0
+    )
+    txs_cnt = int(
+        await db.scalar(
+            select(sa_func.count(CashTransaction.id)).where(CashTransaction.tenant_id == tid)
+        )
+        or 0
+    )
+    sess_cnt = int(
+        await db.scalar(
+            select(sa_func.count(DailyCashSession.id)).where(DailyCashSession.tenant_id == tid)
+        )
+        or 0
+    )
+    clients_cnt = int(
+        await db.scalar(select(sa_func.count(Client.id)).where(Client.tenant_id == tid)) or 0
+    )
 
-    await db.execute(delete(SaleItem))
-    await db.execute(delete(Sale))
-    await db.execute(delete(ClientPayment))
-    await db.execute(delete(CashTransaction))
-    await db.execute(delete(DailyCashSession))
-    await db.execute(delete(ClientProductPrice))
-    await db.execute(delete(Client))
-    await db.execute(delete(GroupConfig))
-    await db.execute(delete(Product))
-    await db.execute(delete(AppSetting))
+    sale_ids_sub = select(Sale.id).where(Sale.tenant_id == tid)
+    client_ids_sub = select(Client.id).where(Client.tenant_id == tid)
+    await db.execute(delete(SaleItem).where(SaleItem.sale_id.in_(sale_ids_sub)))
+    await db.execute(delete(Sale).where(Sale.tenant_id == tid))
+    await db.execute(delete(ClientPayment).where(ClientPayment.tenant_id == tid))
+    await db.execute(delete(CashTransaction).where(CashTransaction.tenant_id == tid))
+    await db.execute(delete(DailyCashSession).where(DailyCashSession.tenant_id == tid))
+    await db.execute(
+        delete(ClientProductPrice).where(ClientProductPrice.client_id.in_(client_ids_sub))
+    )
+    await db.execute(delete(Client).where(Client.tenant_id == tid))
+    await db.execute(delete(GroupConfig).where(GroupConfig.tenant_id == tid))
+    await db.execute(delete(Product).where(Product.tenant_id == tid))
+    if tid == 1:
+        await db.execute(delete(AppSetting).where(~AppSetting.key.contains(":")))
+    else:
+        await db.execute(delete(AppSetting).where(AppSetting.key.like(f"t{tid}:%")))
     await db.commit()
 
-    await seed_default_products(db)
+    await seed_default_products(db, tenant_id=tid)
 
     return {
         "sales": sales_cnt,

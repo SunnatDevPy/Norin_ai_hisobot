@@ -212,7 +212,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         warn_line = "\n\n🔒 <b>Obuna muddati tugagan.</b> Davom ettirish uchun Sozlamalar → Obuna holatiga kiring."
 
     await message.answer(
-        "👋 <b>Assalomu alaykum! Norin AI Hisobot botiga xush kelibsiz.</b>\n\n"
+        "👋 <b>Assalomu alaykum! Norin AI Hisobot botiga xush kelibsiz.</b>\n"
+        f"🏢 Filial: <b>{html.escape(sub_status.state.tenant_name)}</b> (<code>#{sub_status.state.id}</code>)\n\n"
         "Botda quyidagilarni 1 soniyada bajarasiz:\n"
         "• 📸 <b>Tarozi/do'kon cheki rasmi</b> — AI faqat <b>kg va go'sht turini</b> o'qiydi (chekdagi do'kon narxini e'tiborsiz qoldiradi) va mijoz narxida hisoblab guruhiga tashlaydi\n"
         "• 🎤 <b>Ovoz / matn</b> — <i>«Iftiqor 80 notin ot 25 kg»</i> desangiz avtomatik hisoblaydi\n"

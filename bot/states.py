@@ -45,4 +45,6 @@ class SuperAdminStates(StatesGroup):
     waiting_owner_contact = State()
     waiting_tenant_name = State()
     waiting_add_user_id = State()
+    waiting_add_user_same_tenant_id = State()
+    waiting_new_tenant_name = State()
     waiting_custom_extend_days = State()

@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -28,10 +29,12 @@ class Product(Base):
     """Norin and meat products catalog with production cost and default sell price."""
 
     __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_products_tenant_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     order_num: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     aliases: Mapped[str] = mapped_column(Text, nullable=False, default="")
     unit: Mapped[str] = mapped_column(String(16), nullable=False, default="kg")
     cost_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
@@ -50,9 +53,11 @@ class Client(Base):
     """Wholesale clients (stores/buyers) with bound Telegram group and opening debt."""
 
     __tablename__ = "clients"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_clients_tenant_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     aliases: Mapped[str] = mapped_column(Text, nullable=False, default="")
     phone: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     group_chat_id: Mapped[Optional[int]] = mapped_column(
@@ -99,9 +104,11 @@ class GroupConfig(Base):
     """System Telegram group binding by role (e.g. 'report')."""
 
     __tablename__ = "group_configs"
+    __table_args__ = (UniqueConstraint("tenant_id", "role", name="uq_group_configs_tenant_role"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    role: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
     chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     updated_at: Mapped[datetime] = mapped_column(
@@ -115,6 +122,7 @@ class DailyCashSession(Base):
     __tablename__ = "daily_cash_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     report_date: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", index=True)
     opening_balance: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
@@ -145,6 +153,7 @@ class Sale(Base):
     __tablename__ = "sales"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     session_id: Mapped[int] = mapped_column(
         ForeignKey("daily_cash_sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -206,6 +215,7 @@ class ClientPayment(Base):
     __tablename__ = "client_payments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     session_id: Mapped[int] = mapped_column(
         ForeignKey("daily_cash_sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -232,6 +242,7 @@ class CashTransaction(Base):
     __tablename__ = "cash_transactions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     session_id: Mapped[int] = mapped_column(
         ForeignKey("daily_cash_sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -251,7 +262,7 @@ class SubscriptionState(Base):
 
     __tablename__ = "subscription_states"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_name: Mapped[str] = mapped_column(String(255), nullable=False, default="Norin Sexi")
     plan_name: Mapped[str] = mapped_column(String(64), nullable=False, default="Pro Oylik")
     monthly_price: Mapped[float] = mapped_column(Float, nullable=False, default=400000.0)
@@ -271,6 +282,7 @@ class SubscriptionPayment(Base):
     __tablename__ = "subscription_payments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     days_added: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     plan_name: Mapped[str] = mapped_column(String(64), nullable=False, default="Pro Oylik")
@@ -287,6 +299,7 @@ class AuthorizedUser(Base):
     __tablename__ = "authorized_users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="staff")

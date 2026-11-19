@@ -1642,14 +1642,15 @@ async def _notify_admins_after_group_sale(
     """Send private profit & quick-edit card to the sender/admin after a group auto-calc."""
     settings = get_settings()
     targets: set[int] = set()
+    tid = int(getattr(sale, "tenant_id", 1) or 1)
     if sender_id and sender_id != 1087968824:
         targets.add(sender_id)
     else:
-        targets.update(settings.admin_id_list)
-        if not targets:
-            async with async_session_maker() as db:
-                db_users = await list_authorized_users(db, active_only=True)
-            targets.update(u.telegram_id for u in db_users)
+        async with async_session_maker() as db:
+            db_users = await list_authorized_users(db, active_only=True, tenant_id=tid)
+        targets.update(u.telegram_id for u in db_users)
+        if tid == 1:
+            targets.update(settings.admin_id_list)
         if not targets:
             targets.update(settings.super_admin_id_list)
 
