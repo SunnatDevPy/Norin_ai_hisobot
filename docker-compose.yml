@@ -1,0 +1,41 @@
+services:
+  norin-postgres:
+    image: postgres:16-alpine
+    container_name: norin-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-norin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-norin_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-norin_db}
+    volumes:
+      - norin_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-norin} -d ${POSTGRES_DB:-norin_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  norin-bot:
+    build: .
+    container_name: norin-bot
+    restart: unless-stopped
+    depends_on:
+      norin-postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  norin_pgdata:
