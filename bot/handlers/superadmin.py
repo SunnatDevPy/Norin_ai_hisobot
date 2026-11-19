@@ -613,6 +613,7 @@ async def process_superadmin_add_user_new_tenant(
         full_name = rest or f"Mijoz {tg_id}"
         custom_tenant = ""
 
+    await state.clear()
     async with async_session_maker() as db:
         user = await add_authorized_user(
             db,
@@ -625,7 +626,6 @@ async def process_superadmin_add_user_new_tenant(
         sub_status = await evaluate_subscription_status(db, tenant_id=user.tenant_id)
         users = await list_authorized_users(db, active_only=True, tenant_id=user.tenant_id)
     _set_sa_tenant(uid, user.tenant_id)
-    await state.clear()
     await message.answer(
         "✅ <b>Yangi mijoz va alohida baza (Tenant) ochildi!</b>\n\n"
         f"👤 Mijoz: <b>{html.escape(user.full_name)}</b> (<code>{tg_id}</code>)\n"

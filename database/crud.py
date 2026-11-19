@@ -30,11 +30,13 @@ from database.models import (
 )
 
 
+import asyncio
 from contextlib import contextmanager
 from contextvars import ContextVar
 
 ANONYMOUS_ADMIN_BOT_ID = 1087968824
 CURRENT_TENANT_ID: ContextVar[int] = ContextVar("norin_current_tenant_id", default=1)
+_ADD_USER_LOCK = asyncio.Lock()
 
 
 def get_current_tenant_id(tenant_id: Optional[int] = None) -> int:
@@ -2053,44 +2055,45 @@ async def add_authorized_user(
     new_tenant_name: Optional[str] = None,
 ) -> AuthorizedUser:
     """Add or reactivate an authorized Telegram user, optionally creating a dedicated new tenant."""
-    tid_int = int(telegram_id)
-    existing = await db.scalar(
-        select(AuthorizedUser).where(AuthorizedUser.telegram_id == tid_int)
-    )
+    async with _ADD_USER_LOCK:
+        tid_int = int(telegram_id)
+        existing = await db.scalar(
+            select(AuthorizedUser).where(AuthorizedUser.telegram_id == tid_int)
+        )
 
-    if create_new_tenant:
-        if existing is not None and existing.tenant_id != 1 and existing.is_active:
-            target_tid = int(existing.tenant_id)
+        if create_new_tenant:
+            if existing is not None and existing.tenant_id != 1 and existing.is_active:
+                target_tid = int(existing.tenant_id)
+            else:
+                label = (new_tenant_name or "").strip() or (
+                    f"{full_name.strip()} Filiali" if full_name.strip() else f"Filial {tid_int}"
+                )
+                sub = await create_tenant(db, tenant_name=label)
+                target_tid = sub.id
         else:
-            label = (new_tenant_name or "").strip() or (
-                f"{full_name.strip()} Filiali" if full_name.strip() else f"Filial {tid_int}"
-            )
-            sub = await create_tenant(db, tenant_name=label)
-            target_tid = sub.id
-    else:
-        target_tid = get_current_tenant_id(tenant_id)
+            target_tid = get_current_tenant_id(tenant_id)
 
-    if existing is not None:
-        existing.tenant_id = target_tid
-        existing.is_active = True
-        if full_name.strip():
-            existing.full_name = full_name.strip()
-        existing.role = role
+        if existing is not None:
+            existing.tenant_id = target_tid
+            existing.is_active = True
+            if full_name.strip():
+                existing.full_name = full_name.strip()
+            existing.role = role
+            await db.commit()
+            await db.refresh(existing)
+            return existing
+
+        user = AuthorizedUser(
+            tenant_id=target_tid,
+            telegram_id=tid_int,
+            full_name=full_name.strip() or f"User {tid_int}",
+            role=role,
+            is_active=True,
+        )
+        db.add(user)
         await db.commit()
-        await db.refresh(existing)
-        return existing
-
-    user = AuthorizedUser(
-        tenant_id=target_tid,
-        telegram_id=tid_int,
-        full_name=full_name.strip() or f"User {tid_int}",
-        role=role,
-        is_active=True,
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
+        await db.refresh(user)
+        return user
 
 
 async def remove_authorized_user(

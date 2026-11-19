@@ -38,11 +38,13 @@ logger = logging.getLogger("norin_bot")
 
 
 class IPv4AiohttpSession(AiohttpSession):
-    """Force IPv4 connections to api.telegram.org to avoid IPv6 timeout stalls on VPS."""
+    """Force IPv4 connections with short keepalive to avoid NAT idle stalls on VPS."""
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._connector_init["family"] = socket.AF_INET
+        self._connector_init["keepalive_timeout"] = 10
+        self._connector_init["ttl_dns_cache"] = 300
 
 
 async def subscription_watcher(bot: Bot) -> None:
@@ -121,7 +123,7 @@ async def run_bot() -> None:
 
     bot = Bot(
         token=settings.BOT_TOKEN,
-        session=IPv4AiohttpSession(timeout=60),
+        session=IPv4AiohttpSession(timeout=20),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher(storage=MemoryStorage())
@@ -139,7 +141,7 @@ async def run_bot() -> None:
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(
             bot,
-            polling_timeout=20,
+            polling_timeout=10,
             allowed_updates=dp.resolve_used_update_types(),
         )
     finally:

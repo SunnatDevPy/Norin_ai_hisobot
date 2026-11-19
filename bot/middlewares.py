@@ -6,6 +6,7 @@ import html
 from typing import Any, Awaitable, Callable, Dict
 
 from aiogram import BaseMiddleware
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, TelegramObject
 
 from config import get_settings
@@ -67,31 +68,44 @@ class SubscriptionMiddleware(BaseMiddleware):
                 db, user_id, allow_group_anon=True, tenant_id=tid
             )
 
+        async def _call_handler() -> Any:
+            try:
+                return await handler(event, data)
+            except TelegramBadRequest as exc:
+                err_msg = str(exc).lower()
+                if (
+                    "query is too old" in err_msg
+                    or "query id is invalid" in err_msg
+                    or "message is not modified" in err_msg
+                ):
+                    return None
+                raise
+
         data["tenant_id"] = tid
         with tenant_scope(tid):
             # Super Admins always bypass subscription lock
             if user_id and user_id in settings.super_admin_id_list:
-                return await handler(event, data)
+                return await _call_handler()
 
             # Allow essential commands and renewal/export callbacks even when expired
             if isinstance(event, Message):
                 text = (event.text or "").strip()
                 if text.startswith("/start") or text.startswith("/myid"):
-                    return await handler(event, data)
+                    return await _call_handler()
             elif isinstance(event, CallbackQuery):
                 cb_data = event.data or ""
                 if cb_data.startswith("sub:") or cb_data.startswith("export:"):
-                    return await handler(event, data)
+                    return await _call_handler()
 
             if sub_status.is_allowed:
-                return await handler(event, data)
+                return await _call_handler()
 
             # Never expose billing notices inside client Telegram groups
             if chat is not None and chat_type != "private":
                 return None
 
             if not authorized:
-                return await handler(event, data)
+                return await _call_handler()
 
             sub = sub_status.state
             exp_str = format_local_dt(sub.expires_at, "%d.%m.%Y")
