@@ -396,7 +396,12 @@ async def extract_norin_from_image(
         f"{clients_block}"
     )
     if caption:
-        prompt += f"Rasm izohi (caption): {caption}\n\n"
+        prompt += (
+            f"Rasm izohi (caption): {caption}\n"
+            "AGAR rasm izohida (caption) mijoz, do'kon yoki postavshik nomi yozilgan bo'lsa — "
+            "nakladnoy/chekdagi bosma yoki noto'g'ri postavshik/firma nomini E'TIBORSIZ QOLDIRING "
+            "va `client_hint` ga aynan rasm izohidagi nomni yozing!\n\n"
+        )
 
     prompt += (
         "JSON formatda qaytaring:\n"
@@ -418,12 +423,17 @@ async def extract_norin_from_image(
         data = await _call_gemini(parts, kind="image")
     except Exception as exc:
         fallback_items = []
+        cap_cli, cap_hint = extract_caption_client_override(caption, products, clients)
+        fb_client: Optional[str] = cap_cli.name if cap_cli is not None else cap_hint
         if caption:
             parsed_cap = _heuristic_parse_norin_text(caption, products, clients)
-            if parsed_cap and parsed_cap.get("items"):
-                fallback_items = parsed_cap["items"]
+            if parsed_cap:
+                if parsed_cap.get("items"):
+                    fallback_items = parsed_cap["items"]
+                if fb_client is None and parsed_cap.get("client_hint"):
+                    fb_client = parsed_cap["client_hint"]
         return {
-            "client_hint": caption.strip() if caption else None,
+            "client_hint": fb_client,
             "items": fallback_items,
             "is_clear": False,
             "notes": f"Gemini ulanish xatosi: {exc}",
@@ -474,8 +484,14 @@ async def extract_norin_from_image(
                     }
                 )
 
-    # Caption fallback if Gemini missed items or client_hint
+    # Caption explicitly overrides client/postavshik name from nakladnoy if present
     if caption:
+        cap_cli, cap_hint = extract_caption_client_override(caption, products, clients)
+        if cap_cli is not None:
+            client_hint = cap_cli.name
+        elif cap_hint:
+            client_hint = cap_hint
+
         cap_parsed = _heuristic_parse_norin_text(caption, products, clients)
         if cap_parsed:
             if not client_hint and cap_parsed.get("client_hint"):
@@ -492,6 +508,66 @@ async def extract_norin_from_image(
         "is_clear": is_clear,
         "notes": str(data.get("notes") or ""),
     }
+
+
+_CAPTION_FILLER_RE = re.compile(
+    r"(?i)(?<!\w)(?:"
+    r"norin|notin|норин|nakladnoy|накладной|nakladnoi|chek|чек|tarozi|тарози|"
+    r"postavshik|поставщик|postavsik|mijoz|мижоз|do'kon|dokon|doʻkon|shop|"
+    r"berdim|yoz|hisobla|tashla|sotuv|rasm|kg|kilo|kilogramm|кг|кило|ta|dona|"
+    r"yarim|ярим"
+    r")(?!\w)"
+)
+_CAPTION_WEIGHT_UNIT_RE = re.compile(
+    r"(?i)\b\d+(?:[.,]\d+)?(?:\s*\+\s*\d+(?:[.,]\d+)?)*\s*(?:kg|kilo|kilogramm|кг|кило|ta|dona)\b"
+)
+
+
+def extract_caption_client_override(
+    caption: Optional[str],
+    products: Sequence[Product],
+    clients: Sequence[Client],
+) -> tuple[Optional[Client], Optional[str]]:
+    """
+    Extract an explicit client/postavshik override from a photo caption.
+
+    Returns (matched_client, clean_hint):
+    - If caption names an existing client -> (Client, Client.name)
+    - If caption contains an explicit unrecognized client/postavshik name -> (None, name)
+    - If caption only contains weights/products/numbers -> (None, None)
+    """
+    if not caption or not caption.strip():
+        return None, None
+
+    from database.crud import match_client
+
+    cap = caption.strip()
+    matched_name, _ = _find_client_in_text(cap, clients)
+    if matched_name:
+        cli = match_client(matched_name, clients)
+        if cli is not None:
+            return cli, cli.name
+        return None, matched_name
+
+    # Remove weight+unit expressions and product/filler tokens using word boundaries
+    leftover = cap.translate(_UZ_QUOTE_TRANS)
+    leftover = _CAPTION_WEIGHT_UNIT_RE.sub(" ", leftover)
+    product_tokens = _build_product_token_list(products)
+    if product_tokens:
+        prod_alt = "|".join(re.escape(t.translate(_UZ_QUOTE_TRANS)) for t in product_tokens if t)
+        if prod_alt:
+            leftover = re.sub(rf"(?i)(?<!\w)(?:{prod_alt})(?!\w)", " ", leftover)
+    leftover = _CAPTION_FILLER_RE.sub(" ", leftover)
+    leftover = re.sub(r"[+:;,./|]+", " ", leftover)
+    leftover = re.sub(r"\s+", " ", leftover).strip(" -")
+
+    if len(re.findall(r"[A-Za-zА-Яа-яЁёЎўҚқҒғҲҳ]", leftover)) < 2:
+        return None, None
+
+    cli = match_client(leftover, clients)
+    if cli is not None:
+        return cli, cli.name
+    return None, leftover
 
 
 _UZ_QUOTE_TRANS = str.maketrans(

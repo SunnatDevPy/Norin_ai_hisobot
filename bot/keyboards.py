@@ -8,6 +8,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
+    KeyboardButtonRequestUsers,
     ReplyKeyboardMarkup,
 )
 
@@ -147,8 +148,20 @@ def pick_client_for_sale_kb(
     clients: Sequence[Client],
     prefix: str = "sale:setcli",
     page: int = 0,
+    suggested_name: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """Paginated 2-column inline list of clients to bind to a pending/confirmed sale."""
+    rows: list[list[InlineKeyboardButton]] = []
+    if suggested_name and suggested_name.strip() and page <= 0:
+        clean_s = suggested_name.strip()
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"➕ «{clean_s[:22]}» qilib qo'shish",
+                    callback_data=f"sale:newcli_cap:{sale_id}",
+                )
+            ]
+        )
     start = max(0, page) * PAGE_SIZE
     slice_cli = clients[start : start + PAGE_SIZE]
     btns = [
@@ -158,7 +171,7 @@ def pick_client_for_sale_kb(
         )
         for c in slice_cli
     ]
-    rows = _chunk_2col(btns)
+    rows.extend(_chunk_2col(btns))
     nav = _pagination_row(f"sale:pcli:{sale_id}", max(0, page), len(clients))
     if nav:
         rows.append(nav)
@@ -1036,6 +1049,71 @@ def subscription_status_kb() -> InlineKeyboardMarkup:
     )
 
 
+def superadmin_pick_user_reply_kb(request_id: int = 101) -> ReplyKeyboardMarkup:
+    """Native Telegram user-picker button + Cancel so Super Admin picks a user without external ID bots."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="👤 Telegramdan odam tanlash",
+                    request_users=KeyboardButtonRequestUsers(
+                        request_id=request_id,
+                        user_is_bot=False,
+                        max_quantity=1,
+                        request_name=True,
+                        request_username=True,
+                    ),
+                )
+            ],
+            [KeyboardButton(text="❌ Bekor qilish")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def superadmin_default_name_reply_kb(default_label: str = "") -> ReplyKeyboardMarkup:
+    """Reply keyboard offering 1-tap acceptance of Telegram's picked profile name or Cancel."""
+    rows: list[list[KeyboardButton]] = []
+    clean = (default_label or "").strip()
+    if clean:
+        rows.append([KeyboardButton(text=f"✅ {clean[:40]}")])
+    rows.append([KeyboardButton(text="❌ Bekor qilish")])
+    return ReplyKeyboardMarkup(
+        keyboard=rows,
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def superadmin_quick_menu_kb(tenant_id: int, tenant_count: int) -> InlineKeyboardMarkup:
+    """Fast command dashboard (/menu) visible strictly to Super Admin."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="👑 Super Admin Panel", callback_data="sa:menu"),
+                InlineKeyboardButton(text=f"🏢 Filiallar ({tenant_count} ta)", callback_data="sa:tenants"),
+            ],
+            [
+                InlineKeyboardButton(text="🆕 Yangi mijoz + Filial", callback_data="sa:add_user_new"),
+                InlineKeyboardButton(text="🔗 Filialga odam bog'lash", callback_data="sa:add_user"),
+            ],
+            [
+                InlineKeyboardButton(text=f"⚙️ Filial sozlamalari (#{tenant_id})", callback_data="sa:settings"),
+                InlineKeyboardButton(text=f"👥 Filial odamlari (#{tenant_id})", callback_data="sa:users"),
+            ],
+            [
+                InlineKeyboardButton(text=f"➕ +30 kun (#{tenant_id})", callback_data="sa:ext:30"),
+                InlineKeyboardButton(text="📢 Barchaga e'lon", callback_data="sa:broadcast"),
+            ],
+            [
+                InlineKeyboardButton(text="📊 Kunlik hisobot", callback_data="rep:today"),
+                InlineKeyboardButton(text=f"🧹 Bazani tozalash (#{tenant_id})", callback_data="sa:clear_menu"),
+            ],
+        ]
+    )
+
+
 def superadmin_menu_kb(
     is_suspended: bool,
     tenant_label: str = "Filiallar",
@@ -1050,7 +1128,11 @@ def superadmin_menu_kb(
     rows = [
         [
             InlineKeyboardButton(text=f"🏢 {tenant_label}", callback_data="sa:tenants"),
-            InlineKeyboardButton(text="➕ Yangi mijoz (Filial)", callback_data="sa:add_user_new"),
+            InlineKeyboardButton(text="🆕 Yangi mijoz + Filial", callback_data="sa:add_user_new"),
+        ],
+        [
+            InlineKeyboardButton(text="👥 Odamlari / Bog'lash", callback_data="sa:users"),
+            InlineKeyboardButton(text="⚙️ Filial sozlamalari", callback_data="sa:settings"),
         ],
         [
             InlineKeyboardButton(text="➕ +7 kun", callback_data="sa:ext:7"),
@@ -1058,28 +1140,54 @@ def superadmin_menu_kb(
             InlineKeyboardButton(text="➕ +90 kun", callback_data="sa:ext:90"),
         ],
         [
-            InlineKeyboardButton(text="🗓 Boshqa kun qo'shish", callback_data="sa:ext_custom"),
-            InlineKeyboardButton(text="💳 Oylik narx", callback_data="sa:edit_price"),
-        ],
-        [
-            InlineKeyboardButton(text="🏢 Sex nomi", callback_data="sa:edit_tenant"),
-            InlineKeyboardButton(text="📞 Kontakt", callback_data="sa:edit_contact"),
-        ],
-        [
-            InlineKeyboardButton(text="👥 Xodim/Mijozlar", callback_data="sa:users"),
+            InlineKeyboardButton(text="🗓 Boshqa kun", callback_data="sa:ext_custom"),
             InlineKeyboardButton(text="📜 To'lovlar tarixi", callback_data="sa:payments"),
         ],
         [
             suspend_btn,
-            InlineKeyboardButton(text="🔔 Eslatma yuborish", callback_data="sa:send_reminder"),
+            InlineKeyboardButton(text="🔔 Eslatma", callback_data="sa:send_reminder"),
         ],
         [
+            InlineKeyboardButton(text="📢 Barchaga e'lon", callback_data="sa:broadcast"),
             InlineKeyboardButton(
                 text=f"🧹 Bazani tozalash (#{tenant_id})",
                 callback_data="sa:clear_menu",
             ),
-            InlineKeyboardButton(text="📢 Barchaga e'lon", callback_data="sa:broadcast"),
         ],
+        [InlineKeyboardButton(text="⬅️ Sozlamalar", callback_data="set:back")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def superadmin_tenant_settings_kb(
+    tenant_id: int,
+    auto_confirm: bool,
+    group_auto_calc: bool,
+    round_mode: str,
+) -> InlineKeyboardMarkup:
+    """Per-tenant subscription & automation settings for Super Admin."""
+    auto_lbl = f"⚡ DM Avto: {'✅ ON' if auto_confirm else '❌ OFF'}"
+    grp_lbl = f"👥 Guruh Avto: {'✅ ON' if group_auto_calc else '❌ OFF'}"
+    round_lbl = {
+        "nearest_1000": "🔢 Yaxlitlash: Yaqin 1 000",
+        "floor_1000": "🔢 Yaxlitlash: Pastga 1 000",
+        "none": "🔢 Yaxlitlash: Aniq (Yo'q)",
+    }.get(round_mode, f"🔢 Yaxlitlash: {round_mode}")
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(text="🏢 Filial nomi", callback_data="sa:edit_tenant"),
+            InlineKeyboardButton(text="📦 Tarif nomi", callback_data="sa:edit_plan"),
+        ],
+        [
+            InlineKeyboardButton(text="💳 Oylik narx", callback_data="sa:edit_price"),
+            InlineKeyboardButton(text="⏳ Grace kunlari", callback_data="sa:edit_grace"),
+        ],
+        [InlineKeyboardButton(text="📞 Aloqa kontakti", callback_data="sa:edit_contact")],
+        [
+            InlineKeyboardButton(text=auto_lbl, callback_data="sa:ten_toggle:auto_confirm"),
+            InlineKeyboardButton(text=grp_lbl, callback_data="sa:ten_toggle:group_auto_calc"),
+        ],
+        [InlineKeyboardButton(text=round_lbl, callback_data="sa:ten_toggle:round_mode")],
     ]
     if tenant_id != 1:
         rows.append(
@@ -1090,7 +1198,37 @@ def superadmin_menu_kb(
                 )
             ]
         )
-    rows.append([InlineKeyboardButton(text="⬅️ Sozlamalar", callback_data="set:back")])
+    rows.append([InlineKeyboardButton(text="⬅️ Super Admin", callback_data="sa:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def superadmin_user_detail_kb(
+    tg_id: int,
+    current_role: str,
+    tenants: Sequence[SubscriptionState],
+    current_tid: int,
+) -> InlineKeyboardMarkup:
+    """Manage a single AuthorizedUser: toggle role, move across tenants, or delete."""
+    role_lbl = (
+        "🔄 Rol: 👑 Admin → 👤 Xodim"
+        if current_role == "owner"
+        else "🔄 Rol: 👤 Xodim → 👑 Admin"
+    )
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text=role_lbl, callback_data=f"sa:user_role:{tg_id}")],
+    ]
+    other_tenants = [t for t in tenants if t.id != current_tid][:8]
+    if other_tenants:
+        move_btns = [
+            InlineKeyboardButton(
+                text=f"➡️ #{t.id} {t.tenant_name[:18]}",
+                callback_data=f"sa:user_move:{tg_id}:{t.id}",
+            )
+            for t in other_tenants
+        ]
+        rows.extend(_chunk_2col(move_btns))
+    rows.append([InlineKeyboardButton(text="🗑 Filialdan o'chirish", callback_data=f"sa:del_user:{tg_id}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Odamlari ro'yxati", callback_data="sa:users")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1148,30 +1286,31 @@ def superadmin_clear_confirm_kb() -> InlineKeyboardMarkup:
 def superadmin_users_kb(
     users: Sequence[AuthorizedUser], tenant_id: int = 1
 ) -> InlineKeyboardMarkup:
-    """AuthorizedUser list for the selected tenant with add/remove buttons."""
+    """AuthorizedUser list for the selected tenant with inspect/bind/add buttons."""
     rows = []
     for u in users:
+        role_icon = "👑" if u.role == "owner" else "👤"
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"🗑 {u.full_name} ({u.telegram_id})",
-                    callback_data=f"sa:del_user:{u.telegram_id}",
+                    text=f"{role_icon} {u.full_name} ({u.telegram_id})",
+                    callback_data=f"sa:user_info:{u.telegram_id}",
                 )
             ]
         )
     rows.append(
         [
             InlineKeyboardButton(
-                text="🆕 Yangi mijoz + yangi filial",
-                callback_data="sa:add_user_new",
+                text=f"🔗 Shu filialga odam bog'lash (#{tenant_id})",
+                callback_data="sa:add_user",
             ),
         ]
     )
     rows.append(
         [
             InlineKeyboardButton(
-                text=f"➕ Shu filialga xodim (#{tenant_id})",
-                callback_data="sa:add_user",
+                text="🆕 Yangi mijoz + yangi filial",
+                callback_data="sa:add_user_new",
             ),
             InlineKeyboardButton(text="⬅️ Super Admin", callback_data="sa:menu"),
         ]

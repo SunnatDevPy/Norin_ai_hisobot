@@ -29,10 +29,12 @@ from database.crud import (
     extend_subscription,
     get_ai_usage_summary,
     get_app_setting,
+    get_authorized_user,
     get_cash_transaction,
     get_or_create_open_session,
     get_period_excel_data,
     get_raw_app_setting,
+    get_tenant_overview_stats,
     infer_expense_category,
     is_user_authorized,
     list_all_broadcast_recipients,
@@ -46,6 +48,7 @@ from database.crud import (
     match_client,
     match_product,
     now_utc,
+    reassign_authorized_user,
     remove_authorized_user,
     reopen_cash_session,
     reset_full_database,
@@ -824,5 +827,99 @@ def test_excel_exports_formulas_full_akt_sverka_and_no_cost_leak(tmp_path: Path)
         period_bytes = build_period_excel(pdata)
         wb_period = load_workbook(io.BytesIO(period_bytes), data_only=False)
         assert len(wb_period.sheetnames) == 4
+
+    asyncio.run(_run_with_db(tmp_path, _logic))
+
+
+def test_caption_client_override_postavshik_and_weight_safety(tmp_path: Path):
+    """Verify photo caption overrides wrong nakladnoy postavshik without false-matching product tokens."""
+    from services.gemini_ai import extract_caption_client_override
+
+    async def _logic(db):
+        prods = await list_products(db)
+        c_ift = await create_client(db, "Iftiqor", aliases="iftiqor 80")
+        c_oka = await create_client(db, "OKA GO'SHT", aliases="oka gosht")
+        await create_client(db, "Otabek")
+
+        # Existing client in caption -> resolves exact Client
+        cli, hint = extract_caption_client_override("Iftiqor", prods, [c_ift, c_oka])
+        assert cli is not None and cli.id == c_ift.id and hint == "Iftiqor"
+
+        cli2, hint2 = extract_caption_client_override("Postavshik: oka gosht", prods, [c_ift, c_oka])
+        assert cli2 is not None and cli2.id == c_oka.id and hint2 == c_oka.name
+
+        # Product/weight-only caption MUST NOT false-match client "Otabek" via "ot"
+        all_clis = await list_clients(db)
+        cli_w, hint_w = extract_caption_client_override("ot 25 kg", prods, all_clis)
+        assert cli_w is None and hint_w is None
+
+        cli_m, hint_m = extract_caption_client_override("mol go'shti 12 yarim kg", prods, all_clis)
+        assert cli_m is None and hint_m is None
+
+        # Explicit new postavshik name returns (None, clean_name) for 1-tap creation
+        cli_new, hint_new = extract_caption_client_override("Postavshik: Sardor Bozor", prods, all_clis)
+        assert cli_new is None and hint_new == "Sardor Bozor"
+
+    asyncio.run(_run_with_db(tmp_path, _logic))
+
+
+def test_superadmin_user_reassign_settings_and_keyboards(tmp_path: Path):
+    """Verify tenant settings updates, user reassignment/stats, and SA picker/menu keyboards."""
+    from bot.keyboards import (
+        pick_client_for_sale_kb,
+        superadmin_pick_user_reply_kb,
+        superadmin_quick_menu_kb,
+        superadmin_tenant_settings_kb,
+    )
+
+    async def _logic(db):
+        u = await add_authorized_user(
+            db,
+            telegram_id=777000111,
+            full_name="Sardor",
+            role="owner",
+            create_new_tenant=True,
+            new_tenant_name="Chorsu Sexi",
+        )
+        assert u.tenant_id == 2
+
+        sub2 = await update_subscription_settings(
+            db, plan_name="VIP", grace_days=5, tenant_id=2
+        )
+        assert sub2.plan_name == "VIP" and sub2.grace_days == 5
+
+        found = await get_authorized_user(db, 777000111)
+        assert found is not None and found.tenant_id == 2
+
+        with tenant_scope(2):
+            cli = await create_client(db, "Bozor-1")
+            await bind_client_group(db, cli.id, -100777888, "Bozor Group")
+            prods = await list_products(db)
+            sale = await create_pending_sale(
+                db, client_id=cli.id, items_spec=[{"product_id": prods[0].id, "weight_kg": 4.0}]
+            )
+            await confirm_sale(db, sale.id)
+
+        stats = await get_tenant_overview_stats(db, 2)
+        assert stats["users"] == 1
+        assert stats["clients"] == 1
+        assert stats["groups"] == 1
+        assert stats["sales"] == 1
+
+        moved = await reassign_authorized_user(db, 777000111, 1, role="staff")
+        assert moved is not None and moved.tenant_id == 1 and moved.role == "staff"
+
+        pick_kb = superadmin_pick_user_reply_kb(request_id=101)
+        req = pick_kb.keyboard[0][0].request_users
+        assert req is not None and req.request_id == 101 and req.user_is_bot is False and req.request_name is True
+
+        q_kb = superadmin_quick_menu_kb(2, 2)
+        assert any(btn.callback_data == "sa:settings" for row in q_kb.inline_keyboard for btn in row)
+
+        ts_kb = superadmin_tenant_settings_kb(2, True, False, "nearest_1000")
+        assert any(btn.callback_data == "sa:edit_plan" for row in ts_kb.inline_keyboard for btn in row)
+
+        sale_kb = pick_client_for_sale_kb(99, [cli], suggested_name="Sardor Bozor")
+        assert sale_kb.inline_keyboard[0][0].callback_data == "sale:newcli_cap:99"
 
     asyncio.run(_run_with_db(tmp_path, _logic))

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+from typing import Optional
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -18,9 +19,14 @@ from bot.keyboards import (
     main_menu_keyboard,
     subscription_status_kb,
     superadmin_clear_confirm_kb,
+    superadmin_default_name_reply_kb,
     superadmin_menu_kb,
+    superadmin_pick_user_reply_kb,
+    superadmin_quick_menu_kb,
     superadmin_renewal_request_kb,
+    superadmin_tenant_settings_kb,
     superadmin_tenants_kb,
+    superadmin_user_detail_kb,
     superadmin_users_kb,
 )
 from bot.states import SuperAdminStates
@@ -33,17 +39,23 @@ from database.crud import (
     extend_subscription,
     format_local_dt,
     get_ai_usage_summary,
+    get_app_setting,
+    get_authorized_user,
     get_raw_app_setting,
+    get_tenant_overview_stats,
     is_user_authorized,
     list_all_broadcast_recipients,
     list_authorized_users,
     list_subscription_payments,
     list_tenants,
+    reassign_authorized_user,
     remove_authorized_user,
     reset_full_database,
     reset_test_transactions,
     resolve_user_tenant_id,
+    set_app_setting,
     set_raw_app_setting,
+    tenant_scope,
     update_subscription_settings,
 )
 from database.session import async_session_maker
@@ -117,6 +129,7 @@ async def _render_superadmin_dashboard(tenant_id: int = 1) -> tuple[str, bool, i
         sub = sub_status.state
         users = await list_authorized_users(db, active_only=True, tenant_id=sub.id)
         ai_usage = await get_ai_usage_summary(db, days=30, tenant_id=sub.id)
+        stats = await get_tenant_overview_stats(db, sub.id)
     exp_str = format_local_dt(sub.expires_at, "%d.%m.%Y %H:%M")
 
     status_map = {
@@ -144,6 +157,7 @@ async def _render_superadmin_dashboard(tenant_id: int = 1) -> tuple[str, bool, i
         f"⏳ Imtiyoz (Grace): <b>{sub.grace_days} kun</b>\n"
         f"📌 Holat: <b>{status_map.get(sub_status.status, sub_status.status)}</b>\n"
         f"📞 Kontakt: <b>{html.escape(sub.owner_contact)}</b>\n"
+        f"📊 Baza: <b>{stats['clients']}</b> mijoz (guruh: <b>{stats['groups']}</b>) | <b>{stats['sales']}</b> sotuv | <b>{stats['products']}</b> mahsulot\n"
         f"🤖 AI (30 kun): rasm <b>{ai_usage['image_calls']}</b> | ovoz <b>{ai_usage['audio_calls']}</b> | token: <b>{format_uzs(ai_usage['total_tokens'])}</b>\n"
         "-------------------------------"
         f"{env_line}\n"
@@ -279,7 +293,30 @@ async def cancel_superadmin_or_any_state(message: Message, state: FSMContext) ->
         await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
-@router.message(Command("superadmin"), F.chat.type == "private")
+@router.message(Command("menu"), F.chat.type == "private")
+async def cmd_superadmin_quick_menu(message: Message, state: FSMContext) -> None:
+    """Quick command dashboard visible STRICTLY to Super Admin (silent no-op for everyone else)."""
+    uid = message.from_user.id if message.from_user else None
+    if not is_super_admin(uid):
+        return
+    await state.clear()
+    tid = await _get_sa_tenant(uid)
+    async with async_session_maker() as db:
+        tenants = await list_tenants(db)
+        sub_status = await evaluate_subscription_status(db, tenant_id=tid)
+    sub = sub_status.state
+    if sub.id != tid:
+        await _set_sa_tenant(uid, sub.id)
+    await message.answer(
+        "⚡ <b>SUPER ADMIN TEZKOR MENYUSI</b>\n"
+        f"🎯 Tanlangan filial: <b>#{sub.id} {html.escape(sub.tenant_name)}</b> (Jami: <b>{len(tenants)} ta</b>)\n"
+        "Kerakli tezkor amalni tanlang:",
+        parse_mode="HTML",
+        reply_markup=superadmin_quick_menu_kb(sub.id, len(tenants)),
+    )
+
+
+@router.message(Command("superadmin", "supaeradmin"), F.chat.type == "private")
 async def cmd_superadmin(message: Message, state: FSMContext) -> None:
     """Open Super Admin subscription control panel."""
     uid = message.from_user.id if message.from_user else None
@@ -381,6 +418,20 @@ async def process_superadmin_new_tenant(message: Message, state: FSMContext) -> 
         f"✅ Yangi filial yaratildi: <b>#{sub.id} {html.escape(sub.tenant_name)}</b>!",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
+    )
+    await message.answer(
+        f"👤 Endi <b>#{sub.id} {html.escape(sub.tenant_name)}</b> filialiga egasini/xodimni Telegramdan tanlab bog'laysizmi?",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔗 Shu filialga odam bog'lash (Telegramdan tanlash)",
+                        callback_data="sa:add_user",
+                    )
+                ]
+            ]
+        ),
     )
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
@@ -582,6 +633,166 @@ async def process_superadmin_contact(message: Message, state: FSMContext) -> Non
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
+async def _render_tenant_settings_view(tenant_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    """Render Super Admin settings screen for the currently selected tenant."""
+    async with async_session_maker() as db:
+        sub_status = await evaluate_subscription_status(db, tenant_id=tenant_id)
+        sub = sub_status.state
+        stats = await get_tenant_overview_stats(db, sub.id)
+        with tenant_scope(sub.id):
+            auto_confirm = (await get_app_setting(db, "auto_confirm", "on")) == "on"
+            group_auto = (await get_app_setting(db, "group_auto_calc", "on")) == "on"
+            round_mode = await get_app_setting(db, "round_mode", "none")
+
+    round_desc = {
+        "nearest_1000": "Eng yaqin 1 000 so'm",
+        "floor_1000": "1 000 so'm pastga",
+        "none": "Yaxlitlamaslik (aniq)",
+    }.get(round_mode, round_mode)
+    text = (
+        f"⚙️ <b>FILIAL SOZLAMALARI — #{sub.id} {html.escape(sub.tenant_name)}</b>\n"
+        "===============================\n"
+        f"🏢 Filial nomi: <b>{html.escape(sub.tenant_name)}</b>\n"
+        f"📦 Tarif: <b>{html.escape(sub.plan_name)}</b>\n"
+        f"💳 Oylik narx: <b>{format_uzs(sub.monthly_price)} so'm</b>\n"
+        f"⏳ Imtiyoz (Grace): <b>{sub.grace_days} kun</b>\n"
+        f"📞 Aloqa kontakti: <b>{html.escape(sub.owner_contact)}</b>\n"
+        "-------------------------------\n"
+        f"⚡ DM Avto-tasdiq: <b>{'✅ Yoqilgan' if auto_confirm else '❌ O‘chiq'}</b>\n"
+        f"👥 Guruhda Avto-hisob: <b>{'✅ Yoqilgan' if group_auto else '❌ O‘chiq'}</b>\n"
+        f"🔢 Summa yaxlitlash: <b>{round_desc}</b>\n"
+        "-------------------------------\n"
+        f"📊 Xodim: <b>{stats['users']}</b> | Mijoz: <b>{stats['clients']}</b> (guruh: <b>{stats['groups']}</b>) | Sotuv: <b>{stats['sales']}</b>"
+    )
+    kb = superadmin_tenant_settings_kb(sub.id, auto_confirm, group_auto, round_mode)
+    return text, kb
+
+
+@router.callback_query(F.data == "sa:settings")
+async def cb_superadmin_tenant_settings(cb: CallbackQuery, state: FSMContext) -> None:
+    uid = cb.from_user.id if cb.from_user else None
+    if not is_super_admin(uid):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    await state.clear()
+    tid = await _get_sa_tenant(uid)
+    text, kb = await _render_tenant_settings_view(tid)
+    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data == "sa:edit_plan")
+async def cb_superadmin_edit_plan(cb: CallbackQuery, state: FSMContext) -> None:
+    if not is_super_admin(cb.from_user.id if cb.from_user else None):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    await state.set_state(SuperAdminStates.waiting_plan_name)
+    await cb.message.answer(
+        "📦 Yangi tarif nomini kiriting (masalan: <code>Pro Oylik</code> yoki <code>VIP</code>):",
+        parse_mode="HTML",
+        reply_markup=cancel_reply_keyboard(),
+    )
+    await cb.answer()
+
+
+@router.message(
+    SuperAdminStates.waiting_plan_name,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
+async def process_superadmin_plan_name(message: Message, state: FSMContext) -> None:
+    uid = message.from_user.id if message.from_user else None
+    if not is_super_admin(uid):
+        return
+    plan = (message.text or "").strip()
+    if not plan:
+        await message.answer("⚠️ Tarif nomini kiriting:")
+        return
+    tid = await _get_sa_tenant(uid)
+    async with async_session_maker() as db:
+        await update_subscription_settings(db, plan_name=plan, tenant_id=tid)
+    await state.clear()
+    text, kb = await _render_tenant_settings_view(tid)
+    await message.answer(
+        f"✅ Tarif nomi yangilandi: <b>{html.escape(plan)}</b>",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
+    )
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
+@router.callback_query(F.data == "sa:edit_grace")
+async def cb_superadmin_edit_grace(cb: CallbackQuery, state: FSMContext) -> None:
+    if not is_super_admin(cb.from_user.id if cb.from_user else None):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    await state.set_state(SuperAdminStates.waiting_grace_days)
+    await cb.message.answer(
+        "⏳ Imtiyoz (Grace) kunlari sonini kiriting (<code>0</code> dan <code>60</code> gacha):",
+        parse_mode="HTML",
+        reply_markup=cancel_reply_keyboard(),
+    )
+    await cb.answer()
+
+
+@router.message(
+    SuperAdminStates.waiting_grace_days,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
+async def process_superadmin_grace_days(message: Message, state: FSMContext) -> None:
+    uid = message.from_user.id if message.from_user else None
+    if not is_super_admin(uid):
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or not (0 <= int(raw) <= 60):
+        await message.answer("⚠️ 0 dan 60 gacha butun son kiriting:")
+        return
+    grace = int(raw)
+    tid = await _get_sa_tenant(uid)
+    async with async_session_maker() as db:
+        await update_subscription_settings(db, grace_days=grace, tenant_id=tid)
+    await state.clear()
+    text, kb = await _render_tenant_settings_view(tid)
+    await message.answer(
+        f"✅ Imtiyoz davri yangilandi: <b>{grace} kun</b>",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
+    )
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("sa:ten_toggle:"))
+async def cb_superadmin_tenant_toggle(cb: CallbackQuery) -> None:
+    uid = cb.from_user.id if cb.from_user else None
+    if not is_super_admin(uid):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    key = cb.data.split(":")[-1]
+    tid = await _get_sa_tenant(uid)
+    async with async_session_maker() as db:
+        with tenant_scope(tid):
+            if key in ("auto_confirm", "group_auto_calc"):
+                cur = await get_app_setting(db, key, "on")
+                await set_app_setting(db, key, "off" if cur == "on" else "on")
+            elif key == "round_mode":
+                cur = await get_app_setting(db, "round_mode", "none")
+                cycle = {"none": "nearest_1000", "nearest_1000": "floor_1000", "floor_1000": "none"}
+                await set_app_setting(db, "round_mode", cycle.get(cur, "none"))
+            else:
+                await cb.answer("Noma'lum sozlama")
+                return
+    text, kb = await _render_tenant_settings_view(tid)
+    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer("✅ Sozlama saqlandi!")
+
+
 @router.callback_query(F.data == "sa:toggle_suspend")
 async def cb_superadmin_toggle_suspend(cb: CallbackQuery) -> None:
     uid = cb.from_user.id if cb.from_user else None
@@ -617,13 +828,309 @@ async def cb_superadmin_users(cb: CallbackQuery) -> None:
     await cb.message.edit_text(
         f"👥 <b>#{sub_status.state.id} {html.escape(sub_status.state.tenant_name)} — Foydalanuvchilar</b>\n\n"
         f"{env_block}"
-        "• Shu filialga biriktirilgan ID lar (o'chirish uchun ustiga bosing):\n"
-        "• Yangi buyurtmachi qo'shish uchun <b>«🆕 Yangi mijoz + yangi filial»</b> ni bosing — unga alohida toza baza ochiladi.\n"
-        "<i>Foydalanuvchi o'z ID sini bilish uchun botga /myid yozishi kifoya.</i>",
+        "• Foydalanuvchini boshqarish (rol, boshqa filialga ko'chirish, o'chirish) uchun ustiga bosing.\n"
+        "• Telegramdan odam tanlab bog'lash uchun pastdagi <b>«🔗 Shu filialga odam bog'lash»</b> yoki <b>«🆕 Yangi mijoz + yangi filial»</b> ni bosing.",
         parse_mode="HTML",
         reply_markup=superadmin_users_kb(users, tenant_id=sub_status.state.id),
     )
     await cb.answer()
+
+
+async def _render_user_detail_view(tg_id: int) -> Optional[tuple[str, InlineKeyboardMarkup]]:
+    async with async_session_maker() as db:
+        user = await get_authorized_user(db, tg_id)
+        if user is None:
+            return None
+        tenants = await list_tenants(db)
+        sub_status = await evaluate_subscription_status(db, tenant_id=user.tenant_id)
+    role_lbl = "👑 Filial Admini (owner)" if user.role == "owner" else "👤 Xodim (staff)"
+    text = (
+        "👤 <b>FOYDALANUVCHI PROFILI</b>\n"
+        "===============================\n"
+        f"• Ism: <b>{html.escape(user.full_name)}</b>\n"
+        f"• Telegram ID: <code>{user.telegram_id}</code>\n"
+        f"• Rol: <b>{role_lbl}</b>\n"
+        f"• Filial: <b>#{sub_status.state.id} {html.escape(sub_status.state.tenant_name)}</b>\n\n"
+        "Rolni o'zgartirishingiz, boshqa filialga ko'chirishingiz yoki o'chirishingiz mumkin:"
+    )
+    kb = superadmin_user_detail_kb(user.telegram_id, user.role, tenants, user.tenant_id)
+    return text, kb
+
+
+@router.callback_query(F.data.startswith("sa:user_info:"))
+async def cb_superadmin_user_info(cb: CallbackQuery) -> None:
+    if not is_super_admin(cb.from_user.id if cb.from_user else None):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    tg_id = int(cb.data.split(":")[-1])
+    res = await _render_user_detail_view(tg_id)
+    if not res:
+        await cb.answer("Foydalanuvchi topilmadi", show_alert=True)
+        return
+    text, kb = res
+    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("sa:user_role:"))
+async def cb_superadmin_user_role(cb: CallbackQuery) -> None:
+    if not is_super_admin(cb.from_user.id if cb.from_user else None):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    tg_id = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        user = await get_authorized_user(db, tg_id)
+        if user is None:
+            await cb.answer("Foydalanuvchi topilmadi", show_alert=True)
+            return
+        new_role = "staff" if user.role == "owner" else "owner"
+        await reassign_authorized_user(db, tg_id, user.tenant_id, role=new_role)
+    res = await _render_user_detail_view(tg_id)
+    if res:
+        text, kb = res
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer("✅ Rol yangilandi!")
+
+
+@router.callback_query(F.data.startswith("sa:user_move:"))
+async def cb_superadmin_user_move(cb: CallbackQuery) -> None:
+    uid = cb.from_user.id if cb.from_user else None
+    if not is_super_admin(uid):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    parts = cb.data.split(":")
+    tg_id = int(parts[2])
+    target_tid = int(parts[3])
+    async with async_session_maker() as db:
+        moved = await reassign_authorized_user(db, tg_id, target_tid)
+    if not moved:
+        await cb.answer("Ko'chirib bo'lmadi", show_alert=True)
+        return
+    await _set_sa_tenant(uid, target_tid)
+    res = await _render_user_detail_view(tg_id)
+    if res:
+        text, kb = res
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer(f"✅ Filial #{target_tid} ga ko'chirildi!")
+
+
+_SA_PICK_USER_FILTER = (
+    F.users_shared
+    | F.user_shared
+    | F.forward_origin
+    | F.forward_from
+    | (
+        F.text
+        & ~F.text.startswith("/")
+        & ~F.text.in_(MAIN_MENU_BUTTONS)
+        & (F.text != "❌ Bekor qilish")
+    )
+)
+
+
+def _extract_picked_user(message: Message) -> tuple[Optional[int], str, str, bool]:
+    """
+    Extract (telegram_id, full_name, username, is_hidden_forward) from:
+    - Telegram native user picker (`users_shared` / `user_shared`)
+    - Forwarded message (`forward_origin` / `forward_from`)
+    - Manual numeric ID in `message.text`
+    """
+    if getattr(message, "users_shared", None):
+        shared = message.users_shared
+        if getattr(shared, "users", None):
+            u = shared.users[0]
+            name = " ".join(
+                x for x in (getattr(u, "first_name", None) or "", getattr(u, "last_name", None) or "") if x
+            ).strip()
+            uname = f"@{u.username}" if getattr(u, "username", None) else ""
+            return int(u.user_id), name, uname, False
+        if getattr(shared, "user_ids", None):
+            return int(shared.user_ids[0]), "", "", False
+
+    if getattr(message, "user_shared", None):
+        return int(message.user_shared.user_id), "", "", False
+
+    origin = getattr(message, "forward_origin", None)
+    if origin is not None:
+        sender = getattr(origin, "sender_user", None)
+        if sender is not None:
+            uname = f"@{sender.username}" if getattr(sender, "username", None) else ""
+            return int(sender.id), (sender.full_name or "").strip(), uname, False
+        return None, "", "", True
+
+    fwd = getattr(message, "forward_from", None)
+    if fwd is not None:
+        uname = f"@{fwd.username}" if getattr(fwd, "username", None) else ""
+        return int(fwd.id), (fwd.full_name or "").strip(), uname, False
+
+    raw = (message.text or "").strip()
+    if raw:
+        first = raw.split(maxsplit=1)[0]
+        if first.lstrip("-").isdigit():
+            return int(first), "", "", False
+
+    return None, "", "", False
+
+
+async def _finalize_sa_user_binding(
+    message: Message,
+    state: FSMContext,
+    sa_uid: int | None,
+    tg_id: int,
+    full_name: str,
+    mode: str,
+    target_tid: int,
+    custom_tenant: str = "",
+) -> None:
+    """Create new tenant or bind user to target_tid, send welcome DM, and show confirmation."""
+    await state.clear()
+    async with async_session_maker() as db:
+        if mode == "new_tenant":
+            user = await add_authorized_user(
+                db,
+                telegram_id=tg_id,
+                full_name=full_name,
+                role="owner",
+                create_new_tenant=True,
+                new_tenant_name=custom_tenant or None,
+            )
+            final_tid = user.tenant_id
+        else:
+            user = await add_authorized_user(
+                db,
+                telegram_id=tg_id,
+                full_name=full_name,
+                role="staff",
+                tenant_id=target_tid,
+            )
+            final_tid = user.tenant_id
+        sub_status = await evaluate_subscription_status(db, tenant_id=final_tid)
+        users = await list_authorized_users(db, active_only=True, tenant_id=final_tid)
+
+    await _set_sa_tenant(sa_uid, final_tid)
+    try:
+        await message.bot.send_message(
+            chat_id=tg_id,
+            text=(
+                "🎉 <b>Norin AI Hisobot botiga xush kelibsiz!</b>\n\n"
+                f"🏢 Siz <b>#{final_tid} {html.escape(sub_status.state.tenant_name)}</b> filialiga ulandingiz.\n"
+                "Boshlash uchun /start tugmasini bosing 👇"
+            ),
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
+    except Exception as exc:
+        logger.info("Welcome DM not delivered to %s: %s", tg_id, exc)
+
+    title_msg = (
+        "✅ <b>Yangi mijoz va alohida baza (Filial) ochildi!</b>\n\n"
+        if mode == "new_tenant"
+        else f"✅ <b>Foydalanuvchi #{final_tid} filialiga bog'landi!</b>\n\n"
+    )
+    await message.answer(
+        f"{title_msg}"
+        f"👤 Foydalanuvchi: <b>{html.escape(user.full_name)}</b> (<code>{tg_id}</code>)\n"
+        f"🏢 Filial: <b>#{final_tid} {html.escape(sub_status.state.tenant_name)}</b>\n"
+        "<i>U /start bosganda faqat shu filial bazasini ko'radi.</i>",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
+    )
+    await message.answer(
+        f"👥 <b>#{final_tid} {html.escape(sub_status.state.tenant_name)}</b> odamlari:",
+        parse_mode="HTML",
+        reply_markup=superadmin_users_kb(users, tenant_id=final_tid),
+    )
+
+
+async def _handle_picked_user_step(
+    message: Message, state: FSMContext, mode: str
+) -> None:
+    uid = message.from_user.id if message.from_user else None
+    if not is_super_admin(uid):
+        return
+
+    tg_id, picked_name, picked_uname, is_hidden = _extract_picked_user(message)
+    if is_hidden:
+        await message.answer(
+            "🔒 Bu foydalanuvchining profiling yopiq (forward yashirilgan).\n"
+            "Pastdagi <b>«👤 Telegramdan odam tanlash»</b> tugmasini bosing — Telegram ID ni o'zi chiqaradi:",
+            parse_mode="HTML",
+        )
+        return
+    if tg_id is None:
+        await message.answer(
+            "⚠️ Pastdagi <b>«👤 Telegramdan odam tanlash»</b> tugmasini bosing, xabar forward qiling "
+            "yoki ID yozing (masalan: <code>123456789 Sardor | Chorsu</code>):",
+            parse_mode="HTML",
+        )
+        return
+    if tg_id in get_settings().super_admin_id_list:
+        await message.answer(
+            "⚠️ Bu ID Super Admin sifatida Test Filial (#1) ga biriktirilgan.",
+            reply_markup=main_menu_keyboard(),
+        )
+        await state.clear()
+        return
+
+    # 1-line text shortcut backward compatibility: "123456789 Sardor" or "123456789 Sardor | Chorsu"
+    is_picker_or_fwd = bool(
+        getattr(message, "users_shared", None)
+        or getattr(message, "user_shared", None)
+        or getattr(message, "forward_origin", None)
+        or getattr(message, "forward_from", None)
+    )
+    if not is_picker_or_fwd and message.text:
+        parts = message.text.strip().split(maxsplit=1)
+        if len(parts) > 1 and parts[1].strip():
+            rest = parts[1].strip()
+            if mode == "new_tenant" and "|" in rest:
+                full_name, custom_tenant = (x.strip() for x in rest.split("|", 1))
+                full_name = full_name or f"Mijoz {tg_id}"
+            else:
+                full_name = rest
+                custom_tenant = ""
+            target_tid = 0 if mode == "new_tenant" else await _get_sa_tenant(uid)
+            await _finalize_sa_user_binding(
+                message, state, uid, tg_id, full_name, mode, target_tid, custom_tenant
+            )
+            return
+
+    target_tid = 0 if mode == "new_tenant" else await _get_sa_tenant(uid)
+    existing_note = ""
+    async with async_session_maker() as db:
+        existing = await get_authorized_user(db, tg_id)
+        if existing is not None:
+            ex_sub = await evaluate_subscription_status(db, tenant_id=existing.tenant_id)
+            existing_note = (
+                f"\n⚠️ <i>Bu ID avval <b>#{existing.tenant_id} {html.escape(ex_sub.state.tenant_name)}</b> "
+                "filialiga biriktirilgan — davom etsangiz ko'chiriladi.</i>"
+            )
+
+    await state.set_state(SuperAdminStates.waiting_add_user_name)
+    await state.update_data(
+        picked_tg_id=tg_id,
+        picked_tg_name=picked_name,
+        picked_uname=picked_uname,
+        bind_mode=mode,
+        bind_tenant_id=target_tid,
+    )
+    uname_lbl = f" ({html.escape(picked_uname)})" if picked_uname else ""
+    prof_lbl = html.escape(picked_name) if picked_name else f"User {tg_id}"
+    hint_prompt = (
+        "✏️ Endi mijoz ismini (yoki <code>Ism | Filial nomi</code> shaklida) tering, "
+        "yoki pastdagi tayyor nom tugmasini bosing:"
+        if mode == "new_tenant"
+        else f"✏️ <b>Filial #{target_tid}</b> uchun xodim ismini tering yoki pastdagi tayyor nomni bosing:"
+    )
+    await message.answer(
+        f"✅ <b>Topildi!</b>\n"
+        f"👤 Profil: <b>{prof_lbl}</b>{uname_lbl}\n"
+        f"🆔 ID: <code>{tg_id}</code>"
+        f"{existing_note}\n\n"
+        f"{hint_prompt}",
+        parse_mode="HTML",
+        reply_markup=superadmin_default_name_reply_kb(picked_name),
+    )
 
 
 @router.callback_query(F.data == "sa:add_user_new")
@@ -635,13 +1142,11 @@ async def cb_superadmin_add_user_new_tenant_prompt(
         return
     await state.set_state(SuperAdminStates.waiting_add_user_id)
     await cb.message.answer(
-        "🆕 <b>Yangi mijoz qo'shish (Alohida yangi filial/baza ochiladi)</b>\n\n"
-        "Telegram ID va ixtiyoriy ism / filial nomini yozing:\n"
-        "• <code>123456789 Sardor</code>\n"
-        "• <code>123456789 Sardor | Chorsu Norin Sexi</code>\n"
-        "• Yoki shunchaki: <code>123456789</code>",
+        "🆕 <b>Yangi mijoz + alohida filial (baza) ochish</b>\n\n"
+        "1️⃣ Pastdagi <b>«👤 Telegramdan odam tanlash»</b> tugmasini bosing — Telegram ro'yxatingizdan tanlaysiz va bot ID ni avtomatik oladi!\n"
+        "<i>(Yoki foydalanuvchi xabarini shu yerga forward qiling yoxud <code>123456789 Sardor | Chorsu</code> deb yozing.)</i>",
         parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
+        reply_markup=superadmin_pick_user_reply_kb(request_id=101),
     )
     await cb.answer()
 
@@ -655,9 +1160,11 @@ async def cb_superadmin_add_user_prompt(cb: CallbackQuery, state: FSMContext) ->
     tid = await _get_sa_tenant(uid)
     await state.set_state(SuperAdminStates.waiting_add_user_same_tenant_id)
     await cb.message.answer(
-        f"👤 <b>Filial #{tid}</b> ichiga qo'shimcha xodim Telegram ID sini kiriting (masalan: <code>123456789 Sardor</code>):",
+        f"🔗 <b>Filial #{tid}</b> ga odam bog'lash\n\n"
+        "Pastdagi <b>«👤 Telegramdan odam tanlash»</b> tugmasini bosing — ro'yxatdan tanlasangiz ID avtomatik olinadi!\n"
+        "<i>(Yoki xabarini forward qiling yoxud <code>123456789 Sardor</code> deb yozing.)</i>",
         parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
+        reply_markup=superadmin_pick_user_reply_kb(request_id=102),
     )
     await cb.answer()
 
@@ -665,121 +1172,68 @@ async def cb_superadmin_add_user_prompt(cb: CallbackQuery, state: FSMContext) ->
 @router.message(
     SuperAdminStates.waiting_add_user_id,
     F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
+    _SA_PICK_USER_FILTER,
 )
 async def process_superadmin_add_user_new_tenant(
     message: Message, state: FSMContext
 ) -> None:
-    uid = message.from_user.id if message.from_user else None
-    if not is_super_admin(uid):
-        return
-    raw = (message.text or "").strip()
-    parts = raw.split(maxsplit=1)
-    if not parts or not parts[0].lstrip("-").isdigit():
-        await message.answer(
-            "⚠️ Birinchi so'z raqamli Telegram ID bo'lishi kerak (masalan: <code>123456789 Sardor | Chorsu Sexi</code>):",
-            parse_mode="HTML",
-        )
-        return
-    tg_id = int(parts[0])
-    if tg_id in get_settings().super_admin_id_list:
-        await message.answer(
-            "⚠️ Bu ID Super Admin sifatida Test Filial (#1) ga biriktirilgan.",
-            reply_markup=main_menu_keyboard(),
-        )
-        await state.clear()
-        return
-
-    rest = parts[1].strip() if len(parts) > 1 else ""
-    if "|" in rest:
-        full_name, custom_tenant = (x.strip() for x in rest.split("|", 1))
-    else:
-        full_name = rest or f"Mijoz {tg_id}"
-        custom_tenant = ""
-
-    await state.clear()
-    async with async_session_maker() as db:
-        user = await add_authorized_user(
-            db,
-            telegram_id=tg_id,
-            full_name=full_name,
-            role="owner",
-            create_new_tenant=True,
-            new_tenant_name=custom_tenant or None,
-        )
-        sub_status = await evaluate_subscription_status(db, tenant_id=user.tenant_id)
-        users = await list_authorized_users(db, active_only=True, tenant_id=user.tenant_id)
-    await _set_sa_tenant(uid, user.tenant_id)
-    try:
-        await message.bot.send_message(
-            chat_id=tg_id,
-            text=(
-                "🎉 <b>Norin AI Hisobot botiga xush kelibsiz!</b>\n\n"
-                f"🏢 Sizga alohida baza/filial ochildi: <b>#{user.tenant_id} {html.escape(sub_status.state.tenant_name)}</b>\n"
-                "Boshlash uchun /start tugmasini bosing 👇"
-            ),
-            parse_mode="HTML",
-            reply_markup=main_menu_keyboard(),
-        )
-    except Exception as exc:
-        logger.info("Welcome DM not delivered to %s: %s", tg_id, exc)
-    await message.answer(
-        "✅ <b>Yangi mijoz va alohida baza (Tenant) ochildi!</b>\n\n"
-        f"👤 Mijoz: <b>{html.escape(user.full_name)}</b> (<code>{tg_id}</code>)\n"
-        f"🏢 Filial: <b>#{user.tenant_id} {html.escape(sub_status.state.tenant_name)}</b>\n"
-        "<i>U /start bosganda faqat o'zining toza bazasi va mahsulotlarini ko'radi.</i>",
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
-    )
-    await message.answer(
-        f"👥 <b>#{user.tenant_id} {html.escape(sub_status.state.tenant_name)}</b> xodimlari:",
-        parse_mode="HTML",
-        reply_markup=superadmin_users_kb(users, tenant_id=user.tenant_id),
-    )
+    await _handle_picked_user_step(message, state, mode="new_tenant")
 
 
 @router.message(
     SuperAdminStates.waiting_add_user_same_tenant_id,
+    F.chat.type == "private",
+    _SA_PICK_USER_FILTER,
+)
+async def process_superadmin_add_user_same_tenant(
+    message: Message, state: FSMContext
+) -> None:
+    await _handle_picked_user_step(message, state, mode="same_tenant")
+
+
+@router.message(
+    SuperAdminStates.waiting_add_user_name,
     F.chat.type == "private",
     F.text,
     ~F.text.startswith("/"),
     ~F.text.in_(MAIN_MENU_BUTTONS),
     F.text != "❌ Bekor qilish",
 )
-async def process_superadmin_add_user_same_tenant(
+async def process_superadmin_picked_user_name(
     message: Message, state: FSMContext
 ) -> None:
     uid = message.from_user.id if message.from_user else None
     if not is_super_admin(uid):
         return
     raw = (message.text or "").strip()
-    parts = raw.split(maxsplit=1)
-    if not parts or not parts[0].lstrip("-").isdigit():
-        await message.answer(
-            "⚠️ Birinchi so'z raqamli Telegram ID bo'lishi kerak (masalan: <code>123456789 Sardor</code>):",
-            parse_mode="HTML",
-        )
+    if raw.startswith("✅ "):
+        raw = raw[2:].strip()
+    data = await state.get_data()
+    tg_id = data.get("picked_tg_id")
+    if not tg_id:
+        await state.clear()
+        await message.answer("⚠️ Sessiya eskirdi, qaytadan urinib ko'ring.", reply_markup=main_menu_keyboard())
         return
-    tg_id = int(parts[0])
-    full_name = parts[1].strip() if len(parts) > 1 else f"Xodim {tg_id}"
-    tid = await _get_sa_tenant(uid)
-    await state.clear()
-    async with async_session_maker() as db:
-        await add_authorized_user(
-            db, telegram_id=tg_id, full_name=full_name, role="staff", tenant_id=tid
-        )
-        users = await list_authorized_users(db, active_only=True, tenant_id=tid)
-    await message.answer(
-        f"✅ Filial #{tid} ga qo'shildi: <b>{html.escape(full_name)}</b> (<code>{tg_id}</code>)",
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
-    )
-    await message.answer(
-        f"👥 Filial #{tid} foydalanuvchilari:",
-        reply_markup=superadmin_users_kb(users, tenant_id=tid),
+    mode = str(data.get("bind_mode") or "same_tenant")
+    target_tid = int(data.get("bind_tenant_id") or 1)
+    default_name = str(data.get("picked_tg_name") or "").strip() or f"Mijoz {tg_id}"
+
+    if mode == "new_tenant" and "|" in raw:
+        full_name, custom_tenant = (x.strip() for x in raw.split("|", 1))
+        full_name = full_name or default_name
+    else:
+        full_name = raw or default_name
+        custom_tenant = ""
+
+    await _finalize_sa_user_binding(
+        message=message,
+        state=state,
+        sa_uid=uid,
+        tg_id=int(tg_id),
+        full_name=full_name,
+        mode=mode,
+        target_tid=target_tid,
+        custom_tenant=custom_tenant,
     )
 
 

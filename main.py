@@ -13,6 +13,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 
 from bot.handlers import get_main_router
 from bot.keyboards import subscription_status_kb
@@ -110,6 +111,32 @@ async def subscription_watcher(bot: Bot) -> None:
         await asyncio.sleep(6 * 3600)
 
 
+async def _configure_bot_commands(bot: Bot) -> None:
+    """Configure Telegram '/' command menu: basic commands for users, /menu & /superadmin ONLY for Super Admins."""
+    settings = get_settings()
+    default_cmds = [
+        BotCommand(command="start", description="Bosh menyuni ochish"),
+        BotCommand(command="myid", description="Telegram ID ni ko'rish"),
+        BotCommand(command="cancel", description="Amalni bekor qilish"),
+    ]
+    super_cmds = [
+        BotCommand(command="menu", description="Super Admin tezkor menyusi"),
+        BotCommand(command="superadmin", description="Filiallar & Obuna boshqaruvi"),
+        BotCommand(command="clear", description="Tanlangan filial bazasini tozalash"),
+        BotCommand(command="start", description="Asosiy menyu"),
+        BotCommand(command="myid", description="Telegram ID"),
+    ]
+    try:
+        await bot.set_my_commands(default_cmds, scope=BotCommandScopeDefault())
+    except Exception as exc:
+        logger.warning("Failed setting default bot commands: %s", exc)
+    for sid in settings.super_admin_id_list:
+        try:
+            await bot.set_my_commands(super_cmds, scope=BotCommandScopeChat(chat_id=sid))
+        except Exception as exc:
+            logger.warning("Failed setting superadmin commands for %s: %s", sid, exc)
+
+
 async def run_bot() -> None:
     """Initialize database, attach middlewares/routers, and start long polling."""
     settings = get_settings()
@@ -139,6 +166,7 @@ async def run_bot() -> None:
     logger.info("Starting Norin AI Hisobot Bot polling...")
     try:
         await bot.delete_webhook(drop_pending_updates=True)
+        await _configure_bot_commands(bot)
         await dp.start_polling(
             bot,
             polling_timeout=10,

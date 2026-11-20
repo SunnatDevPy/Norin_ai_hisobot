@@ -47,6 +47,7 @@ from database.crud import (
     compute_client_debt,
     compute_session_summary,
     confirm_sale,
+    create_client,
     create_pending_sale,
     delete_cash_transaction,
     delete_client_payment,
@@ -81,6 +82,7 @@ from database.session import async_session_maker
 from services.gemini_ai import (
     _heuristic_parse_norin_text,
     extract_amount_from_audio,
+    extract_caption_client_override,
     extract_norin_from_image,
     format_kg,
     format_uzs,
@@ -92,6 +94,7 @@ from services.gemini_ai import (
 
 router = Router(name="sales_norin")
 logger = logging.getLogger("norin_bot.sales")
+_PENDING_SALE_SUGGESTED_CLIENT: dict[int, str] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +479,7 @@ async def _process_ready_sale(
     note: str,
     is_confident: bool,
     prefix_html: str = "",
+    suggested_client_name: Optional[str] = None,
 ) -> None:
     """Create pending Sale, check duplicates/client match, and auto-post or ask confirmation."""
     was_in_fsm = (await state.get_state()) is not None
@@ -510,14 +514,28 @@ async def _process_ready_sale(
         # If client is missing, do not auto-confirm — ask user to pick client!
         if client_id is None:
             await state.clear()
+            clean_suggested = (suggested_client_name or "").strip() or None
+            if clean_suggested:
+                _PENDING_SALE_SUGGESTED_CLIENT[sale.id] = clean_suggested
+                pick_prompt = (
+                    f"🏷 Rasm tagidagi nom: <b>{html.escape(clean_suggested)}</b> (bazada topilmadi)\n"
+                    "🏪 Uni yangi mijoz qilib qo'shing yoki mavjud mijozni tanlang:"
+                )
+            else:
+                pick_prompt = "🏪 <b>Bu chek qaysi mijozga (do'konga) tegishli?</b> Tanlang:"
             if was_in_fsm:
                 await message.answer("🔍 Hisob tayyor!", reply_markup=main_menu_keyboard())
             await message.answer(
                 f"{prefix_html}"
                 f"{render_sale_admin_summary(sale)}\n\n"
-                "🏪 <b>Bu chek qaysi mijozga (do'konga) tegishli?</b> Tanlang:",
+                f"{pick_prompt}",
                 parse_mode="HTML",
-                reply_markup=pick_client_for_sale_kb(sale.id, clients, prefix="sale:setcli"),
+                reply_markup=pick_client_for_sale_kb(
+                    sale.id,
+                    clients,
+                    prefix="sale:setcli",
+                    suggested_name=clean_suggested,
+                ),
             )
             return
 
@@ -604,6 +622,8 @@ async def _process_dm_photo(message: Message, state: FSMContext) -> None:
         products = await list_products(db, active_only=True)
         clients = await list_clients(db, active_only=True)
 
+    cap_cli, cap_hint = extract_caption_client_override(message.caption, products, clients)
+
     extracted = await extract_norin_from_image(
         image_bytes=buf.getvalue(),
         products=products,
@@ -617,7 +637,21 @@ async def _process_dm_photo(message: Message, state: FSMContext) -> None:
         pass
 
     items_spec = _build_items_spec(extracted.get("items") or [], products)
-    client_obj = match_client(extracted.get("client_hint"), clients)
+    if cap_cli is not None:
+        client_obj = cap_cli
+        suggested_name: Optional[str] = None
+        caption_prefix = (
+            f"🏷 <i>Rasm tagidagi nom olindi:</i> <b>{html.escape(cap_cli.name)}</b>\n\n"
+        )
+    elif cap_hint:
+        client_obj = None
+        suggested_name = cap_hint
+        caption_prefix = ""
+    else:
+        client_obj = match_client(extracted.get("client_hint"), clients)
+        suggested_name = None
+        caption_prefix = ""
+
     is_clear = bool(extracted.get("is_clear")) and len(items_spec) > 0
 
     if items_spec:
@@ -629,6 +663,8 @@ async def _process_dm_photo(message: Message, state: FSMContext) -> None:
             photo_file_id=photo.file_id,
             note=extracted.get("notes") or "",
             is_confident=is_clear,
+            prefix_html=caption_prefix,
+            suggested_client_name=suggested_name,
         )
         return
 
@@ -637,6 +673,7 @@ async def _process_dm_photo(message: Message, state: FSMContext) -> None:
     await state.update_data(
         clarify_photo_id=photo.file_id,
         clarify_client_id=client_obj.id if client_obj else None,
+        clarify_client_hint=suggested_name,
     )
     await message.answer(
         "🤔 Rasmdan KG miqdori aniq o'qilmadi.\n"
@@ -657,6 +694,7 @@ async def process_sale_clarify(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     photo_id = data.get("clarify_photo_id")
     preset_client_id = data.get("clarify_client_id")
+    preset_client_hint = data.get("clarify_client_hint")
 
     async with async_session_maker() as db:
         products = await list_products(db, active_only=True)
@@ -691,6 +729,7 @@ async def process_sale_clarify(message: Message, state: FSMContext) -> None:
 
     cli = match_client(parsed.get("client_hint"), clients)
     cid = cli.id if cli else preset_client_id
+    suggested_hint = None if cid else (parsed.get("client_hint") or preset_client_hint)
     await _process_ready_sale(
         message=message,
         state=state,
@@ -699,6 +738,7 @@ async def process_sale_clarify(message: Message, state: FSMContext) -> None:
         photo_file_id=photo_id,
         note=parsed.get("transcript") or "",
         is_confident=False,
+        suggested_client_name=suggested_hint,
     )
 
 
@@ -713,7 +753,13 @@ async def cb_sale_pick_client(cb: CallbackQuery) -> None:
     async with async_session_maker() as db:
         clients = await list_clients(db, active_only=True)
     await cb.message.edit_reply_markup(
-        reply_markup=pick_client_for_sale_kb(sale_id, clients, prefix="sale:setcli", page=0)
+        reply_markup=pick_client_for_sale_kb(
+            sale_id,
+            clients,
+            prefix="sale:setcli",
+            page=0,
+            suggested_name=_PENDING_SALE_SUGGESTED_CLIENT.get(sale_id),
+        )
     )
     await cb.answer()
 
@@ -726,9 +772,56 @@ async def cb_sale_pick_client_page(cb: CallbackQuery) -> None:
     async with async_session_maker() as db:
         clients = await list_clients(db, active_only=True)
     await cb.message.edit_reply_markup(
-        reply_markup=pick_client_for_sale_kb(sale_id, clients, prefix="sale:setcli", page=page)
+        reply_markup=pick_client_for_sale_kb(
+            sale_id,
+            clients,
+            prefix="sale:setcli",
+            page=page,
+            suggested_name=_PENDING_SALE_SUGGESTED_CLIENT.get(sale_id) if page == 0 else None,
+        )
     )
     await cb.answer()
+
+
+@router.callback_query(F.data.startswith("sale:newcli_cap:"))
+async def cb_sale_newcli_from_caption(cb: CallbackQuery) -> None:
+    sale_id = int(cb.data.split(":")[-1])
+    suggested_name = _PENDING_SALE_SUGGESTED_CLIENT.pop(sale_id, None)
+    if not suggested_name:
+        await cb.answer(
+            "⚠️ Taklif qilingan nom topilmadi, «➕ Yangi mijoz qo'shish» ni bosing.",
+            show_alert=True,
+        )
+        return
+
+    async with async_session_maker() as db:
+        before = await get_sale(db, sale_id)
+        if not before or before.status == "deleted":
+            await cb.answer("Sotuv topilmadi", show_alert=True)
+            return
+        existing_clients = await list_clients(db, active_only=True)
+        exact = next(
+            (c for c in existing_clients if c.name.strip().lower() == suggested_name.strip().lower()),
+            None,
+        )
+        cli = exact if exact is not None else await create_client(db, name=suggested_name.strip())
+        sale = await update_sale_client(db, sale_id, cli.id)
+        if not sale:
+            await cb.answer("Sotuv topilmadi", show_alert=True)
+            return
+        debt = await compute_client_debt(db, cli.id, history_limit=1)
+
+    header = (
+        f"✅ <b>«{html.escape(cli.name)}»</b> hisobga ulandi!\n\n"
+        if exact is not None
+        else f"🆕 <b>«{html.escape(cli.name)}»</b> yangi mijoz qilib yaratildi va hisobga ulandi!\n\n"
+    )
+    await cb.message.edit_text(
+        f"{header}{render_sale_admin_summary(sale, debt.current_debt)}\n\nHammasi to'g'rimi?",
+        parse_mode="HTML",
+        reply_markup=sale_confirm_kb(sale),
+    )
+    await cb.answer(f"✅ «{cli.name}» saqlandi!")
 
 
 @router.callback_query(F.data.startswith("sale:back_card:"))

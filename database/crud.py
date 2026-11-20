@@ -2228,6 +2228,7 @@ async def update_subscription_settings(
     monthly_price: Optional[float] = None,
     owner_contact: Optional[str] = None,
     tenant_name: Optional[str] = None,
+    plan_name: Optional[str] = None,
     is_suspended: Optional[bool] = None,
     grace_days: Optional[int] = None,
     tenant_id: Optional[int] = None,
@@ -2240,6 +2241,8 @@ async def update_subscription_settings(
         sub.owner_contact = owner_contact.strip()
     if tenant_name is not None and tenant_name.strip():
         sub.tenant_name = tenant_name.strip()
+    if plan_name is not None and plan_name.strip():
+        sub.plan_name = plan_name.strip()
     if is_suspended is not None:
         sub.is_suspended = bool(is_suspended)
     if grace_days is not None:
@@ -2303,6 +2306,10 @@ async def add_authorized_user(
         if create_new_tenant:
             if existing is not None and existing.tenant_id != 1 and existing.is_active:
                 target_tid = int(existing.tenant_id)
+                if new_tenant_name and new_tenant_name.strip():
+                    sub_existing = await db.get(SubscriptionState, target_tid)
+                    if sub_existing is not None:
+                        sub_existing.tenant_name = new_tenant_name.strip()
             else:
                 label = (new_tenant_name or "").strip() or (
                     f"{full_name.strip()} Filiali" if full_name.strip() else f"Filial {tid_int}"
@@ -2348,6 +2355,91 @@ async def remove_authorized_user(
     await db.delete(existing)
     await db.commit()
     return True
+
+
+async def get_authorized_user(
+    db: AsyncSession, telegram_id: int
+) -> Optional[AuthorizedUser]:
+    """Lookup an AuthorizedUser across all tenants by Telegram user ID."""
+    return await db.scalar(
+        select(AuthorizedUser).where(AuthorizedUser.telegram_id == int(telegram_id))
+    )
+
+
+async def reassign_authorized_user(
+    db: AsyncSession,
+    telegram_id: int,
+    new_tenant_id: int,
+    role: Optional[str] = None,
+) -> Optional[AuthorizedUser]:
+    """Move an AuthorizedUser to another tenant and/or update their role."""
+    existing = await get_authorized_user(db, telegram_id)
+    if existing is None:
+        return None
+    sub = await db.get(SubscriptionState, int(new_tenant_id))
+    if sub is None:
+        return None
+    existing.tenant_id = int(new_tenant_id)
+    existing.is_active = True
+    if role is not None and role.strip():
+        existing.role = role.strip()
+    await db.commit()
+    await db.refresh(existing)
+    return existing
+
+
+async def get_tenant_overview_stats(db: AsyncSession, tenant_id: int) -> dict:
+    """Return high-level counts of users, clients, groups, products, and confirmed sales."""
+    tid = int(tenant_id)
+    users_cnt = int(
+        await db.scalar(
+            select(sa_func.count(AuthorizedUser.id)).where(
+                AuthorizedUser.tenant_id == tid, AuthorizedUser.is_active.is_(True)
+            )
+        )
+        or 0
+    )
+    clients_cnt = int(
+        await db.scalar(
+            select(sa_func.count(Client.id)).where(
+                Client.tenant_id == tid, Client.is_active.is_(True)
+            )
+        )
+        or 0
+    )
+    groups_cnt = int(
+        await db.scalar(
+            select(sa_func.count(Client.id)).where(
+                Client.tenant_id == tid,
+                Client.is_active.is_(True),
+                Client.group_chat_id.is_not(None),
+            )
+        )
+        or 0
+    )
+    products_cnt = int(
+        await db.scalar(
+            select(sa_func.count(Product.id)).where(
+                Product.tenant_id == tid, Product.is_active.is_(True)
+            )
+        )
+        or 0
+    )
+    sales_cnt = int(
+        await db.scalar(
+            select(sa_func.count(Sale.id)).where(
+                Sale.tenant_id == tid, Sale.status == "confirmed"
+            )
+        )
+        or 0
+    )
+    return {
+        "users": users_cnt,
+        "clients": clients_cnt,
+        "groups": groups_cnt,
+        "products": products_cnt,
+        "sales": sales_cnt,
+    }
 
 
 async def resolve_user_tenant_id(
