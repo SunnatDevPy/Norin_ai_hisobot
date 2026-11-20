@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 
@@ -11,7 +12,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.keyboards import (
+    MAIN_MENU_BUTTONS,
     cancel_reply_keyboard,
+    confirm_delete_kb,
     main_menu_keyboard,
     subscription_status_kb,
     superadmin_clear_confirm_kb,
@@ -25,10 +28,14 @@ from config import get_settings
 from database.crud import (
     add_authorized_user,
     create_tenant,
+    delete_tenant,
     evaluate_subscription_status,
     extend_subscription,
     format_local_dt,
+    get_ai_usage_summary,
+    get_raw_app_setting,
     is_user_authorized,
+    list_all_broadcast_recipients,
     list_authorized_users,
     list_subscription_payments,
     list_tenants,
@@ -36,6 +43,7 @@ from database.crud import (
     reset_full_database,
     reset_test_transactions,
     resolve_user_tenant_id,
+    set_raw_app_setting,
     update_subscription_settings,
 )
 from database.session import async_session_maker
@@ -56,23 +64,43 @@ def is_super_admin(user_id: int | None) -> bool:
 _selected_sa_tenant: dict[int, int] = {}
 
 
-def _get_sa_tenant(uid: int | None) -> int:
-    """Return currently selected tenant_id for a Super Admin (defaults to 1)."""
-    return int(_selected_sa_tenant.get(int(uid or 0), 1) or 1)
+async def _get_sa_tenant(uid: int | None) -> int:
+    """Return currently selected tenant_id for a Super Admin (persisted in DB)."""
+    if not uid:
+        return 1
+    uid_int = int(uid)
+    if uid_int in _selected_sa_tenant:
+        return _selected_sa_tenant[uid_int]
+    try:
+        async with async_session_maker() as db:
+            raw = await get_raw_app_setting(db, f"sa_sel:{uid_int}", "1")
+        tid = max(1, int(raw or "1"))
+    except Exception:
+        tid = 1
+    _selected_sa_tenant[uid_int] = tid
+    return tid
 
 
-def _set_sa_tenant(uid: int | None, tenant_id: int) -> None:
-    """Remember selected tenant_id for a Super Admin."""
-    if uid:
-        _selected_sa_tenant[int(uid)] = max(1, int(tenant_id))
+async def _set_sa_tenant(uid: int | None, tenant_id: int) -> None:
+    """Remember selected tenant_id in memory cache and persist in DB."""
+    if not uid:
+        return
+    uid_int = int(uid)
+    tid = max(1, int(tenant_id))
+    _selected_sa_tenant[uid_int] = tid
+    try:
+        async with async_session_maker() as db:
+            await set_raw_app_setting(db, f"sa_sel:{uid_int}", str(tid))
+    except Exception as exc:
+        logger.warning("Could not persist selected SA tenant for %s: %s", uid_int, exc)
 
 
 async def _superadmin_panel(uid: int | None) -> tuple[str, InlineKeyboardMarkup]:
     """Render Super Admin dashboard text and multi-tenant keyboard for selected tenant."""
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     text, is_susp, tenant_count, resolved_tid = await _render_superadmin_dashboard(tid)
     if resolved_tid != tid and uid:
-        _set_sa_tenant(uid, resolved_tid)
+        await _set_sa_tenant(uid, resolved_tid)
     kb = superadmin_menu_kb(
         is_susp,
         tenant_label=f"Filiallar ({tenant_count} ta)",
@@ -88,6 +116,7 @@ async def _render_superadmin_dashboard(tenant_id: int = 1) -> tuple[str, bool, i
         sub_status = await evaluate_subscription_status(db, tenant_id=tenant_id)
         sub = sub_status.state
         users = await list_authorized_users(db, active_only=True, tenant_id=sub.id)
+        ai_usage = await get_ai_usage_summary(db, days=30, tenant_id=sub.id)
     exp_str = format_local_dt(sub.expires_at, "%d.%m.%Y %H:%M")
 
     status_map = {
@@ -115,6 +144,7 @@ async def _render_superadmin_dashboard(tenant_id: int = 1) -> tuple[str, bool, i
         f"⏳ Imtiyoz (Grace): <b>{sub.grace_days} kun</b>\n"
         f"📌 Holat: <b>{status_map.get(sub_status.status, sub_status.status)}</b>\n"
         f"📞 Kontakt: <b>{html.escape(sub.owner_contact)}</b>\n"
+        f"🤖 AI (30 kun): rasm <b>{ai_usage['image_calls']}</b> | ovoz <b>{ai_usage['audio_calls']}</b> | token: <b>{format_uzs(ai_usage['total_tokens'])}</b>\n"
         "-------------------------------"
         f"{env_line}\n"
         f"👥 Shu filial xodimlari (baza): <b>{len(users)} ta</b>"
@@ -280,7 +310,7 @@ async def cb_superadmin_tenants(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
     await state.clear()
-    sel_id = _get_sa_tenant(uid)
+    sel_id = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         tenants = await list_tenants(db)
     lines = ["🏢 <b>Filiallar / Tenantlar boshqaruvi</b>\n"]
@@ -304,7 +334,7 @@ async def cb_superadmin_select_tenant(cb: CallbackQuery, state: FSMContext) -> N
         await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
     tid = int(cb.data.split(":")[-1])
-    _set_sa_tenant(uid, tid)
+    await _set_sa_tenant(uid, tid)
     await state.clear()
     text, kb = await _superadmin_panel(uid)
     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
@@ -329,7 +359,9 @@ async def cb_superadmin_new_tenant_prompt(cb: CallbackQuery, state: FSMContext) 
 @router.message(
     SuperAdminStates.waiting_new_tenant_name,
     F.chat.type == "private",
+    F.text,
     ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
     F.text != "❌ Bekor qilish",
 )
 async def process_superadmin_new_tenant(message: Message, state: FSMContext) -> None:
@@ -342,7 +374,7 @@ async def process_superadmin_new_tenant(message: Message, state: FSMContext) -> 
         return
     async with async_session_maker() as db:
         sub = await create_tenant(db, tenant_name=name)
-    _set_sa_tenant(uid, sub.id)
+    await _set_sa_tenant(uid, sub.id)
     await state.clear()
     text, kb = await _superadmin_panel(uid)
     await message.answer(
@@ -360,7 +392,7 @@ async def cb_superadmin_extend_quick(cb: CallbackQuery) -> None:
         await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
     days = int(cb.data.split(":")[-1])
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         sub_status = await evaluate_subscription_status(db, tenant_id=tid)
         monthly = float(sub_status.state.monthly_price)
@@ -395,7 +427,9 @@ async def cb_superadmin_extend_custom_prompt(cb: CallbackQuery, state: FSMContex
 @router.message(
     SuperAdminStates.waiting_custom_extend_days,
     F.chat.type == "private",
+    F.text,
     ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
     F.text != "❌ Bekor qilish",
 )
 async def process_superadmin_custom_days(message: Message, state: FSMContext) -> None:
@@ -407,7 +441,7 @@ async def process_superadmin_custom_days(message: Message, state: FSMContext) ->
         await message.answer("⚠️ Musbat butun son kiriting (masalan: 30):")
         return
     days = int(raw)
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         sub_status = await evaluate_subscription_status(db, tenant_id=tid)
         pay_amount = round((float(sub_status.state.monthly_price) / 30.0) * days)
@@ -445,7 +479,9 @@ async def cb_superadmin_edit_price(cb: CallbackQuery, state: FSMContext) -> None
 @router.message(
     SuperAdminStates.waiting_monthly_price,
     F.chat.type == "private",
+    F.text,
     ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
     F.text != "❌ Bekor qilish",
 )
 async def process_superadmin_price(message: Message, state: FSMContext) -> None:
@@ -456,7 +492,7 @@ async def process_superadmin_price(message: Message, state: FSMContext) -> None:
     if not amt or amt <= 0:
         await message.answer("⚠️ To'g'ri summa kiriting:")
         return
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         await update_subscription_settings(db, monthly_price=amt, tenant_id=tid)
     await state.clear()
@@ -482,7 +518,9 @@ async def cb_superadmin_edit_tenant(cb: CallbackQuery, state: FSMContext) -> Non
 @router.message(
     SuperAdminStates.waiting_tenant_name,
     F.chat.type == "private",
+    F.text,
     ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
     F.text != "❌ Bekor qilish",
 )
 async def process_superadmin_tenant(message: Message, state: FSMContext) -> None:
@@ -493,7 +531,7 @@ async def process_superadmin_tenant(message: Message, state: FSMContext) -> None
     if not name:
         await message.answer("⚠️ Nom kiriting:")
         return
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         await update_subscription_settings(db, tenant_name=name, tenant_id=tid)
     await state.clear()
@@ -522,7 +560,9 @@ async def cb_superadmin_edit_contact(cb: CallbackQuery, state: FSMContext) -> No
 @router.message(
     SuperAdminStates.waiting_owner_contact,
     F.chat.type == "private",
+    F.text,
     ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
     F.text != "❌ Bekor qilish",
 )
 async def process_superadmin_contact(message: Message, state: FSMContext) -> None:
@@ -533,7 +573,7 @@ async def process_superadmin_contact(message: Message, state: FSMContext) -> Non
     if not contact:
         await message.answer("⚠️ Kontakt kiriting:")
         return
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         await update_subscription_settings(db, owner_contact=contact, tenant_id=tid)
     await state.clear()
@@ -548,7 +588,7 @@ async def cb_superadmin_toggle_suspend(cb: CallbackQuery) -> None:
     if not is_super_admin(uid):
         await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         sub_status = await evaluate_subscription_status(db, tenant_id=tid)
         new_val = not sub_status.state.is_suspended
@@ -564,7 +604,7 @@ async def cb_superadmin_users(cb: CallbackQuery) -> None:
     if not is_super_admin(uid):
         await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         sub_status = await evaluate_subscription_status(db, tenant_id=tid)
         users = await list_authorized_users(db, active_only=True, tenant_id=sub_status.state.id)
@@ -612,7 +652,7 @@ async def cb_superadmin_add_user_prompt(cb: CallbackQuery, state: FSMContext) ->
     if not is_super_admin(uid):
         await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     await state.set_state(SuperAdminStates.waiting_add_user_same_tenant_id)
     await cb.message.answer(
         f"👤 <b>Filial #{tid}</b> ichiga qo'shimcha xodim Telegram ID sini kiriting (masalan: <code>123456789 Sardor</code>):",
@@ -625,7 +665,9 @@ async def cb_superadmin_add_user_prompt(cb: CallbackQuery, state: FSMContext) ->
 @router.message(
     SuperAdminStates.waiting_add_user_id,
     F.chat.type == "private",
+    F.text,
     ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
     F.text != "❌ Bekor qilish",
 )
 async def process_superadmin_add_user_new_tenant(
@@ -670,7 +712,20 @@ async def process_superadmin_add_user_new_tenant(
         )
         sub_status = await evaluate_subscription_status(db, tenant_id=user.tenant_id)
         users = await list_authorized_users(db, active_only=True, tenant_id=user.tenant_id)
-    _set_sa_tenant(uid, user.tenant_id)
+    await _set_sa_tenant(uid, user.tenant_id)
+    try:
+        await message.bot.send_message(
+            chat_id=tg_id,
+            text=(
+                "🎉 <b>Norin AI Hisobot botiga xush kelibsiz!</b>\n\n"
+                f"🏢 Sizga alohida baza/filial ochildi: <b>#{user.tenant_id} {html.escape(sub_status.state.tenant_name)}</b>\n"
+                "Boshlash uchun /start tugmasini bosing 👇"
+            ),
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
+    except Exception as exc:
+        logger.info("Welcome DM not delivered to %s: %s", tg_id, exc)
     await message.answer(
         "✅ <b>Yangi mijoz va alohida baza (Tenant) ochildi!</b>\n\n"
         f"👤 Mijoz: <b>{html.escape(user.full_name)}</b> (<code>{tg_id}</code>)\n"
@@ -689,7 +744,9 @@ async def process_superadmin_add_user_new_tenant(
 @router.message(
     SuperAdminStates.waiting_add_user_same_tenant_id,
     F.chat.type == "private",
+    F.text,
     ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
     F.text != "❌ Bekor qilish",
 )
 async def process_superadmin_add_user_same_tenant(
@@ -708,7 +765,7 @@ async def process_superadmin_add_user_same_tenant(
         return
     tg_id = int(parts[0])
     full_name = parts[1].strip() if len(parts) > 1 else f"Xodim {tg_id}"
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     await state.clear()
     async with async_session_maker() as db:
         await add_authorized_user(
@@ -733,12 +790,128 @@ async def cb_superadmin_del_user(cb: CallbackQuery) -> None:
         await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
     tg_id = int(cb.data.split(":")[-1])
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
+    await cb.message.edit_text(
+        f"⚠️ Foydalanuvchi <code>{tg_id}</code> ni Filial #{tid} dan o'chirmoqchimisiz?",
+        parse_mode="HTML",
+        reply_markup=confirm_delete_kb(f"sa:del_user_ok:{tg_id}", "sa:users"),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("sa:del_user_ok:"))
+async def cb_superadmin_del_user_ok(cb: CallbackQuery) -> None:
+    uid = cb.from_user.id if cb.from_user else None
+    if not is_super_admin(uid):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    tg_id = int(cb.data.split(":")[-1])
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         await remove_authorized_user(db, tg_id, tenant_id=tid)
-        users = await list_authorized_users(db, active_only=True, tenant_id=tid)
-    await cb.message.edit_reply_markup(reply_markup=superadmin_users_kb(users, tenant_id=tid))
-    await cb.answer("🗑 O'chirildi")
+        sub_status = await evaluate_subscription_status(db, tenant_id=tid)
+        users = await list_authorized_users(db, active_only=True, tenant_id=sub_status.state.id)
+    await cb.message.edit_text(
+        f"👥 <b>#{sub_status.state.id} {html.escape(sub_status.state.tenant_name)} — Foydalanuvchilar</b>",
+        parse_mode="HTML",
+        reply_markup=superadmin_users_kb(users, tenant_id=sub_status.state.id),
+    )
+    await cb.answer("🗑 Foydalanuvchi o'chirildi!")
+
+
+@router.callback_query(F.data.startswith("sa:del_tenant:"))
+async def cb_superadmin_del_tenant_prompt(cb: CallbackQuery) -> None:
+    uid = cb.from_user.id if cb.from_user else None
+    if not is_super_admin(uid):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    tid = int(cb.data.split(":")[-1])
+    if tid <= 1:
+        await cb.answer("⛔ #1 Asosiy/Test filialni o'chirib bo'lmaydi!", show_alert=True)
+        return
+    async with async_session_maker() as db:
+        sub_status = await evaluate_subscription_status(db, tenant_id=tid)
+    await cb.message.edit_text(
+        f"🗑 <b>Filial #{sub_status.state.id} {html.escape(sub_status.state.tenant_name)}</b> ni butunlay o'chirmoqchimisiz?\n\n"
+        "⚠️ Ushbu filialning barcha sotuvlari, mijozlari, xodimlari va kassa tarixi <b>qaytmas bo'lib o'chadi!</b>",
+        parse_mode="HTML",
+        reply_markup=confirm_delete_kb(f"sa:del_tenant_ok:{tid}", "sa:menu"),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("sa:del_tenant_ok:"))
+async def cb_superadmin_del_tenant_ok(cb: CallbackQuery) -> None:
+    uid = cb.from_user.id if cb.from_user else None
+    if not is_super_admin(uid):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    tid = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        deleted = await delete_tenant(db, tid)
+    if deleted:
+        await _set_sa_tenant(uid, 1)
+    text, kb = await _superadmin_panel(uid)
+    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer("🗑 Filial o'chirildi!" if deleted else "⚠️ O'chirib bo'lmadi", show_alert=True)
+
+
+@router.callback_query(F.data == "sa:broadcast")
+async def cb_superadmin_broadcast_prompt(cb: CallbackQuery, state: FSMContext) -> None:
+    uid = cb.from_user.id if cb.from_user else None
+    if not is_super_admin(uid):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    await state.set_state(SuperAdminStates.waiting_broadcast_text)
+    await cb.message.answer(
+        "📢 <b>Barcha filiallar va foydalanuvchilarga e'lon yuborish</b>\n\n"
+        "Yuboriladigan xabar matnini yozing:",
+        parse_mode="HTML",
+        reply_markup=cancel_reply_keyboard(),
+    )
+    await cb.answer()
+
+
+@router.message(
+    SuperAdminStates.waiting_broadcast_text,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
+async def process_superadmin_broadcast(message: Message, state: FSMContext) -> None:
+    uid = message.from_user.id if message.from_user else None
+    if not is_super_admin(uid):
+        return
+    msg_text = (message.text or "").strip()
+    if not msg_text:
+        await message.answer("⚠️ Xabar matnini kiriting:")
+        return
+    await state.clear()
+    async with async_session_maker() as db:
+        recipients = await list_all_broadcast_recipients(db)
+
+    sent = 0
+    for target_uid in recipients:
+        try:
+            await message.bot.send_message(
+                chat_id=target_uid,
+                text=f"📢 <b>Tizim e'loni:</b>\n\n{html.escape(msg_text)}",
+                parse_mode="HTML",
+            )
+            sent += 1
+            await asyncio.sleep(0.05)
+        except Exception as exc:
+            logger.warning("Broadcast failed for %s: %s", target_uid, exc)
+
+    await message.answer(
+        f"📢 E'lon yuborildi: <b>{sent}/{len(recipients)}</b> ta foydalanuvchiga.",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
+    )
+    text, kb = await _superadmin_panel(uid)
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
 @router.callback_query(F.data == "sa:payments")
@@ -747,7 +920,7 @@ async def cb_superadmin_payments(cb: CallbackQuery) -> None:
     if not is_super_admin(uid):
         await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         payments = await list_subscription_payments(db, limit=15, tenant_id=tid)
     if not payments:
@@ -769,7 +942,7 @@ async def cb_superadmin_send_reminder(cb: CallbackQuery) -> None:
     if not is_super_admin(uid):
         await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         sub_status = await evaluate_subscription_status(db, tenant_id=tid)
         db_users = await list_authorized_users(db, active_only=True, tenant_id=sub_status.state.id)
@@ -921,7 +1094,7 @@ async def cmd_superadmin_clear(message: Message, state: FSMContext) -> None:
         await message.answer("⛔ Bu buyruq faqat tizim egasi (Super Admin) uchun.")
         return
     await state.clear()
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         sub_status = await evaluate_subscription_status(db, tenant_id=tid)
     await message.answer(
@@ -937,7 +1110,7 @@ async def cb_superadmin_clear_menu(cb: CallbackQuery) -> None:
     if not is_super_admin(uid):
         await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
         return
-    tid = _get_sa_tenant(uid)
+    tid = await _get_sa_tenant(uid)
     async with async_session_maker() as db:
         sub_status = await evaluate_subscription_status(db, tenant_id=tid)
     await cb.message.edit_text(
@@ -959,7 +1132,7 @@ async def cb_superadmin_clear_execute(cb: CallbackQuery) -> None:
         await cb.answer("Noto'g'ri rejim")
         return
 
-    tid = _get_sa_tenant(sa_uid)
+    tid = await _get_sa_tenant(sa_uid)
     settings = get_settings()
     async with async_session_maker() as db:
         sub_status = await evaluate_subscription_status(db, tenant_id=tid)

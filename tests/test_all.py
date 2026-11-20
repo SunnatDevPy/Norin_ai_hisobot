@@ -24,28 +24,25 @@ from database.crud import (
     create_pending_sale,
     delete_client_payment,
     delete_sale,
-    add_authorized_user,
-    bind_client_group,
+    delete_tenant,
     evaluate_subscription_status,
-    get_app_setting,
-    list_clients,
-    list_products,
-    list_recent_sales,
-    list_tenants,
-    remove_authorized_user,
-    reset_full_database,
-    reset_test_transactions,
-    resolve_user_tenant_id,
-    set_app_setting,
-    tenant_scope,
-    update_subscription_settings,
     extend_subscription,
+    get_ai_usage_summary,
+    get_app_setting,
+    get_cash_transaction,
     get_or_create_open_session,
+    get_period_excel_data,
+    get_raw_app_setting,
+    infer_expense_category,
     is_user_authorized,
+    list_all_broadcast_recipients,
     list_all_client_debts,
     list_clients,
     list_products,
+    list_recent_sales,
     list_subscription_payments,
+    list_tenants,
+    log_ai_usage,
     match_client,
     match_product,
     now_utc,
@@ -54,8 +51,12 @@ from database.crud import (
     reset_full_database,
     reset_test_transactions,
     resolve_sell_price,
+    resolve_user_tenant_id,
+    set_app_setting,
     set_client_product_price,
+    set_raw_app_setting,
     set_sale_group_message,
+    tenant_scope,
     update_client_payment,
     update_product,
     update_sale_client,
@@ -669,3 +670,159 @@ def test_app_imports_and_router_assembly():
     assert hasattr(main, "run_bot")
     assert hasattr(main, "subscription_watcher")
     assert SubscriptionMiddleware is not None
+
+
+def test_parse_uzbek_amount_yarim_and_variants():
+    from services.gemini_ai import parse_uzbek_amount
+
+    assert parse_uzbek_amount("3 yarim million") == 3_500_000
+    assert parse_uzbek_amount("yarim mln") == 500_000
+    assert parse_uzbek_amount("1 yarim ming") == 1_500
+    assert parse_uzbek_amount("450 000") == 450_000
+
+
+def test_zero_token_text_routing(monkeypatch, tmp_path: Path):
+    """Ensure free text & captions NEVER invoke Gemini (_call_gemini)."""
+    import services.gemini_ai as gai
+
+    async def _fail_gemini(*args, **kwargs):
+        raise AssertionError("Gemini MUST NOT be called for text/caption input!")
+
+    monkeypatch.setattr(gai, "_call_gemini", _fail_gemini)
+
+    async def _logic(db):
+        prods = await list_products(db)
+        c = await create_client(db, "Iftiqor")
+        res = await gai.parse_norin_voice_or_text(
+            prods, [c], text="Iftiqor ot 25 yarim kg"
+        )
+        assert res["intent"] == "sale"
+        assert res["client_hint"] == "Iftiqor"
+        assert abs(res["items"][0]["weight_kg"] - 25.5) < 0.01
+
+        chat_res = await gai.parse_norin_voice_or_text(prods, [c], text="salom qalesiz")
+        assert chat_res["intent"] == "unknown"
+
+    asyncio.run(_run_with_db(tmp_path, _logic))
+
+
+def test_cash_tx_isolation_expense_category_ai_usage_and_tenant_delete(tmp_path: Path):
+    """Verify expense auto-category, get_cash_transaction isolation, AI logs, raw settings & delete_tenant."""
+
+    async def _logic(db):
+        user2 = await add_authorized_user(
+            db,
+            telegram_id=999111222,
+            full_name="Buxoro Admin",
+            role="owner",
+            create_new_tenant=True,
+            new_tenant_name="Buxoro Filiali",
+        )
+        assert user2.tenant_id == 2
+        assert infer_expense_category("qo'y go'shti oldik") == "Go'sht"
+
+        with tenant_scope(1):
+            tx = await add_cash_transaction(
+                db, amount=300_000, source_type="expense", note="qo'y go'shti oldik"
+            )
+            assert tx.category == "Go'sht"
+            assert await get_cash_transaction(db, tx.id) is not None
+
+        # Cross-tenant cash_tx protection
+        with tenant_scope(2):
+            assert await get_cash_transaction(db, tx.id) is None
+
+        # AI usage logs isolated per tenant
+        await log_ai_usage(db, "image", "gemini-2.5-flash", 120, 40, 160, tenant_id=1)
+        await log_ai_usage(db, "audio", "gemini-2.5-flash-lite", 50, 20, 70, tenant_id=2)
+        u1 = await get_ai_usage_summary(db, days=30, tenant_id=1)
+        u2 = await get_ai_usage_summary(db, days=30, tenant_id=2)
+        assert u1["image_calls"] == 1 and u1["audio_calls"] == 0 and u1["total_tokens"] == 160
+        assert u2["image_calls"] == 0 and u2["audio_calls"] == 1 and u2["total_tokens"] == 70
+
+        # Raw SA app setting persistence
+        await set_raw_app_setting(db, "sa_sel:5649321700", "2")
+        assert await get_raw_app_setting(db, "sa_sel:5649321700") == "2"
+
+        # Tenant #1 cannot be deleted; Tenant #2 can be deleted cleanly
+        assert await delete_tenant(db, 1) is False
+        assert await delete_tenant(db, 2) is True
+        assert [t.id for t in await list_tenants(db)] == [1]
+
+    asyncio.run(_run_with_db(tmp_path, _logic))
+
+
+def test_excel_exports_formulas_full_akt_sverka_and_no_cost_leak(tmp_path: Path):
+    """Verify full untruncated Akt Sverka (>100 rows), formulas, no cost leaks, and 4-sheet period Excel."""
+    from services.excel_export import (
+        build_client_statement_excel,
+        build_daily_norin_excel,
+        build_period_excel,
+    )
+
+    async def _logic(db):
+        prods = await list_products(db)
+        c = await create_client(db, "Mega Bozor", opening_debt=200_000)
+        sale = await create_pending_sale(
+            db,
+            client_id=c.id,
+            items_spec=[{"product_id": prods[0].id, "weight_kg": 10.0}],
+        )
+        await confirm_sale(db, sale.id)
+        await add_cash_transaction(
+            db, amount=150_000, source_type="expense", note="xamir oldik", category="Xamir"
+        )
+        # Add 105 payments -> total events = 106 (> old 100 truncation cap)
+        for idx in range(105):
+            await add_client_payment(
+                db, client_id=c.id, amount=1_000, payment_method="cash", note=f"p{idx}"
+            )
+
+        summary = await compute_session_summary(db)
+        debts = await list_all_client_debts(db)
+        daily_bytes = build_daily_norin_excel(summary, debts, tenant_name="Asad Test Sexi")
+        wb_daily = load_workbook(io.BytesIO(daily_bytes), data_only=False)
+        assert "Kunlik Hisobot" in wb_daily.sheetnames
+        assert "Pul Oldi-Berdi" in wb_daily.sheetnames
+        daily_formulas = [
+            str(cell.value)
+            for ws in wb_daily.worksheets
+            for row in ws.iter_rows()
+            for cell in row
+            if isinstance(cell.value, str) and cell.value.startswith("=")
+        ]
+        assert any("=SUM(" in f for f in daily_formulas)
+
+        # Full Akt Sverka check
+        debt_full = await compute_client_debt(db, c.id, history_limit=None)
+        assert len(debt_full.recent_sales) == 1
+        assert len(debt_full.recent_payments) == 105
+        stmt_bytes = build_client_statement_excel(debt_full, tenant_name="Asad Test Sexi")
+        wb_stmt = load_workbook(io.BytesIO(stmt_bytes), data_only=False)
+        assert "Akt Sverka" in wb_stmt.sheetnames
+        all_stmt_text = " ".join(
+            str(cell.value or "")
+            for ws in wb_stmt.worksheets
+            for row in ws.iter_rows()
+            for cell in row
+        ).lower()
+        assert "tannarx" not in all_stmt_text
+        assert "foyda" not in all_stmt_text
+        assert "marja" not in all_stmt_text
+        sverka_ws = wb_stmt["Akt Sverka"]
+        assert sverka_ws.max_row >= 115
+        stmt_formulas = [
+            str(cell.value)
+            for row in sverka_ws.iter_rows()
+            for cell in row
+            if isinstance(cell.value, str) and cell.value.startswith("=")
+        ]
+        assert any("=H" in f and "-" in f for f in stmt_formulas)
+
+        # 4-sheet Period Excel check
+        pdata = await get_period_excel_data(db, days=30)
+        period_bytes = build_period_excel(pdata)
+        wb_period = load_workbook(io.BytesIO(period_bytes), data_only=False)
+        assert len(wb_period.sheetnames) == 4
+
+    asyncio.run(_run_with_db(tmp_path, _logic))

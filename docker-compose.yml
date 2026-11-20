@@ -37,5 +37,38 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  norin-backup:
+    image: postgres:16-alpine
+    container_name: norin-backup
+    restart: unless-stopped
+    depends_on:
+      norin-postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-norin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-norin_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-norin_db}
+    volumes:
+      - ./data/backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /backups
+        while true; do
+          TS=$$(date +%Y-%m-%d_%H%M)
+          OUT="/backups/norin_$$TS.sql.gz"
+          if PGPASSWORD="$$POSTGRES_PASSWORD" pg_dump -h norin-postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" > /tmp/norin_dump.sql; then
+            gzip -c /tmp/norin_dump.sql > "$$OUT"
+          fi
+          rm -f /tmp/norin_dump.sql
+          find /backups -name "norin_*.sql.gz" -type f -mtime +14 -delete
+          sleep 86400
+        done
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
 volumes:
   norin_pgdata:

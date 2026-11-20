@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
@@ -76,6 +77,11 @@ def parse_uzbek_amount(text: str) -> Optional[float]:
                 found_any = True
         return total if found_any else None
 
+    yarim_patterns = [
+        (r"(?:(\d+)\s+)?\b(?:yarim|ярим)\s*(?:mlrd|milliard|миллиард)\b", 1_000_000_000),
+        (r"(?:(\d+)\s+)?\b(?:yarim|ярим)\s*(?:mln|million|миллион|млн)\b", 1_000_000),
+        (r"(?:(\d+)\s+)?\b(?:yarim|ярим)\s*(?:ming|тысяч|тыс|k)\b", 1_000),
+    ]
     multiplier_patterns = [
         (r"(\d+(?:[.,]\d+)?)\s*(?:mlrd|milliard|миллиард)\b", 1_000_000_000),
         (r"(\d+(?:[.,]\d+)?)\s*(?:mln|million|миллион|млн)\b", 1_000_000),
@@ -84,6 +90,13 @@ def parse_uzbek_amount(text: str) -> Optional[float]:
     total_multi = 0.0
     matched_multi = False
     remainder = cleaned
+    for pattern, mult in yarim_patterns:
+        for match in re.finditer(pattern, remainder):
+            whole = float(match.group(1)) if match.group(1) else 0.0
+            total_multi += (whole + 0.5) * mult
+            matched_multi = True
+        remainder = re.sub(pattern, " ", remainder)
+
     for pattern, mult in multiplier_patterns:
         for match in re.finditer(pattern, remainder):
             num_str = match.group(1).replace(",", ".")
@@ -193,6 +206,7 @@ def _extract_json_object(raw_text: str) -> Dict[str, Any]:
 
 
 _HTTP_CLIENT: Optional[httpx.AsyncClient] = None
+_UNAVAILABLE_MODELS: Dict[str, float] = {}
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -206,8 +220,31 @@ def _get_http_client() -> httpx.AsyncClient:
     return _HTTP_CLIENT
 
 
-async def _call_gemini(parts: list[dict[str, Any]]) -> Dict[str, Any]:
-    """Send multimodal content to Gemini generateContent endpoint with model fallback and retry."""
+async def _record_ai_usage_safe(
+    kind: str, model_name: str, usage: Dict[str, Any]
+) -> None:
+    """Best-effort record Gemini token usage in database without failing AI calls."""
+    try:
+        from database.crud import log_ai_usage
+        from database.session import async_session_maker
+
+        async with async_session_maker() as db:
+            await log_ai_usage(
+                db,
+                kind=kind,
+                model_name=model_name,
+                prompt_tokens=int(usage.get("promptTokenCount") or 0),
+                output_tokens=int(usage.get("candidatesTokenCount") or 0),
+                total_tokens=int(usage.get("totalTokenCount") or 0),
+            )
+    except Exception:
+        pass
+
+
+async def _call_gemini(
+    parts: list[dict[str, Any]], kind: str = "image"
+) -> Dict[str, Any]:
+    """Send multimodal content (image or audio) to Gemini with fallback and token logging."""
     settings = get_settings()
     if not settings.GEMINI_API_KEY:
         return {"error": "GEMINI_API_KEY sozlanmagan"}
@@ -224,21 +261,24 @@ async def _call_gemini(parts: list[dict[str, Any]]) -> Dict[str, Any]:
     for model_name in (
         settings.GEMINI_MODEL,
         "gemini-flash-lite-latest",
-        "gemini-3.5-flash-lite",
-        "gemini-3.5-flash",
-        "gemini-3.7-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash",
         "gemini-flash-latest",
-        "gemini-3.8-flash",
     ):
         if model_name and model_name not in candidates_order:
             candidates_order.append(model_name)
 
     last_exc: Optional[Exception] = None
     body: Dict[str, Any] = {}
+    used_model = ""
     client = _get_http_client()
 
     for attempt in range(2):
+        now_mono = time.monotonic()
         for model_name in candidates_order:
+            blocked_at = _UNAVAILABLE_MODELS.get(model_name)
+            if blocked_at is not None and (now_mono - blocked_at) < 3600:
+                continue
             url = (
                 f"https://generativelanguage.googleapis.com/v1beta/models/"
                 f"{model_name}:generateContent"
@@ -249,7 +289,16 @@ async def _call_gemini(parts: list[dict[str, Any]]) -> Dict[str, Any]:
                     params={"key": settings.GEMINI_API_KEY},
                     json=payload,
                 )
-                if resp.status_code in (404, 429, 503):
+                if resp.status_code == 404:
+                    _UNAVAILABLE_MODELS[model_name] = time.monotonic()
+                    logger.warning("Gemini model %s returned 404 (cached skip 1h)", model_name)
+                    last_exc = httpx.HTTPStatusError(
+                        f"Model {model_name} returned 404",
+                        request=resp.request,
+                        response=resp,
+                    )
+                    continue
+                if resp.status_code in (429, 503):
                     logger.warning(
                         "Gemini model %s returned HTTP %s (attempt %s)",
                         model_name,
@@ -264,6 +313,7 @@ async def _call_gemini(parts: list[dict[str, Any]]) -> Dict[str, Any]:
                     continue
                 resp.raise_for_status()
                 body = resp.json()
+                used_model = model_name
                 last_exc = None
                 break
             except httpx.HTTPError as exc:
@@ -283,6 +333,8 @@ async def _call_gemini(parts: list[dict[str, Any]]) -> Dict[str, Any]:
 
     if last_exc is not None:
         raise last_exc
+
+    await _record_ai_usage_safe(kind, used_model, body.get("usageMetadata") or {})
 
     candidates = body.get("candidates") or []
     if not candidates:
@@ -328,36 +380,31 @@ async def extract_norin_from_image(
     multiple stickers/rows of the same product if present.
     """
     products_ctx = _format_products_context(products)
-    clients_ctx = _format_clients_context(clients)
+    clients_block = (
+        f"Mavjud mijozlar ro'yxati:\n{_format_clients_context(clients)}\n\n"
+        if clients
+        else ""
+    )
 
     prompt = (
         "Siz O'zbekistondagi Norin ishlab chiqaruvchi sexning hisobchi AI yordamchisisiz.\n"
         "Sizga do'kon/tarozi cheki yoki nakladnoy rasmi yuborildi.\n\n"
         "MUHIM QOIDA:\n"
-        "1. Chekda yozilgan SO'M NARXLARI va SUMMALARNI MUTLAQO E'TIBORSIZ QOLDIRING! "
-        "(Do'konning chakana narxi bizga kerak emas — biz faqat KG miqdorini olamiz va o'zimizning mijoz narxiga ko'paytiramiz.)\n"
-        "2. Rasmdan har bir mahsulotning KG (kilogramm / вес / масса / кг) miqdorini va qaysi turdagi mahsulot ekanini aniqlang.\n"
-        "3. Agar bitta rasmda bir nechta tarozi cheki/nakleyka yoki bir xil mahsulotdan bir nechta qator bo'lsa, "
-        "alohida kg sonlarini `weights_breakdown` ro'yxatiga yozing va jami kg ni `weight_kg` ga jamlab chiqaring.\n\n"
+        "1. Chekdagi SO'M NARXLARI va SUMMALARNI E'TIBORSIZ QOLDIRING! Faqat KG miqdorini va mahsulot turini oling.\n"
+        "2. Bir nechta tarozi cheki/qator bo'lsa, har bir kg ni `weights_breakdown` ga yozib jami `weight_kg` ni chiqaring.\n\n"
         f"Mavjud mahsulotlar katalogi:\n{products_ctx}\n\n"
-        f"Mavjud mijozlar ro'yxati:\n{clients_ctx}\n\n"
+        f"{clients_block}"
     )
     if caption:
-        prompt += f"Foydalanuvchi rasm ostiga yozgan izoh (caption): {caption}\n\n"
+        prompt += f"Rasm izohi (caption): {caption}\n\n"
 
     prompt += (
         "JSON formatda qaytaring:\n"
         "{\n"
-        '  "client_hint": "rasm yoki izohdan topilgan mijoz/do\'kon nomi, topilmasa null",\n'
-        '  "items": [\n'
-        "    {\n"
-        '      "product_hint": "mahsulot nomi yoki turi, masalan: Norin (Ot go\'shtli) yoki Norin (Mol go\'shtli)",\n'
-        '      "weight_kg": 25.0,\n'
-        '      "weights_breakdown": [8.25, 9.1, 7.65]\n'
-        "    }\n"
-        "  ],\n"
+        '  "client_hint": "mijoz/do\'kon nomi, topilmasa null",\n'
+        '  "items": [{"product_hint": "mahsulot nomi", "weight_kg": 25.0, "weights_breakdown": [8.25, 9.1]}],\n'
         '  "is_clear": true,\n'
-        '  "notes": "qisqa izoh (nimalar o\'qildi)"\n'
+        '  "notes": "qisqa izoh"\n'
         "}"
     )
 
@@ -368,7 +415,7 @@ async def extract_norin_from_image(
     ]
 
     try:
-        data = await _call_gemini(parts)
+        data = await _call_gemini(parts, kind="image")
     except Exception as exc:
         fallback_items = []
         if caption:
@@ -594,9 +641,13 @@ def _heuristic_parse_norin_text(
     # Search for product + weight or weight + product pairs in working_text
     # Pattern A: <product> <weights (+ weights)> [kg]
     # Pattern B: <weights (+ weights)> <kg> [<product>]
+    weight_expr = (
+        r"(?:(?:\d+\s+)?(?:yarim|ярим)"
+        r"|\d+(?:[.,]\d+)?(?:\s*\+\s*\d+(?:[.,]\d+)?)*)"
+    )
     pair_pattern = re.compile(
-        rf"(?i)(?:(?P<prod1>{prod_alt})\s*[:\-]?\s*(?P<w1>\d+(?:[.,]\d+)?(?:\s*\+\s*\d+(?:[.,]\d+)?)*)\s*(?:kg|kilo|kilogramm|кг|кило)?)"
-        rf"|(?:(?P<w2>\d+(?:[.,]\d+)?(?:\s*\+\s*\d+(?:[.,]\d+)?)*)\s*(?:kg|kilo|kilogramm|кг|кило)\s*(?P<prod2>{prod_alt})?)"
+        rf"(?i)(?:(?P<prod1>{prod_alt})\s*[:\-]?\s*(?P<w1>{weight_expr})\s*(?:kg|kilo|kilogramm|кг|кило)?)"
+        rf"|(?:(?P<w2>{weight_expr})\s*(?:kg|kilo|kilogramm|кг|кило)\s*(?P<prod2>{prod_alt})?)"
     )
 
     items: List[Dict[str, Any]] = []
@@ -726,6 +777,36 @@ def _heuristic_parse_norin_text(
     return None
 
 
+async def extract_amount_from_audio(
+    audio_bytes: bytes, mime_type: str = "audio/ogg"
+) -> tuple[Optional[float], str]:
+    """Lightweight Gemini Audio extractor returning only monetary amount (UZS) & transcript (~80 tokens)."""
+    prompt = (
+        "O'zbek/rus tilidagi audiodan pul summasini (so'mda) va matnini aniqlang.\n"
+        'JSON qaytaring: {"amount": 2500000, "transcript": "matn"}. Topilmasa amount: null.'
+    )
+    encoded = base64.b64encode(audio_bytes).decode("ascii")
+    parts: list[dict[str, Any]] = [
+        {"text": prompt},
+        {"inlineData": {"mimeType": mime_type, "data": encoded}},
+    ]
+    try:
+        data = await _call_gemini(parts, kind="audio")
+    except Exception as exc:
+        return None, f"Audio xatolik: {exc}"
+
+    transcript = str(data.get("transcript") or "").strip()
+    raw_amt = data.get("amount")
+    amount: Optional[float] = None
+    if isinstance(raw_amt, (int, float)) and raw_amt > 0:
+        amount = float(raw_amt)
+    elif isinstance(raw_amt, str):
+        amount = parse_uzbek_amount(raw_amt)
+    if (amount is None or amount <= 0) and transcript:
+        amount = parse_uzbek_amount(transcript)
+    return amount, transcript
+
+
 async def parse_norin_voice_or_text(
     products: Sequence[Product],
     clients: Sequence[Client],
@@ -734,60 +815,44 @@ async def parse_norin_voice_or_text(
     mime_type: str = "audio/ogg",
 ) -> Dict[str, Any]:
     """
-    Understand an Uzbek/Russian voice message or free-form text for Norin wholesale business.
-
-    Returns dict:
-        {
-            "intent": "sale" | "client_payment" | "expense" | "cash_in" | "kassa_debt" | "kassa_repay" | "debts" | "status" | "number_only" | "unknown",
-            "client_hint": str | None,
-            "items": [{"product_hint": str, "weight_kg": float, "weights_breakdown": list[float]}],
-            "amount": float | None,
-            "payment_method": "cash" | "card" | "transfer" | None,
-            "note": str,
-            "transcript": str
-        }
+    Understand an Uzbek/Russian voice message (via Gemini Audio) or text (100% local, 0 AI tokens).
     """
-    if text and not audio_bytes:
-        heuristic = _heuristic_parse_norin_text(text, products, clients)
-        if heuristic is not None:
-            return heuristic
+    if not audio_bytes:
+        raw_text = (text or "").strip()
+        if raw_text:
+            heuristic = _heuristic_parse_norin_text(raw_text, products, clients)
+            if heuristic is not None:
+                return heuristic
+        return {
+            "intent": "unknown",
+            "client_hint": None,
+            "items": [],
+            "amount": parse_uzbek_amount(raw_text) if raw_text else None,
+            "payment_method": None,
+            "note": raw_text,
+            "transcript": raw_text,
+        }
 
     products_ctx = _format_products_context(products)
     clients_ctx = _format_clients_context(clients)
 
     prompt = (
-        "Siz O'zbekistondagi Norin ishlab chiqaruvchi sexning moliyaviy AI yordamchisisiz.\n"
-        "Foydalanuvchi o'zbek yoki rus tilida ovozli xabar yoki matn yubordi.\n\n"
-        f"Mahsulotlar:\n{products_ctx}\n\n"
-        f"Mijozlar:\n{clients_ctx}\n\n"
-        "Vazifa: Xabarni tushunib JSON qaytaring:\n"
-        '- "transcript": Xabar matni (audio bo\'lsa o\'zbek/rus tilidagi matn).\n'
-        '- "intent": Quyidagilardan BITTA qiymat:\n'
-        '  * "sale": Mijozga kg da norin/mahsulot chiqarilsa (masalan: "Iftiqor norin ot 25 kg", "ot 12.5 kg mol 8 kg").\n'
-        '  * "client_payment": Mijozdan pul/qarz olinsa (masalan: "Iftiqordan 2 million karta oldim", "Chorsudan 5 mln naqd tushdi").\n'
-        '  * "expense": Sex xarajati (masalan: "Go\'shtga 3 yarim million xarajat", "Xamirga 400 ming rasxod").\n'
-        '  * "cash_in": Asosiy kassaga/qo\'lga pul qo\'shish ("Pul oldim 10 million").\n'
-        '  * "kassa_debt": "Kassadan 2 million oldim".\n'
-        '  * "kassa_repay": "Kassaga 2 million qaytardim".\n'
-        '  * "debts": "Qarzlar", "Kimdan qancha qarz bor".\n'
-        '  * "status": "Status", "Kunlik hisobot", "Foyda qancha".\n'
-        '  * "unknown": Boshqa narsa bo\'lsa.\n'
-        '- "client_hint": Mijoz nomi (topilsa), bo\'lmasa null.\n'
-        '- "items": Agar intent="sale" bo\'lsa: [{"product_hint": "...", "weight_kg": 25.0, "weights_breakdown": []}].\n'
-        '- "amount": Pul summasi (so\'mda, raqamda), bo\'lmasa null.\n'
-        '- "payment_method": Agar client_payment bo\'lsa "cash", "card", yoki "transfer"; bo\'lmasa null.\n'
-        'Faqat JSON qaytaring.'
+        "Siz Norin sexi hisobchi AI yordamchisisiz. Audio xabardan JSON qaytaring:\n"
+        f"Mahsulotlar:\n{products_ctx}\nMijozlar:\n{clients_ctx}\n\n"
+        'intent: "sale"|"client_payment"|"expense"|"cash_in"|"kassa_debt"|"kassa_repay"|"debts"|"status"|"unknown"\n'
+        '{"transcript":"...", "intent":"...", "client_hint":null, '
+        '"items":[{"product_hint":"...", "weight_kg":25.0}], '
+        '"amount":null, "payment_method":"cash"|"card"|"transfer"|null}'
     )
 
-    parts: list[dict[str, Any]] = [{"text": prompt}]
-    if text:
-        parts.append({"text": f"Foydalanuvchi matni: {text}"})
-    if audio_bytes:
-        encoded = base64.b64encode(audio_bytes).decode("ascii")
-        parts.append({"inlineData": {"mimeType": mime_type, "data": encoded}})
+    encoded = base64.b64encode(audio_bytes).decode("ascii")
+    parts: list[dict[str, Any]] = [
+        {"text": prompt},
+        {"inlineData": {"mimeType": mime_type, "data": encoded}},
+    ]
 
     try:
-        data = await _call_gemini(parts)
+        data = await _call_gemini(parts, kind="audio")
     except Exception as exc:
         fallback_amt = parse_uzbek_amount(text or "") if text else None
         return {

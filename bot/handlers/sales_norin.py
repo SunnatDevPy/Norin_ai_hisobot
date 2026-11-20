@@ -20,9 +20,11 @@ from bot.keyboards import (
     BTN_ADD_SALE,
     BTN_CLIENT_PAY,
     BTN_EDIT,
+    MAIN_MENU_BUTTONS,
     auto_confirmed_sale_kb,
     cancel_reply_keyboard,
     cash_tx_edit_kb,
+    confirm_delete_kb,
     confirmed_sale_edit_kb,
     daily_report_kb,
     debts_list_kb,
@@ -33,6 +35,8 @@ from bot.keyboards import (
     payment_method_kb,
     pick_client_for_payment_kb,
     pick_client_for_sale_kb,
+    pick_product_for_item_kb,
+    quick_sale_payment_kb,
     sale_confirm_kb,
 )
 from bot.states import SaleStates, WalletStates
@@ -50,9 +54,12 @@ from database.crud import (
     find_duplicate_confirmed_sale,
     format_local_dt,
     get_app_setting,
+    get_cash_transaction,
     get_client,
     get_client_by_group,
     get_client_payment,
+    get_open_session,
+    get_product,
     get_sale,
     list_all_client_debts,
     list_authorized_users,
@@ -63,6 +70,7 @@ from database.crud import (
     round_amount,
     set_client_payment_group_message,
     set_sale_group_message,
+    today_iso,
     update_cash_transaction,
     update_client_payment,
     update_sale_client,
@@ -71,6 +79,8 @@ from database.crud import (
 from database.models import CashTransaction, ClientPayment, Product, Sale, SaleItem
 from database.session import async_session_maker
 from services.gemini_ai import (
+    _heuristic_parse_norin_text,
+    extract_amount_from_audio,
     extract_norin_from_image,
     format_kg,
     format_uzs,
@@ -500,6 +510,8 @@ async def _process_ready_sale(
         # If client is missing, do not auto-confirm — ask user to pick client!
         if client_id is None:
             await state.clear()
+            if was_in_fsm:
+                await message.answer("🔍 Hisob tayyor!", reply_markup=main_menu_keyboard())
             await message.answer(
                 f"{prefix_html}"
                 f"{render_sale_admin_summary(sale)}\n\n"
@@ -521,6 +533,8 @@ async def _process_ready_sale(
         posted, group_notice = await _post_sale_to_client_group(
             message.bot, sale, debt.current_debt
         )
+        if was_in_fsm:
+            await message.answer("⚡ Avto-tasdiqlandi!", reply_markup=main_menu_keyboard())
         await message.answer(
             f"{prefix_html}"
             f"⚡ <b>Avto-tasdiqlandi!</b>\n"
@@ -529,8 +543,6 @@ async def _process_ready_sale(
             parse_mode="HTML",
             reply_markup=auto_confirmed_sale_kb(sale, sent_to_group=posted),
         )
-        if was_in_fsm:
-            await message.answer("📋 Asosiy menyu:", reply_markup=main_menu_keyboard())
         return
 
     dup_warn = ""
@@ -539,6 +551,8 @@ async def _process_ready_sale(
             f"\n\n⚠️ <b>DIQQAT (Dublikat ehtimoli):</b> Bugun <b>{html.escape(sale.client.name if sale.client else '')}</b> "
             f"uchun <b>{format_kg(dup.total_weight_kg)} kg</b> allaqachon tasdiqlangan!"
         )
+    if was_in_fsm:
+        await message.answer("🔍 Tekshirib tasdiqlang:", reply_markup=main_menu_keyboard())
     await message.answer(
         f"{prefix_html}"
         f"{render_sale_admin_summary(sale)}{dup_warn}\n\n"
@@ -546,8 +560,6 @@ async def _process_ready_sale(
         parse_mode="HTML",
         reply_markup=sale_confirm_kb(sale),
     )
-    if was_in_fsm:
-        await message.answer("👇 Tasdiqlang yoki tahrirlang:", reply_markup=main_menu_keyboard())
 
 
 # ---------------------------------------------------------------------------
@@ -559,13 +571,23 @@ async def _process_ready_sale(
 async def handle_add_sale_btn(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
+    await state.clear()
+    warn_prev = ""
+    async with async_session_maker() as db:
+        open_sess = await get_open_session(db)
+        if open_sess and open_sess.report_date != today_iso():
+            warn_prev = (
+                f"\n\n⚠️ <i>Eslatma: <code>{open_sess.report_date}</code> smenasi hali yopilmagan "
+                "(avval «🏁 Kunni yakunlash» ni bosishingiz mumkin).</i>"
+            )
     await state.set_state(SaleStates.waiting_sale_input)
     await message.answer(
         "🥩 <b>Yangi Norin Sotuvi</b>\n\n"
         "Quyidagilardan birini yuboring:\n"
         "• 📸 <b>Tarozi / do'kon cheki rasmi</b> (AI faqat KG ni o'qiydi, chekdagi do'kon narxiga qaramaydi!)\n"
         "• 🎤 <b>Ovozli xabar</b>: <i>«Iftiqor 80 notin ot 25 kg»</i>\n"
-        "• ✍️ <b>Matn</b>: <i>«Iftiqor ot 12.5 kg mol 8 kg»</i>",
+        "• ✍️ <b>Matn</b>: <i>«Iftiqor ot 12.5 kg mol 8 kg»</i>"
+        f"{warn_prev}",
         parse_mode="HTML",
         reply_markup=cancel_reply_keyboard(),
     )
@@ -624,7 +646,11 @@ async def _process_dm_photo(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(SaleStates.waiting_sale_clarify, F.chat.type == "private")
+@router.message(
+    SaleStates.waiting_sale_clarify,
+    F.chat.type == "private",
+    (~F.text) | (~F.text.startswith("/") & ~F.text.in_(MAIN_MENU_BUTTONS) & (F.text != "❌ Bekor qilish")),
+)
 async def process_sale_clarify(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -637,6 +663,10 @@ async def process_sale_clarify(message: Message, state: FSMContext) -> None:
         clients = await list_clients(db, active_only=True)
 
     if message.voice or message.audio:
+        file_obj = message.voice or message.audio
+        if (getattr(file_obj, "duration", 0) or 0) > 90:
+            await message.answer("⚠️ Ovozli xabar 90 soniyadan oshmasligi kerak (qisqaroq ayting).")
+            return
         audio_bytes, mime = await _download_voice_bytes(message)
         parsed = await parse_norin_voice_or_text(
             products, clients, audio_bytes=audio_bytes, mime_type=mime
@@ -683,9 +713,168 @@ async def cb_sale_pick_client(cb: CallbackQuery) -> None:
     async with async_session_maker() as db:
         clients = await list_clients(db, active_only=True)
     await cb.message.edit_reply_markup(
-        reply_markup=pick_client_for_sale_kb(sale_id, clients, prefix="sale:setcli")
+        reply_markup=pick_client_for_sale_kb(sale_id, clients, prefix="sale:setcli", page=0)
     )
     await cb.answer()
+
+
+@router.callback_query(F.data.startswith("sale:pcli:"))
+async def cb_sale_pick_client_page(cb: CallbackQuery) -> None:
+    parts = cb.data.split(":")
+    sale_id = int(parts[2])
+    page = int(parts[3])
+    async with async_session_maker() as db:
+        clients = await list_clients(db, active_only=True)
+    await cb.message.edit_reply_markup(
+        reply_markup=pick_client_for_sale_kb(sale_id, clients, prefix="sale:setcli", page=page)
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("sale:back_card:"))
+async def cb_sale_back_card(cb: CallbackQuery) -> None:
+    sale_id = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        sale = await get_sale(db, sale_id)
+        if not sale or sale.status == "deleted":
+            await cb.answer("Topilmadi", show_alert=True)
+            return
+        debt = (
+            await compute_client_debt(db, sale.client_id, history_limit=1)
+            if sale.client_id
+            else None
+        )
+    if sale.status == "confirmed":
+        await cb.message.edit_text(
+            render_sale_admin_summary(sale, debt.current_debt if debt else None),
+            parse_mode="HTML",
+            reply_markup=confirmed_sale_edit_kb(sale),
+        )
+    else:
+        await cb.message.edit_text(
+            f"{render_sale_admin_summary(sale)}\n\nTasdiqlaysizmi?",
+            parse_mode="HTML",
+            reply_markup=sale_confirm_kb(sale),
+        )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("sale:edit_prod:"))
+async def cb_sale_edit_product_menu(cb: CallbackQuery) -> None:
+    item_id = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        item = await db.get(SaleItem, item_id)
+        sale = await get_sale(db, item.sale_id) if item else None
+        if not item or not sale or sale.status == "deleted":
+            await cb.answer("Topilmadi", show_alert=True)
+            return
+        products = await list_products(db, active_only=True)
+    back_cb = f"sale_view:{sale.id}" if sale.status == "confirmed" else f"sale:back_card:{sale.id}"
+    await cb.message.edit_text(
+        f"🥩 <b>{html.escape(item.product_name)}</b> ({format_kg(item.weight_kg)} kg) o'rniga qaysi mahsulotni qo'yamiz?",
+        parse_mode="HTML",
+        reply_markup=pick_product_for_item_kb(item_id, products, back_cb=back_cb),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("sale:set_prod:"))
+async def cb_sale_set_product(cb: CallbackQuery) -> None:
+    parts = cb.data.split(":")
+    item_id = int(parts[2])
+    new_pid = int(parts[3])
+    async with async_session_maker() as db:
+        old_item = await db.get(SaleItem, item_id)
+        old_sale = await get_sale(db, old_item.sale_id) if old_item else None
+        if not old_item or not old_sale or old_sale.status == "deleted":
+            await cb.answer("Topilmadi", show_alert=True)
+            return
+        old_name = old_item.product_name
+        old_total = float(old_sale.total_amount)
+        prod = await get_product(db, new_pid)
+        if not prod:
+            await cb.answer("Mahsulot topilmadi", show_alert=True)
+            return
+        sale = await update_sale_item(db, item_id, product_id=new_pid)
+        if not sale:
+            await cb.answer("Topilmadi", show_alert=True)
+            return
+        debt = (
+            await compute_client_debt(db, sale.client_id, history_limit=1)
+            if sale.client_id
+            else None
+        )
+    if sale.status == "confirmed":
+        change_line = (
+            f"🥩 Mahsulot: <s>{html.escape(old_name)}</s> → <b>{html.escape(prod.name)}</b>\n"
+            f"💰 Summa: <s>{format_uzs(old_total)}</s> → <b>{format_uzs(sale.total_amount)} so'm</b>"
+        )
+        _, sync_msg = await _sync_sale_group_message(
+            cb.bot,
+            sale,
+            debt.current_debt if debt else 0.0,
+            tag="✏️ [MAHSULOT O'ZGARDI]",
+            change_line=change_line,
+        )
+        await cb.message.edit_text(
+            f"✅ Mahsulot almashtirildi!\n{render_sale_admin_summary(sale, debt.current_debt if debt else None)}\n{sync_msg}",
+            parse_mode="HTML",
+            reply_markup=confirmed_sale_edit_kb(sale),
+        )
+    else:
+        await cb.message.edit_text(
+            f"✅ Mahsulot yangilandi!\n{render_sale_admin_summary(sale)}\n\nTasdiqlaysizmi?",
+            parse_mode="HTML",
+            reply_markup=sale_confirm_kb(sale),
+        )
+    await cb.answer("✅ Almashtirildi!")
+
+
+@router.callback_query(F.data.startswith("sale:quick_pay:"))
+async def cb_sale_quick_pay_menu(cb: CallbackQuery) -> None:
+    sale_id = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        sale = await get_sale(db, sale_id)
+        if not sale or not sale.client_id or sale.status == "deleted":
+            await cb.answer("Avval mijozni tanlang!", show_alert=True)
+            return
+        debt = await compute_client_debt(db, sale.client_id, history_limit=1)
+    await cb.message.edit_text(
+        f"💵 <b>Tezkor To'lov — {html.escape(debt.client.name)}</b>\n"
+        f"🧾 Sotuv #{sale.id}: <b>{format_uzs(sale.total_amount)} so'm</b>\n"
+        f"💳 Hozirgi jami qarz: <b>{format_uzs(debt.current_debt)} so'm</b>\n\n"
+        "To'lov usulini tanlang:",
+        parse_mode="HTML",
+        reply_markup=quick_sale_payment_kb(sale),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("sale:qpay_do:"))
+async def cb_sale_quick_pay_execute(cb: CallbackQuery) -> None:
+    parts = cb.data.split(":")
+    sale_id = int(parts[2])
+    method = parts[3]
+    async with async_session_maker() as db:
+        sale = await get_sale(db, sale_id)
+        if not sale or not sale.client_id or sale.status == "deleted":
+            await cb.answer("Topilmadi", show_alert=True)
+            return
+        pay = await add_client_payment(
+            db,
+            client_id=sale.client_id,
+            amount=float(sale.total_amount),
+            payment_method=method,
+            note=f"Sotuv #{sale.id} to'lovi",
+        )
+        debt = await compute_client_debt(db, sale.client_id, history_limit=1)
+    await cb.message.edit_text(
+        f"✅ <b>To'lov qabul qilindi!</b>\n"
+        f"{render_payment_group_receipt(pay, debt.current_debt)}",
+        parse_mode="HTML",
+        reply_markup=payment_after_record_kb(pay.id, has_group=bool(debt.client.group_chat_id)),
+    )
+    await cb.answer("✅ Saqlandi!")
 
 
 @router.callback_query(F.data.startswith("sale:setcli:"))
@@ -917,6 +1106,23 @@ async def cb_sale_cancel(cb: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("sale:delete_conf:"))
+async def cb_sale_delete_prompt(cb: CallbackQuery) -> None:
+    sale_id = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        sale = await get_sale(db, sale_id)
+    if not sale or sale.status == "deleted":
+        await cb.answer("Topilmadi", show_alert=True)
+        return
+    await cb.message.edit_text(
+        f"⚠️ <b>Sotuv #{sale.id}</b> ({format_kg(sale.total_weight_kg)} kg — {format_uzs(sale.total_amount)} so'm) "
+        "rostdan ham o'chirasizmi?",
+        parse_mode="HTML",
+        reply_markup=confirm_delete_kb(f"sale:delete_ok:{sale_id}", f"sale_view:{sale_id}"),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("sale:delete_ok:"))
 async def cb_sale_delete_confirmed(cb: CallbackQuery) -> None:
     sale_id = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
@@ -956,7 +1162,14 @@ async def cb_sale_edit_weight_prompt(cb: CallbackQuery, state: FSMContext) -> No
     await cb.answer()
 
 
-@router.message(SaleStates.waiting_edit_item_weight, F.chat.type == "private")
+@router.message(
+    SaleStates.waiting_edit_item_weight,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_sale_edit_weight(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -999,21 +1212,19 @@ async def process_sale_edit_weight(message: Message, state: FSMContext) -> None:
             tag="✏️ [KG TAHRIRLANDI]",
             change_line=change_line,
         )
+        await message.answer("✅ Vazn yangilandi!", reply_markup=main_menu_keyboard())
         await message.answer(
-            f"✅ Vazn yangilandi!\n"
-            f"{render_sale_admin_summary(sale, debt.current_debt if debt else None)}\n"
-            f"{sync_msg}",
+            f"{render_sale_admin_summary(sale, debt.current_debt if debt else None)}\n{sync_msg}",
             parse_mode="HTML",
             reply_markup=confirmed_sale_edit_kb(sale),
         )
-        await message.answer("📋 Asosiy menyu:", reply_markup=main_menu_keyboard())
     else:
+        await message.answer("✅ Vazn yangilandi!", reply_markup=main_menu_keyboard())
         await message.answer(
             f"{render_sale_admin_summary(sale)}\n\nTasdiqlaysizmi?",
             parse_mode="HTML",
             reply_markup=sale_confirm_kb(sale),
         )
-        await message.answer("📋 Asosiy menyu:", reply_markup=main_menu_keyboard())
 
 
 @router.callback_query(F.data.startswith("sale:edit_p:"))
@@ -1029,7 +1240,14 @@ async def cb_sale_edit_price_prompt(cb: CallbackQuery, state: FSMContext) -> Non
     await cb.answer()
 
 
-@router.message(SaleStates.waiting_edit_item_price, F.chat.type == "private")
+@router.message(
+    SaleStates.waiting_edit_item_price,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_sale_edit_price(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -1068,21 +1286,19 @@ async def process_sale_edit_price(message: Message, state: FSMContext) -> None:
             tag="✏️ [NARX TAHRIRLANDI]",
             change_line=change_line,
         )
+        await message.answer("✅ Narx yangilandi!", reply_markup=main_menu_keyboard())
         await message.answer(
-            f"✅ Narx yangilandi!\n"
-            f"{render_sale_admin_summary(sale, debt.current_debt if debt else None)}\n"
-            f"{sync_msg}",
+            f"{render_sale_admin_summary(sale, debt.current_debt if debt else None)}\n{sync_msg}",
             parse_mode="HTML",
             reply_markup=confirmed_sale_edit_kb(sale),
         )
-        await message.answer("📋 Asosiy menyu:", reply_markup=main_menu_keyboard())
     else:
+        await message.answer("✅ Narx yangilandi!", reply_markup=main_menu_keyboard())
         await message.answer(
             f"{render_sale_admin_summary(sale)}\n\nTasdiqlaysizmi?",
             parse_mode="HTML",
             reply_markup=sale_confirm_kb(sale),
         )
-        await message.answer("📋 Asosiy menyu:", reply_markup=main_menu_keyboard())
 
 
 # ---------------------------------------------------------------------------
@@ -1103,8 +1319,29 @@ async def handle_client_pay_btn(message: Message, state: FSMContext) -> None:
     await message.answer(
         "💵 <b>Qaysi mijozdan pul oldingiz?</b>\nMijozni tanlang (yoki ovoz/matnda <i>«Iftiqordan 2 mln karta oldim»</i> deb yuboring):",
         parse_mode="HTML",
-        reply_markup=pick_client_for_payment_kb(clients),
+        reply_markup=pick_client_for_payment_kb(clients, page=0),
     )
+
+
+@router.callback_query(F.data == "pay:pick_list")
+async def cb_pay_pick_list(cb: CallbackQuery) -> None:
+    async with async_session_maker() as db:
+        clients = await list_clients(db, active_only=True)
+    await cb.message.edit_text(
+        "💵 <b>Qaysi mijozdan pul oldingiz?</b>\nMijozni tanlang:",
+        parse_mode="HTML",
+        reply_markup=pick_client_for_payment_kb(clients, page=0),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("pay:list:p:"))
+async def cb_pay_clients_page(cb: CallbackQuery) -> None:
+    page = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        clients = await list_clients(db, active_only=True)
+    await cb.message.edit_reply_markup(reply_markup=pick_client_for_payment_kb(clients, page=page))
+    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("pay:cli:"))
@@ -1112,12 +1349,12 @@ async def cb_pay_pick_client(cb: CallbackQuery) -> None:
     cid = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
         debt = await compute_client_debt(db, cid, history_limit=1)
-    await cb.message.answer(
+    await cb.message.edit_text(
         f"🏪 Mijoz: <b>{html.escape(debt.client.name)}</b>\n"
         f"💳 Hozirgi qarz: <b>{format_uzs(debt.current_debt)} so'm</b>\n\n"
         "To'lov usulini tanlang:",
         parse_mode="HTML",
-        reply_markup=payment_method_kb(cid),
+        reply_markup=payment_method_kb(cid, back_cb="pay:pick_list"),
     )
     await cb.answer()
 
@@ -1137,22 +1374,23 @@ async def cb_pay_pick_method(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-@router.message(SaleStates.waiting_client_payment_amount, F.chat.type == "private")
+@router.message(
+    SaleStates.waiting_client_payment_amount,
+    F.chat.type == "private",
+    (~F.text) | (~F.text.startswith("/") & ~F.text.in_(MAIN_MENU_BUTTONS) & (F.text != "❌ Bekor qilish")),
+)
 async def process_client_payment_amount(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
     amount: Optional[float] = None
     note = ""
     if message.voice or message.audio:
+        file_obj = message.voice or message.audio
+        if (getattr(file_obj, "duration", 0) or 0) > 90:
+            await message.answer("⚠️ Ovozli xabar 90 soniyadan oshmasligi kerak (qisqaroq ayting).")
+            return
         audio_bytes, mime = await _download_voice_bytes(message)
-        async with async_session_maker() as db:
-            prods = await list_products(db)
-            clis = await list_clients(db)
-        parsed = await parse_norin_voice_or_text(
-            prods, clis, audio_bytes=audio_bytes, mime_type=mime
-        )
-        amount = parsed.get("amount")
-        note = parsed.get("transcript", "")
+        amount, note = await extract_amount_from_audio(audio_bytes, mime_type=mime)
     elif message.text:
         amount = parse_uzbek_amount(message.text)
         note = message.text.strip()
@@ -1169,13 +1407,12 @@ async def process_client_payment_amount(message: Message, state: FSMContext) -> 
         debt = await compute_client_debt(db, cid, history_limit=1)
 
     await state.clear()
+    await message.answer("✅ To'lov qabul qilindi!", reply_markup=main_menu_keyboard())
     await message.answer(
-        f"✅ To'lov qabul qilindi!\n"
-        f"{render_payment_group_receipt(pay, debt.current_debt)}",
+        render_payment_group_receipt(pay, debt.current_debt),
         parse_mode="HTML",
         reply_markup=payment_after_record_kb(pay.id, has_group=bool(debt.client.group_chat_id)),
     )
-    await message.answer("📋 Asosiy menyu:", reply_markup=main_menu_keyboard())
 
 
 @router.callback_query(F.data.startswith("pay:post_grp:"))
@@ -1259,6 +1496,19 @@ async def cb_edit_menu_open(cb: CallbackQuery) -> None:
     await cb.answer()
 
 
+@router.callback_query(F.data.startswith("edit_menu:p:"))
+async def cb_edit_menu_page(cb: CallbackQuery) -> None:
+    page = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        summary = await compute_session_summary(db)
+    await cb.message.edit_reply_markup(
+        reply_markup=edit_items_list_kb(
+            summary.confirmed_sales, summary.client_payments, summary.cash_transactions, page=page
+        )
+    )
+    await cb.answer()
+
+
 @router.callback_query(F.data == "menu:dismiss")
 async def cb_menu_dismiss(cb: CallbackQuery) -> None:
     try:
@@ -1321,7 +1571,14 @@ async def cb_pay_edit_amt_prompt(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-@router.message(SaleStates.waiting_edit_payment_amount, F.chat.type == "private")
+@router.message(
+    SaleStates.waiting_edit_payment_amount,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_pay_edit_amt(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -1353,6 +1610,22 @@ async def process_pay_edit_amt(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data.startswith("pay:delete:"))
+async def cb_pay_delete_confirm(cb: CallbackQuery) -> None:
+    pay_id = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        pay = await get_client_payment(db, pay_id)
+    if not pay or pay.is_deleted:
+        await cb.answer("Topilmadi", show_alert=True)
+        return
+    await cb.message.edit_text(
+        f"⚠️ <b>To'lov #{pay.id}</b> ({format_uzs(pay.amount)} so'm) rostdan ham o'chirasizmi?",
+        parse_mode="HTML",
+        reply_markup=confirm_delete_kb(f"pay:delete_ok:{pay_id}", f"pay_view:{pay_id}"),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("pay:delete_ok:"))
 async def cb_pay_delete(cb: CallbackQuery) -> None:
     pay_id = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
@@ -1377,7 +1650,7 @@ async def cb_pay_delete(cb: CallbackQuery) -> None:
 async def cb_cash_tx_view(cb: CallbackQuery) -> None:
     tx_id = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
-        tx = await db.get(CashTransaction, tx_id)
+        tx = await get_cash_transaction(db, tx_id)
     if not tx or tx.is_deleted:
         await cb.answer("Topilmadi", show_alert=True)
         return
@@ -1387,8 +1660,9 @@ async def cb_cash_tx_view(cb: CallbackQuery) -> None:
         "kassa_debt": "Kassadan qarz",
         "kassa_repay": "Kassaga qaytarish",
     }
+    cat_line = f"\n🏷 Kategoriya: <b>{html.escape(tx.category)}</b>" if tx.source_type == "expense" and tx.category else ""
     await cb.message.edit_text(
-        f"💵 <b>{labels.get(tx.source_type, tx.source_type)}</b>\n"
+        f"💵 <b>{labels.get(tx.source_type, tx.source_type)}</b>{cat_line}\n"
         f"💰 Summa: <b>{format_uzs(tx.amount)} so'm</b>\n"
         f"📝 Izoh: <i>{html.escape(tx.note or '-')}</i>",
         parse_mode="HTML",
@@ -1406,7 +1680,14 @@ async def cb_cash_edit_prompt(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-@router.message(WalletStates.waiting_edit_cash_amount, F.chat.type == "private")
+@router.message(
+    WalletStates.waiting_edit_cash_amount,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_edit_cash_amount(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -1432,6 +1713,22 @@ async def process_edit_cash_amount(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data.startswith("cash:delete:"))
+async def cb_cash_delete_confirm(cb: CallbackQuery) -> None:
+    tx_id = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        tx = await get_cash_transaction(db, tx_id)
+    if not tx or tx.is_deleted:
+        await cb.answer("Topilmadi", show_alert=True)
+        return
+    await cb.message.edit_text(
+        f"⚠️ Ushbu kassa/xarajat yozuvini (<b>{format_uzs(tx.amount)} so'm</b>) rostdan ham o'chirasizmi?",
+        parse_mode="HTML",
+        reply_markup=confirm_delete_kb(f"cash:delete_ok:{tx_id}", f"cash_view:{tx_id}"),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("cash:delete_ok:"))
 async def cb_cash_delete(cb: CallbackQuery) -> None:
     tx_id = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
@@ -1573,6 +1870,10 @@ async def _handle_parsed_dm_command(
 async def handle_dm_voice(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
+    file_obj = message.voice or message.audio
+    if (getattr(file_obj, "duration", 0) or 0) > 90:
+        await message.answer("⚠️ Ovozli xabar 90 soniyadan oshmasligi kerak (token tejash uchun qisqaroq ayting).")
+        return
     wait_msg = await message.answer("🎤 Ovozli xabar eshitilmoqda...")
     try:
         audio_bytes, mime = await _download_voice_bytes(message)
@@ -1699,7 +2000,7 @@ async def _finalize_group_sale(
 
 @router.message(F.chat.type.in_({"group", "supergroup"}), F.photo)
 async def handle_group_photo(message: Message) -> None:
-    """Auto-read scale/receipt photo inside a client-bound Telegram group (authorized sender only)."""
+    """Auto-read scale/receipt photo inside a client-bound Telegram group (caption 0-token first)."""
     uid = message.from_user.id if message.from_user else None
     if not await is_authorized_async(uid, allow_group_anon=True):
         return
@@ -1710,15 +2011,28 @@ async def handle_group_photo(message: Message) -> None:
         if not client:
             return
         products = await list_products(db, active_only=True)
-        clients = await list_clients(db, active_only=True)
 
     photo = message.photo[-1]
+    if message.caption:
+        cap_parsed = _heuristic_parse_norin_text(message.caption, products, [])
+        if cap_parsed and cap_parsed.get("intent") == "sale" and cap_parsed.get("items"):
+            cap_spec = _build_items_spec(cap_parsed["items"], products)
+            if cap_spec:
+                await _finalize_group_sale(
+                    message=message,
+                    client_id=client.id,
+                    items_spec=cap_spec,
+                    photo_file_id=photo.file_id,
+                    note=message.caption.strip(),
+                )
+                return
+
     buf = io.BytesIO()
     await message.bot.download(photo, destination=buf)
     extracted = await extract_norin_from_image(
         image_bytes=buf.getvalue(),
         products=products,
-        clients=clients,
+        clients=(),
         mime_type="image/jpeg",
         caption=message.caption,
     )
@@ -1740,6 +2054,9 @@ async def handle_group_voice(message: Message) -> None:
     uid = message.from_user.id if message.from_user else None
     if not await is_authorized_async(uid, allow_group_anon=True):
         return
+    file_obj = message.voice or message.audio
+    if (getattr(file_obj, "duration", 0) or 0) > 90:
+        return
     async with async_session_maker() as db:
         if (await get_app_setting(db, "group_auto_calc", "on")) != "on":
             return
@@ -1747,11 +2064,10 @@ async def handle_group_voice(message: Message) -> None:
         if not client:
             return
         products = await list_products(db, active_only=True)
-        clients = await list_clients(db, active_only=True)
 
     audio_bytes, mime = await _download_voice_bytes(message)
     parsed = await parse_norin_voice_or_text(
-        products, clients, audio_bytes=audio_bytes, mime_type=mime
+        products, (), audio_bytes=audio_bytes, mime_type=mime
     )
     if parsed.get("intent") != "sale" or not parsed.get("items"):
         return

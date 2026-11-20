@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence
 from zoneinfo import ZoneInfo
 
@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from config import get_settings
 from database.models import (
+    AIUsageLog,
     AppSetting,
     AuthorizedUser,
     CashTransaction,
@@ -653,7 +654,7 @@ async def resolve_sell_price(
 async def compute_client_debt(
     db: AsyncSession,
     client_id: int,
-    history_limit: int = 15,
+    history_limit: Optional[int] = 15,
     tenant_id: Optional[int] = None,
 ) -> ClientDebtSummary:
     """Compute opening debt + confirmed sales - non-deleted payments for a client."""
@@ -703,8 +704,8 @@ async def compute_client_debt(
         total_paid=total_paid,
         current_debt=current_debt,
         total_kg=total_kg,
-        recent_sales=sales[:history_limit],
-        recent_payments=payments[:history_limit],
+        recent_sales=sales if history_limit is None else sales[:history_limit],
+        recent_payments=payments if history_limit is None else payments[:history_limit],
     )
 
 
@@ -1472,15 +1473,67 @@ async def compute_session_summary(
     )
 
 
-async def compute_period_summary(
-    db: AsyncSession, days: int = 30, tenant_id: Optional[int] = None
-) -> PeriodReportSummary:
-    """Compute aggregated Norin sales, profit, collections, and expenses over the last N days."""
-    tid = get_current_tenant_id(tenant_id)
+EXPENSE_CATEGORIES = (
+    "Go'sht",
+    "Xamir",
+    "Ziravor",
+    "Ish haqi",
+    "Transport",
+    "Ijara",
+    "Boshqa",
+)
+
+
+def infer_expense_category(note: str, explicit: Optional[str] = None) -> str:
+    """Determine expense category explicitly or from Uzbek/Russian keywords in note."""
+    if explicit and explicit.strip() in EXPENSE_CATEGORIES:
+        return explicit.strip()
+    if explicit and explicit.strip():
+        return explicit.strip()[:32]
+    low = (note or "").lower()
+    if any(k in low for k in ("go'sht", "gosht", "mol", "ot ", "otga", "мяс", "qazi")):
+        return "Go'sht"
+    if any(k in low for k in ("xamir", "un", "nonga", "мук")):
+        return "Xamir"
+    if any(k in low for k in ("ziravor", "tuz", "piyoz", "yog'", "yog", "masalliq", "zira")):
+        return "Ziravor"
+    if any(k in low for k in ("ishchi", "oylik", "maosh", "ish haqi", "ustaga", "зарплат")):
+        return "Ish haqi"
+    if any(k in low for k in ("benzin", "taksi", "dostavka", "mashina", "transport", "yo'l", "yol")):
+        return "Transport"
+    if any(k in low for k in ("ijara", "arenda", "svet", "gaz", "suv", "kommunal")):
+        return "Ijara"
+    return "Boshqa"
+
+
+def _resolve_period_bounds(
+    days: int = 30,
+    start_iso: Optional[str] = None,
+    end_iso: Optional[str] = None,
+) -> tuple[str, str, int]:
+    """Return normalized (start_iso, end_iso, span_days) for a reporting period."""
+    if start_iso and end_iso:
+        s_dt = date.fromisoformat(start_iso)
+        e_dt = date.fromisoformat(end_iso)
+        span = max(1, (e_dt - s_dt).days + 1)
+        return start_iso, end_iso, span
     end_dt = now_local().date()
     start_dt = end_dt - timedelta(days=max(0, days - 1))
-    start_iso = start_dt.strftime("%Y-%m-%d")
-    end_iso = end_dt.strftime("%Y-%m-%d")
+    return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), days
+
+
+async def compute_period_summary(
+    db: AsyncSession,
+    days: int = 30,
+    start_iso: Optional[str] = None,
+    end_iso: Optional[str] = None,
+    tenant_id: Optional[int] = None,
+) -> PeriodReportSummary:
+    """Compute aggregated Norin sales, profit, collections, and expenses over a period."""
+    tid = get_current_tenant_id(tenant_id)
+    start_iso, end_iso, span_days = _resolve_period_bounds(
+        days=days, start_iso=start_iso, end_iso=end_iso
+    )
 
     sessions = list(
         (
@@ -1559,7 +1612,7 @@ async def compute_period_summary(
     total_clients_debt = await get_total_all_clients_debt(db, tenant_id=tid)
 
     return PeriodReportSummary(
-        days=days,
+        days=span_days,
         start_date=start_iso,
         end_date=end_iso,
         sales_count=len(sales),
@@ -1577,12 +1630,185 @@ async def compute_period_summary(
     )
 
 
+async def get_period_excel_data(
+    db: AsyncSession,
+    days: int = 30,
+    start_iso: Optional[str] = None,
+    end_iso: Optional[str] = None,
+    tenant_id: Optional[int] = None,
+) -> dict:
+    """Gather rich period analytics (KPIs, daily rows, client rankings, expenses) for Excel."""
+    tid = get_current_tenant_id(tenant_id)
+    start_iso, end_iso, span_days = _resolve_period_bounds(
+        days=days, start_iso=start_iso, end_iso=end_iso
+    )
+    period = await compute_period_summary(
+        db, days=span_days, start_iso=start_iso, end_iso=end_iso, tenant_id=tid
+    )
+    sub = await get_subscription_state(db, tenant_id=tid)
+
+    sessions = list(
+        (
+            await db.scalars(
+                select(DailyCashSession)
+                .where(
+                    DailyCashSession.tenant_id == tid,
+                    DailyCashSession.report_date >= start_iso,
+                    DailyCashSession.report_date <= end_iso,
+                )
+                .order_by(DailyCashSession.report_date, DailyCashSession.id)
+            )
+        ).all()
+    )
+    sess_ids = [s.id for s in sessions]
+
+    sales: List[Sale] = []
+    payments: List[ClientPayment] = []
+    txs: List[CashTransaction] = []
+    if sess_ids:
+        sales = list(
+            (
+                await db.scalars(
+                    select(Sale)
+                    .options(selectinload(Sale.items), selectinload(Sale.client))
+                    .where(
+                        Sale.tenant_id == tid,
+                        Sale.session_id.in_(sess_ids),
+                        Sale.status == "confirmed",
+                    )
+                    .order_by(Sale.id)
+                )
+            ).all()
+        )
+        payments = list(
+            (
+                await db.scalars(
+                    select(ClientPayment)
+                    .where(
+                        ClientPayment.tenant_id == tid,
+                        ClientPayment.session_id.in_(sess_ids),
+                        ClientPayment.is_deleted.is_(False),
+                    )
+                    .order_by(ClientPayment.id)
+                )
+            ).all()
+        )
+        txs = list(
+            (
+                await db.scalars(
+                    select(CashTransaction)
+                    .where(
+                        CashTransaction.tenant_id == tid,
+                        CashTransaction.session_id.in_(sess_ids),
+                        CashTransaction.is_deleted.is_(False),
+                    )
+                    .order_by(CashTransaction.id)
+                )
+            ).all()
+        )
+
+    sess_date_by_id = {s.id: s.report_date for s in sessions}
+    daily_map: Dict[str, dict] = {}
+    for s in sessions:
+        row = daily_map.setdefault(
+            s.report_date,
+            {
+                "report_date": s.report_date,
+                "status": "Yopilgan" if s.status == "closed" else "Ochiq",
+                "sales_count": 0,
+                "total_kg": 0.0,
+                "total_revenue": 0.0,
+                "total_cost": 0.0,
+                "total_profit": 0.0,
+                "cash_collected": 0.0,
+                "expenses": 0.0,
+            },
+        )
+        if s.status == "open":
+            row["status"] = "Ochiq"
+
+    for sale in sales:
+        rdate = sale.report_date or sess_date_by_id.get(sale.session_id, "")
+        row = daily_map.setdefault(
+            rdate,
+            {
+                "report_date": rdate,
+                "status": "Ochiq",
+                "sales_count": 0,
+                "total_kg": 0.0,
+                "total_revenue": 0.0,
+                "total_cost": 0.0,
+                "total_profit": 0.0,
+                "cash_collected": 0.0,
+                "expenses": 0.0,
+            },
+        )
+        row["sales_count"] += 1
+        row["total_kg"] = round(row["total_kg"] + float(sale.total_weight_kg), 3)
+        row["total_revenue"] += float(sale.total_amount)
+        row["total_cost"] += float(sale.total_cost)
+        row["total_profit"] += float(sale.total_profit)
+
+    for pay in payments:
+        rdate = sess_date_by_id.get(pay.session_id, "")
+        if rdate in daily_map:
+            daily_map[rdate]["cash_collected"] += float(pay.amount)
+
+    for tx in txs:
+        rdate = sess_date_by_id.get(tx.session_id, "")
+        if tx.source_type == "expense" and rdate in daily_map:
+            daily_map[rdate]["expenses"] += float(tx.amount)
+
+    daily_rows = sorted(daily_map.values(), key=lambda r: r["report_date"])
+    for row in daily_rows:
+        rev = row["total_revenue"]
+        row["margin_pct"] = (row["total_profit"] / rev) if rev > 0 else 0.0
+
+    debts = await list_all_client_debts(db, tenant_id=tid)
+    debt_by_cid = {d.client.id: d for d in debts}
+    cli_agg: Dict[int, dict] = {}
+    for sale in sales:
+        cid = int(sale.client_id or 0)
+        d = debt_by_cid.get(cid)
+        cname = sale.client.name if sale.client else "Noma'lum"
+        entry = cli_agg.setdefault(
+            cid,
+            {
+                "name": cname,
+                "phone": d.client.phone if d else "",
+                "sales_count": 0,
+                "total_kg": 0.0,
+                "total_revenue": 0.0,
+                "total_profit": 0.0,
+                "current_debt": d.current_debt if d else 0.0,
+            },
+        )
+        entry["sales_count"] += 1
+        entry["total_kg"] = round(entry["total_kg"] + float(sale.total_weight_kg), 3)
+        entry["total_revenue"] += float(sale.total_amount)
+        entry["total_profit"] += float(sale.total_profit)
+
+    client_stats = sorted(
+        cli_agg.values(), key=lambda c: (-c["total_revenue"], c["name"].lower())
+    )
+    expenses_list = [t for t in txs if t.source_type == "expense"]
+
+    return {
+        "tenant_name": sub.tenant_name,
+        "period": period,
+        "daily_rows": daily_rows,
+        "client_stats": client_stats,
+        "expenses": expenses_list,
+    }
+
+
 async def add_cash_transaction(
     db: AsyncSession,
     amount: float,
     source_type: str = "main_in",
     note: str = "",
     session_id: Optional[int] = None,
+    category: Optional[str] = None,
     tenant_id: Optional[int] = None,
 ) -> CashTransaction:
     """Record a cash-in, expense, kassa debt, or kassa repayment transaction."""
@@ -1599,11 +1825,13 @@ async def add_cash_transaction(
         if source_type in ("main_in", "expense", "kassa_debt", "kassa_repay")
         else "main_in"
     )
+    cat = infer_expense_category(note, category) if valid_type == "expense" else ""
     tx = CashTransaction(
         tenant_id=tid,
         session_id=session_id,
         amount=float(amount),
         source_type=valid_type,
+        category=cat,
         note=note.strip(),
         is_deleted=False,
     )
@@ -1611,6 +1839,17 @@ async def add_cash_transaction(
     await db.commit()
     await db.refresh(tx)
     await compute_session_summary(db, session_id, tenant_id=tid)
+    return tx
+
+
+async def get_cash_transaction(
+    db: AsyncSession, tx_id: int, tenant_id: Optional[int] = None
+) -> Optional[CashTransaction]:
+    """Fetch a CashTransaction enforcing active tenant_id isolation."""
+    tid = get_current_tenant_id(tenant_id)
+    tx = await db.get(CashTransaction, tx_id)
+    if tx is None or tx.tenant_id != tid:
+        return None
     return tx
 
 
@@ -2321,3 +2560,118 @@ async def reset_full_database(
         "sessions": sess_cnt,
         "clients": clients_cnt,
     }
+
+
+async def delete_tenant(db: AsyncSession, tenant_id: int) -> bool:
+    """Permanently delete a client tenant (id >= 2) and all its isolated data."""
+    tid = int(tenant_id)
+    if tid <= 1:
+        return False
+    sub = await db.get(SubscriptionState, tid)
+    if sub is None:
+        return False
+
+    sale_ids_sub = select(Sale.id).where(Sale.tenant_id == tid)
+    client_ids_sub = select(Client.id).where(Client.tenant_id == tid)
+    await db.execute(delete(SaleItem).where(SaleItem.sale_id.in_(sale_ids_sub)))
+    await db.execute(delete(Sale).where(Sale.tenant_id == tid))
+    await db.execute(delete(ClientPayment).where(ClientPayment.tenant_id == tid))
+    await db.execute(delete(CashTransaction).where(CashTransaction.tenant_id == tid))
+    await db.execute(delete(DailyCashSession).where(DailyCashSession.tenant_id == tid))
+    await db.execute(
+        delete(ClientProductPrice).where(ClientProductPrice.client_id.in_(client_ids_sub))
+    )
+    await db.execute(delete(Client).where(Client.tenant_id == tid))
+    await db.execute(delete(GroupConfig).where(GroupConfig.tenant_id == tid))
+    await db.execute(delete(Product).where(Product.tenant_id == tid))
+    await db.execute(delete(SubscriptionPayment).where(SubscriptionPayment.tenant_id == tid))
+    await db.execute(delete(AuthorizedUser).where(AuthorizedUser.tenant_id == tid))
+    await db.execute(delete(AIUsageLog).where(AIUsageLog.tenant_id == tid))
+    await db.execute(delete(AppSetting).where(AppSetting.key.like(f"t{tid}:%")))
+    await db.execute(delete(SubscriptionState).where(SubscriptionState.id == tid))
+    await db.commit()
+    return True
+
+
+async def list_all_broadcast_recipients(db: AsyncSession) -> List[int]:
+    """Return unique active Telegram IDs across all tenants (excluding Super Admins)."""
+    settings = get_settings()
+    super_ids = set(settings.super_admin_id_list)
+    rows = (
+        await db.scalars(
+            select(AuthorizedUser.telegram_id).where(AuthorizedUser.is_active.is_(True))
+        )
+    ).all()
+    recipients = {int(uid) for uid in rows} | set(settings.admin_id_list)
+    recipients -= super_ids
+    return sorted(recipients)
+
+
+# ---------------------------------------------------------------------------
+# AI Usage Tracking & Raw System Preferences
+# ---------------------------------------------------------------------------
+
+
+async def log_ai_usage(
+    db: AsyncSession,
+    kind: str,
+    model_name: str,
+    prompt_tokens: int = 0,
+    output_tokens: int = 0,
+    total_tokens: int = 0,
+    tenant_id: Optional[int] = None,
+) -> AIUsageLog:
+    """Record a single Gemini multimodal call (image or audio) for a tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    entry = AIUsageLog(
+        tenant_id=tid,
+        kind="audio" if kind == "audio" else "image",
+        model_name=(model_name or "")[:64],
+        prompt_tokens=max(0, int(prompt_tokens or 0)),
+        output_tokens=max(0, int(output_tokens or 0)),
+        total_tokens=max(0, int(total_tokens or (prompt_tokens + output_tokens))),
+    )
+    db.add(entry)
+    await db.commit()
+    await db.refresh(entry)
+    return entry
+
+
+async def get_ai_usage_summary(
+    db: AsyncSession, days: int = 30, tenant_id: Optional[int] = None
+) -> dict:
+    """Return AI call counts and total tokens over the last N days (tenant_id=0 => all)."""
+    since = now_utc() - timedelta(days=max(1, int(days)))
+    stmt = select(AIUsageLog).where(AIUsageLog.created_at >= since)
+    if tenant_id != 0:
+        tid = get_current_tenant_id(tenant_id)
+        stmt = stmt.where(AIUsageLog.tenant_id == tid)
+    rows = (await db.scalars(stmt)).all()
+    image_calls = sum(1 for r in rows if r.kind == "image")
+    audio_calls = sum(1 for r in rows if r.kind == "audio")
+    total_tokens = sum(int(r.total_tokens or 0) for r in rows)
+    return {
+        "image_calls": image_calls,
+        "audio_calls": audio_calls,
+        "total_calls": len(rows),
+        "total_tokens": total_tokens,
+    }
+
+
+async def get_raw_app_setting(db: AsyncSession, key: str, default: str = "") -> str:
+    """Read an un-namespaced global setting directly by primary key."""
+    obj = await db.get(AppSetting, key)
+    return obj.value if obj is not None else default
+
+
+async def set_raw_app_setting(db: AsyncSession, key: str, value: str) -> AppSetting:
+    """Persist an un-namespaced global setting directly by primary key."""
+    obj = await db.get(AppSetting, key)
+    if obj is None:
+        obj = AppSetting(key=key, value=value)
+        db.add(obj)
+    else:
+        obj.value = value
+    await db.commit()
+    await db.refresh(obj)
+    return obj

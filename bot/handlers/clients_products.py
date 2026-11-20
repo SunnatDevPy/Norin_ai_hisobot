@@ -17,19 +17,25 @@ from bot.handlers.superadmin import is_super_admin
 from bot.keyboards import (
     BTN_DEBTS,
     BTN_SETTINGS,
+    MAIN_MENU_BUTTONS,
+    SKIP_BTN,
     ai_prefs_kb,
     bind_group_clients_kb,
     cancel_reply_keyboard,
     client_debt_detail_kb,
     client_detail_kb,
+    client_edit_menu_kb,
     client_prices_kb,
     clients_list_kb,
+    confirm_delete_kb,
     debts_list_kb,
     main_menu_keyboard,
     product_detail_kb,
     products_list_kb,
     report_group_config_kb,
+    sale_confirm_kb,
     settings_menu_kb,
+    skip_or_cancel_keyboard,
 )
 from bot.states import ClientStates, ProductStates, WalletStates
 from database.crud import (
@@ -49,6 +55,7 @@ from database.crud import (
     get_client_prices_map,
     get_group_config,
     get_product,
+    get_sale,
     is_user_authorized,
     list_all_client_debts,
     list_clients,
@@ -59,6 +66,7 @@ from database.crud import (
     unbind_client_group,
     update_client,
     update_product,
+    update_sale_client,
 )
 from database.session import async_session_maker
 from services.gemini_ai import format_kg, format_uzs, parse_uzbek_amount
@@ -558,7 +566,14 @@ async def cb_report_group_id_prompt(cb: CallbackQuery, state: FSMContext) -> Non
     await cb.answer()
 
 
-@router.message(WalletStates.waiting_report_group_id, F.chat.type == "private")
+@router.message(
+    WalletStates.waiting_report_group_id,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_report_group_id(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -608,6 +623,24 @@ async def cb_report_group_ping(cb: CallbackQuery) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def _render_product_card_text(product_id: int) -> tuple[str, Optional[object]]:
+    """Build product detail text and return (html_text, Product)."""
+    async with async_session_maker() as db:
+        prod = await get_product(db, product_id)
+    if not prod or not prod.is_active:
+        return "", None
+    margin = prod.default_sell_price - prod.cost_price
+    text = (
+        f"🥩 <b>{html.escape(prod.name)}</b>\n"
+        "===============================\n"
+        f"📉 Tannarx (1 {html.escape(prod.unit)}): <b>{format_uzs(prod.cost_price)} so'm</b>\n"
+        f"💰 Standart sotuv narxi: <b>{format_uzs(prod.default_sell_price)} so'm</b>\n"
+        f"📈 Standart foyda: <b>{format_uzs(margin)} so'm</b>\n"
+        f"🔗 Sinonimlar (AI uchun):\n<code>{html.escape(prod.aliases or '-')}</code>"
+    )
+    return text, prod
+
+
 @router.callback_query(F.data == "set:products")
 async def cb_products_menu(cb: CallbackQuery) -> None:
     async with async_session_maker() as db:
@@ -624,21 +657,14 @@ async def cb_products_menu(cb: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("prd:view:"))
 async def cb_product_detail(cb: CallbackQuery) -> None:
     pid = int(cb.data.split(":")[-1])
-    async with async_session_maker() as db:
-        prod = await get_product(db, pid)
-    if not prod or not prod.is_active:
+    text, prod = await _render_product_card_text(pid)
+    if not prod:
         await cb.answer("Mahsulot topilmadi", show_alert=True)
         return
-    margin = prod.default_sell_price - prod.cost_price
     await cb.message.edit_text(
-        f"🥩 <b>{html.escape(prod.name)}</b>\n"
-        "===============================\n"
-        f"📉 Tannarx (1 kg): <b>{format_uzs(prod.cost_price)} so'm</b>\n"
-        f"💰 Standart sotuv narxi (1 kg): <b>{format_uzs(prod.default_sell_price)} so'm</b>\n"
-        f"📈 Standart foyda (1 kg): <b>{format_uzs(margin)} so'm</b>\n"
-        f"🔗 Sinonimlar (AI uchun):\n<code>{html.escape(prod.aliases or '-')}</code>",
+        text,
         parse_mode="HTML",
-        reply_markup=product_detail_kb(prod.id),
+        reply_markup=product_detail_kb(pid),
     )
     await cb.answer()
 
@@ -654,7 +680,14 @@ async def cb_product_add_start(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-@router.message(ProductStates.waiting_product_name, F.chat.type == "private")
+@router.message(
+    ProductStates.waiting_product_name,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_product_name(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -670,7 +703,14 @@ async def process_product_name(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(ProductStates.waiting_product_cost, F.chat.type == "private")
+@router.message(
+    ProductStates.waiting_product_cost,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_product_cost(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -686,7 +726,14 @@ async def process_product_cost(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.message(ProductStates.waiting_product_sell, F.chat.type == "private")
+@router.message(
+    ProductStates.waiting_product_sell,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_product_sell(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -713,6 +760,48 @@ async def process_product_sell(message: Message, state: FSMContext) -> None:
     await message.answer("🥩 Mahsulotlar:", reply_markup=products_list_kb(products))
 
 
+@router.callback_query(F.data.startswith("prd:edit_name:"))
+async def cb_product_edit_name_prompt(cb: CallbackQuery, state: FSMContext) -> None:
+    pid = int(cb.data.split(":")[-1])
+    await state.set_state(ProductStates.waiting_product_edit_name)
+    await state.update_data(product_id=pid)
+    await cb.message.answer(
+        "✏️ Mahsulotning yangi nomini kiriting:",
+        reply_markup=cancel_reply_keyboard(),
+    )
+    await cb.answer()
+
+
+@router.message(
+    ProductStates.waiting_product_edit_name,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
+async def process_product_edit_name(message: Message, state: FSMContext) -> None:
+    if not await is_authorized_async(message.from_user.id if message.from_user else None):
+        return
+    name = (message.text or "").strip()
+    if not name:
+        await message.answer("⚠️ Nom kiriting:")
+        return
+    pid = (await state.get_data())["product_id"]
+    async with async_session_maker() as db:
+        prod = await update_product(db, pid, name=name)
+    await state.clear()
+    if prod:
+        await message.answer(
+            f"✅ Mahsulot nomi yangilandi: <b>{html.escape(prod.name)}</b>",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
+        card_text, loaded = await _render_product_card_text(pid)
+        if loaded:
+            await message.answer(card_text, parse_mode="HTML", reply_markup=product_detail_kb(pid))
+
+
 @router.callback_query(F.data.startswith("prd:edit_cost:"))
 async def cb_product_edit_cost_prompt(cb: CallbackQuery, state: FSMContext) -> None:
     pid = int(cb.data.split(":")[-1])
@@ -726,7 +815,14 @@ async def cb_product_edit_cost_prompt(cb: CallbackQuery, state: FSMContext) -> N
     await cb.answer()
 
 
-@router.message(ProductStates.waiting_edit_product_cost, F.chat.type == "private")
+@router.message(
+    ProductStates.waiting_edit_product_cost,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_product_edit_cost(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -744,7 +840,9 @@ async def process_product_edit_cost(message: Message, state: FSMContext) -> None
             parse_mode="HTML",
             reply_markup=main_menu_keyboard(),
         )
-        await message.answer("Mahsulot kartasi:", reply_markup=product_detail_kb(prod.id))
+        card_text, loaded = await _render_product_card_text(pid)
+        if loaded:
+            await message.answer(card_text, parse_mode="HTML", reply_markup=product_detail_kb(pid))
 
 
 @router.callback_query(F.data.startswith("prd:edit_sell:"))
@@ -760,7 +858,14 @@ async def cb_product_edit_sell_prompt(cb: CallbackQuery, state: FSMContext) -> N
     await cb.answer()
 
 
-@router.message(ProductStates.waiting_edit_product_sell, F.chat.type == "private")
+@router.message(
+    ProductStates.waiting_edit_product_sell,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_product_edit_sell(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -778,7 +883,9 @@ async def process_product_edit_sell(message: Message, state: FSMContext) -> None
             parse_mode="HTML",
             reply_markup=main_menu_keyboard(),
         )
-        await message.answer("Mahsulot kartasi:", reply_markup=product_detail_kb(prod.id))
+        card_text, loaded = await _render_product_card_text(pid)
+        if loaded:
+            await message.answer(card_text, parse_mode="HTML", reply_markup=product_detail_kb(pid))
 
 
 @router.callback_query(F.data.startswith("prd:alias:"))
@@ -794,7 +901,14 @@ async def cb_product_alias_prompt(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-@router.message(ProductStates.waiting_product_alias, F.chat.type == "private")
+@router.message(
+    ProductStates.waiting_product_alias,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_product_alias(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -812,16 +926,36 @@ async def process_product_alias(message: Message, state: FSMContext) -> None:
             parse_mode="HTML",
             reply_markup=main_menu_keyboard(),
         )
+        card_text, loaded = await _render_product_card_text(pid)
+        if loaded:
+            await message.answer(card_text, parse_mode="HTML", reply_markup=product_detail_kb(pid))
 
 
 @router.callback_query(F.data.startswith("prd:del:"))
+async def cb_product_delete_confirm(cb: CallbackQuery) -> None:
+    pid = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        prod = await get_product(db, pid)
+    if not prod:
+        await cb.answer("Mahsulot topilmadi", show_alert=True)
+        return
+    await cb.message.edit_text(
+        f"⚠️ <b>{html.escape(prod.name)}</b> mahsulotini rostdan ham o'chirasizmi?\n"
+        "<i>(Eski hisobotlardagi sotuv yozuvlari saqlanib qoladi.)</i>",
+        parse_mode="HTML",
+        reply_markup=confirm_delete_kb(f"prd:del_ok:{pid}", f"prd:view:{pid}"),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("prd:del_ok:"))
 async def cb_product_delete(cb: CallbackQuery) -> None:
     pid = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
         await delete_product(db, pid)
         products = await list_products(db, active_only=True)
     await cb.message.edit_text(
-        "🥩 <b>Mahsulotlar katalogi:</b>",
+        "🗑 Mahsulot o'chirildi.\n\n🥩 <b>Mahsulotlar katalogi:</b>",
         parse_mode="HTML",
         reply_markup=products_list_kb(products),
     )
@@ -874,8 +1008,17 @@ async def cb_clients_menu(cb: CallbackQuery) -> None:
         "🏪 <b>Mijozlar Ro'yxati (Individual Narx & Guruhlar)</b>\n"
         "Sozlash uchun mijozni tanlang yoki yangi mijoz qo'shing:",
         parse_mode="HTML",
-        reply_markup=clients_list_kb(clients),
+        reply_markup=clients_list_kb(clients, page=0),
     )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("set:clients:p:"))
+async def cb_clients_page(cb: CallbackQuery) -> None:
+    page = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        clients = await list_clients(db, active_only=True)
+    await cb.message.edit_reply_markup(reply_markup=clients_list_kb(clients, page=page))
     await cb.answer()
 
 
@@ -904,6 +1047,7 @@ async def cb_client_detail(cb: CallbackQuery) -> None:
 @router.callback_query(F.data == "cli:add")
 async def cb_client_add_start(cb: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(ClientStates.waiting_client_name)
+    await state.update_data(pending_sale_id=None)
     await cb.message.answer(
         "🏪 Yangi mijoz (do'kon/xaridor) nomini kiriting (masalan: <code>Iftiqor 80</code>):",
         parse_mode="HTML",
@@ -912,7 +1056,26 @@ async def cb_client_add_start(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-@router.message(ClientStates.waiting_client_name, F.chat.type == "private")
+@router.callback_query(F.data.startswith("cli:add_for_sale:"))
+async def cb_client_add_for_sale_start(cb: CallbackQuery, state: FSMContext) -> None:
+    sale_id = int(cb.data.split(":")[-1])
+    await state.set_state(ClientStates.waiting_client_name)
+    await state.update_data(pending_sale_id=sale_id)
+    await cb.message.answer(
+        "🏪 Yangi mijoz nomini kiriting — saqlangach avtomatik ushbu sotuvga biriktiriladi:",
+        reply_markup=cancel_reply_keyboard(),
+    )
+    await cb.answer()
+
+
+@router.message(
+    ClientStates.waiting_client_name,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_client_name(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -923,32 +1086,48 @@ async def process_client_name(message: Message, state: FSMContext) -> None:
     await state.update_data(cli_name=name)
     await state.set_state(ClientStates.waiting_client_phone)
     await message.answer(
-        "📞 Telefon raqamini kiriting (yoki o'tkazib yuborish uchun <code>-</code> yozing):",
+        "📞 Telefon raqamini kiriting (ixtiyoriy — pastdagi <b>O'tkazib yuborish</b> tugmasini bosing):",
         parse_mode="HTML",
+        reply_markup=skip_or_cancel_keyboard(),
     )
 
 
-@router.message(ClientStates.waiting_client_phone, F.chat.type == "private")
+@router.message(
+    ClientStates.waiting_client_phone,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_client_phone(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
     phone = (message.text or "").strip()
-    if phone == "-":
+    if phone in ("-", SKIP_BTN):
         phone = ""
     await state.update_data(cli_phone=phone)
     await state.set_state(ClientStates.waiting_client_opening_debt)
     await message.answer(
-        "💳 Mijozning hozirgi eski qarzi bormi? Summani kiriting (yo'q bo'lsa <code>0</code>):",
+        "💳 Mijozning hozirgi eski qarzi bormi? Summani kiriting (yo'q bo'lsa <b>O'tkazib yuborish</b> ni bosing):",
         parse_mode="HTML",
+        reply_markup=skip_or_cancel_keyboard(),
     )
 
 
-@router.message(ClientStates.waiting_client_opening_debt, F.chat.type == "private")
+@router.message(
+    ClientStates.waiting_client_opening_debt,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_client_opening_debt(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
     raw = (message.text or "").strip()
-    if raw == "0":
+    if raw in ("0", SKIP_BTN):
         debt_amt = 0.0
     else:
         parsed = parse_uzbek_amount(raw)
@@ -958,6 +1137,7 @@ async def process_client_opening_debt(message: Message, state: FSMContext) -> No
         debt_amt = parsed
 
     data = await state.get_data()
+    pending_sale_id = data.get("pending_sale_id")
     async with async_session_maker() as db:
         cli = await create_client(
             db,
@@ -965,14 +1145,29 @@ async def process_client_opening_debt(message: Message, state: FSMContext) -> No
             phone=data.get("cli_phone", ""),
             opening_debt=debt_amt,
         )
+        bound_sale = (
+            await update_sale_client(db, int(pending_sale_id), cli.id)
+            if pending_sale_id
+            else None
+        )
     await state.clear()
-    text, loaded_cli = await _render_client_card_text(cli.id)
-    uname = await get_bot_username(message.bot)
     await message.answer(
         f"✅ Yangi mijoz qo'shildi: <b>{html.escape(cli.name)}</b>!",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
     )
+    if bound_sale is not None:
+        from bot.handlers.sales_norin import render_sale_admin_summary
+
+        await message.answer(
+            f"{render_sale_admin_summary(bound_sale)}\n\nMijoz biriktirildi. Tasdiqlaysizmi?",
+            parse_mode="HTML",
+            reply_markup=sale_confirm_kb(bound_sale),
+        )
+        return
+
+    text, loaded_cli = await _render_client_card_text(cli.id)
+    uname = await get_bot_username(message.bot)
     if loaded_cli:
         sent = await message.answer(
             text,
@@ -985,6 +1180,132 @@ async def process_client_opening_debt(message: Message, state: FSMContext) -> No
                 sent.message_id,
                 loaded_cli.id,
             )
+
+
+@router.callback_query(F.data.startswith("cli:edit_menu:"))
+async def cb_client_edit_menu(cb: CallbackQuery) -> None:
+    cid = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        cli = await get_client(db, cid)
+    if not cli:
+        await cb.answer("Mijoz topilmadi", show_alert=True)
+        return
+    await cb.message.edit_text(
+        f"✏️ <b>{html.escape(cli.name)} — Profilni tahrirlash</b>\n"
+        f"📞 Telefon: <code>{html.escape(cli.phone or '-')}</code>\n"
+        f"📌 Boshlang'ich qarz: <b>{format_uzs(cli.opening_debt)} so'm</b>",
+        parse_mode="HTML",
+        reply_markup=client_edit_menu_kb(cid),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("cli:edit_name:"))
+async def cb_client_edit_name_prompt(cb: CallbackQuery, state: FSMContext) -> None:
+    cid = int(cb.data.split(":")[-1])
+    await state.set_state(ClientStates.waiting_client_edit_name)
+    await state.update_data(client_id=cid)
+    await cb.message.answer("✏️ Mijozning yangi nomini kiriting:", reply_markup=cancel_reply_keyboard())
+    await cb.answer()
+
+
+@router.message(
+    ClientStates.waiting_client_edit_name,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
+async def process_client_edit_name(message: Message, state: FSMContext) -> None:
+    if not await is_authorized_async(message.from_user.id if message.from_user else None):
+        return
+    name = (message.text or "").strip()
+    if not name:
+        await message.answer("⚠️ Nom kiriting:")
+        return
+    cid = (await state.get_data())["client_id"]
+    async with async_session_maker() as db:
+        cli = await update_client(db, cid, name=name)
+    await state.clear()
+    await message.answer("✅ Mijoz nomi yangilandi!", reply_markup=main_menu_keyboard())
+    if cli:
+        card_text, loaded_cli = await _render_client_card_text(cid)
+        if loaded_cli:
+            uname = await get_bot_username(message.bot)
+            await message.answer(card_text, parse_mode="HTML", reply_markup=client_detail_kb(loaded_cli, uname))
+
+
+@router.callback_query(F.data.startswith("cli:edit_phone:"))
+async def cb_client_edit_phone_prompt(cb: CallbackQuery, state: FSMContext) -> None:
+    cid = int(cb.data.split(":")[-1])
+    await state.set_state(ClientStates.waiting_client_edit_phone)
+    await state.update_data(client_id=cid)
+    await cb.message.answer("📞 Yangi telefon raqamini kiriting (yoki <code>-</code>):", parse_mode="HTML", reply_markup=cancel_reply_keyboard())
+    await cb.answer()
+
+
+@router.message(
+    ClientStates.waiting_client_edit_phone,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
+async def process_client_edit_phone(message: Message, state: FSMContext) -> None:
+    if not await is_authorized_async(message.from_user.id if message.from_user else None):
+        return
+    phone = (message.text or "").strip()
+    if phone == "-":
+        phone = ""
+    cid = (await state.get_data())["client_id"]
+    async with async_session_maker() as db:
+        cli = await update_client(db, cid, phone=phone)
+    await state.clear()
+    await message.answer("✅ Telefon raqami yangilandi!", reply_markup=main_menu_keyboard())
+    if cli:
+        card_text, loaded_cli = await _render_client_card_text(cid)
+        if loaded_cli:
+            uname = await get_bot_username(message.bot)
+            await message.answer(card_text, parse_mode="HTML", reply_markup=client_detail_kb(loaded_cli, uname))
+
+
+@router.callback_query(F.data.startswith("cli:edit_debt:"))
+async def cb_client_edit_debt_prompt(cb: CallbackQuery, state: FSMContext) -> None:
+    cid = int(cb.data.split(":")[-1])
+    await state.set_state(ClientStates.waiting_client_edit_opening_debt)
+    await state.update_data(client_id=cid)
+    await cb.message.answer("💳 Yangi boshlang'ich qarz summasini kiriting (<code>0</code> mumkin):", parse_mode="HTML", reply_markup=cancel_reply_keyboard())
+    await cb.answer()
+
+
+@router.message(
+    ClientStates.waiting_client_edit_opening_debt,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
+async def process_client_edit_debt(message: Message, state: FSMContext) -> None:
+    if not await is_authorized_async(message.from_user.id if message.from_user else None):
+        return
+    raw = (message.text or "").strip()
+    amt = 0.0 if raw == "0" else parse_uzbek_amount(raw)
+    if amt is None or amt < 0:
+        await message.answer("⚠️ Summa noto'g'ri. Raqam kiriting:")
+        return
+    cid = (await state.get_data())["client_id"]
+    async with async_session_maker() as db:
+        cli = await update_client(db, cid, opening_debt=amt)
+    await state.clear()
+    await message.answer("✅ Boshlang'ich qarz yangilandi!", reply_markup=main_menu_keyboard())
+    if cli:
+        card_text, loaded_cli = await _render_client_card_text(cid)
+        if loaded_cli:
+            uname = await get_bot_username(message.bot)
+            await message.answer(card_text, parse_mode="HTML", reply_markup=client_detail_kb(loaded_cli, uname))
 
 
 @router.callback_query(F.data.startswith("cli:prices:"))
@@ -1028,7 +1349,14 @@ async def cb_client_set_price_prompt(cb: CallbackQuery, state: FSMContext) -> No
     await cb.answer()
 
 
-@router.message(ClientStates.waiting_client_custom_price, F.chat.type == "private")
+@router.message(
+    ClientStates.waiting_client_custom_price,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_client_custom_price(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -1075,7 +1403,14 @@ async def cb_client_group_id_prompt(cb: CallbackQuery, state: FSMContext) -> Non
     await cb.answer()
 
 
-@router.message(ClientStates.waiting_client_group_id, F.chat.type == "private")
+@router.message(
+    ClientStates.waiting_client_group_id,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_client_group_id(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -1147,7 +1482,14 @@ async def cb_client_alias_prompt(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-@router.message(ClientStates.waiting_client_alias, F.chat.type == "private")
+@router.message(
+    ClientStates.waiting_client_alias,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
 async def process_client_alias(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -1165,6 +1507,10 @@ async def process_client_alias(message: Message, state: FSMContext) -> None:
             await update_client(db, cid, aliases=",".join(parts))
     await state.clear()
     await message.answer("✅ Sinonim qo'shildi!", reply_markup=main_menu_keyboard())
+    card_text, loaded_cli = await _render_client_card_text(cid)
+    if loaded_cli:
+        uname = await get_bot_username(message.bot)
+        await message.answer(card_text, parse_mode="HTML", reply_markup=client_detail_kb(loaded_cli, uname))
 
 
 @router.callback_query(F.data.startswith("cli:unbind:"))
@@ -1180,15 +1526,32 @@ async def cb_client_unbind_group(cb: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("cli:del:"))
+async def cb_client_delete_confirm(cb: CallbackQuery) -> None:
+    cid = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        cli = await get_client(db, cid)
+    if not cli:
+        await cb.answer("Mijoz topilmadi", show_alert=True)
+        return
+    await cb.message.edit_text(
+        f"⚠️ <b>{html.escape(cli.name)}</b> mijozini rostdan ham o'chirasizmi?\n"
+        "<i>(Ulangan guruh uziladi, lekin tarixiy sotuvlar saqlanadi.)</i>",
+        parse_mode="HTML",
+        reply_markup=confirm_delete_kb(f"cli:del_ok:{cid}", f"cli:view:{cid}"),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("cli:del_ok:"))
 async def cb_client_delete(cb: CallbackQuery) -> None:
     cid = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
         await delete_client(db, cid)
         clients = await list_clients(db, active_only=True)
     await cb.message.edit_text(
-        "🏪 <b>Mijozlar Ro'yxati:</b>",
+        "🗑 Mijoz o'chirildi.\n\n🏪 <b>Mijozlar Ro'yxati:</b>",
         parse_mode="HTML",
-        reply_markup=clients_list_kb(clients),
+        reply_markup=clients_list_kb(clients, page=0),
     )
     await cb.answer("🗑 O'chirildi")
 
@@ -1239,8 +1602,17 @@ async def cb_debts_list(cb: CallbackQuery) -> None:
     await cb.message.edit_text(
         render_debts_overview_text(debts),
         parse_mode="HTML",
-        reply_markup=debts_list_kb(debts),
+        reply_markup=debts_list_kb(debts, page=0),
     )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("debt:list:p:"))
+async def cb_debts_list_page(cb: CallbackQuery) -> None:
+    page = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        debts = await list_all_client_debts(db)
+    await cb.message.edit_reply_markup(reply_markup=debts_list_kb(debts, page=page))
     await cb.answer()
 
 

@@ -121,6 +121,7 @@ def _upgrade_multitenant_schema(conn) -> None:
         "ALTER TABLE group_configs DROP CONSTRAINT IF EXISTS group_configs_role_key",
         "DROP INDEX IF EXISTS ix_group_configs_role",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_group_configs_tenant_role ON group_configs (tenant_id, role)",
+        "ALTER TABLE cash_transactions ADD COLUMN IF NOT EXISTS category VARCHAR(32) NOT NULL DEFAULT 'Boshqa'",
         "CREATE SEQUENCE IF NOT EXISTS subscription_states_id_seq OWNED BY subscription_states.id",
         "ALTER TABLE subscription_states ALTER COLUMN id SET DEFAULT nextval('subscription_states_id_seq')",
         """

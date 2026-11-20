@@ -248,6 +248,7 @@ class CashTransaction(Base):
     )
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     source_type: Mapped[str] = mapped_column(String(32), nullable=False, default="main_in")
+    category: Mapped[str] = mapped_column(String(32), nullable=False, default="Boshqa")
     note: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -316,3 +317,20 @@ class AppSetting(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+
+
+class AIUsageLog(Base):
+    """Per-tenant audit log of Gemini API calls (images & audio only) and token usage."""
+
+    __tablename__ = "ai_usage_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="image")
+    model_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

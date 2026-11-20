@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import io
 import logging
+from datetime import date, timedelta
 from typing import Optional
 
 from aiogram import F, Router
@@ -16,9 +17,11 @@ from bot.keyboards import (
     BTN_CLOSE_DAY,
     BTN_DAILY_REPORT,
     BTN_EXPENSE_KASSA,
+    MAIN_MENU_BUTTONS,
     cancel_reply_keyboard,
     close_day_confirm_kb,
     daily_report_kb,
+    expense_category_kb,
     history_detail_kb,
     history_feed_kb,
     history_sessions_kb,
@@ -38,25 +41,60 @@ from database.crud import (
     format_local_dt,
     get_group_config,
     get_kassa_debt_stats,
+    get_period_excel_data,
+    get_subscription_state,
     list_all_client_debts,
     list_all_sessions,
     list_closed_sessions,
     list_recent_client_payments,
     list_recent_sales,
     reopen_cash_session,
+    today_iso,
 )
 from database.session import async_session_maker
 from services.excel_export import (
     build_client_statement_excel,
     build_daily_norin_excel,
     build_history_excel,
+    build_period_excel,
 )
-from services.gemini_ai import format_kg, format_uzs, parse_uzbek_amount, parse_norin_voice_or_text
-from database.crud import list_clients, list_products
+from services.gemini_ai import (
+    extract_amount_from_audio,
+    format_kg,
+    format_uzs,
+    parse_uzbek_amount,
+)
 
 
 router = Router(name="wallet_reports")
 logger = logging.getLogger("norin_bot.wallet")
+
+_VOICE_MAX_SECONDS = 90
+_VOICE_OR_TEXT_FILTER = (~F.text) | (
+    ~F.text.startswith("/")
+    & ~F.text.in_(MAIN_MENU_BUTTONS)
+    & (F.text != "❌ Bekor qilish")
+)
+
+
+def _calendar_month_bounds(which: str) -> tuple[str, str, str]:
+    """Return (start_iso, end_iso, title) for 'cur' or 'prev' calendar month."""
+    today_d = date.fromisoformat(today_iso())
+    if which == "cur":
+        start_d = today_d.replace(day=1)
+        end_d = today_d
+        return start_d.isoformat(), end_d.isoformat(), f"SHU OY ({start_d.strftime('%Y-%m')})"
+    first_cur = today_d.replace(day=1)
+    end_d = first_cur - timedelta(days=1)
+    start_d = end_d.replace(day=1)
+    return start_d.isoformat(), end_d.isoformat(), f"O'TGAN OY ({start_d.strftime('%Y-%m')})"
+
+
+def _safe_file_part(raw: str, fallback: str = "Filial") -> str:
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in (raw or "")).strip("_")
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    return cleaned[:32] or fallback
 
 
 def render_daily_report_text(summary: DailyReportSummary) -> str:
@@ -64,8 +102,12 @@ def render_daily_report_text(summary: DailyReportSummary) -> str:
     lines = [
         f"📊 <b>NORIN KUNLIK HISOBOT ({summary.session.report_date})</b>",
         "===============================",
-        f"🥩 <b>Sotilgan mahsulotlar ({len(summary.confirmed_sales)} ta sotuv):</b>",
     ]
+    if summary.session.status == "open" and summary.session.report_date != today_iso():
+        lines.append(
+            f"⚠️ <i>Diqqat: {summary.session.report_date} smenasi hali yopilmagan! Kunni yakunlang.</i>"
+        )
+    lines.append(f"🥩 <b>Sotilgan mahsulotlar ({len(summary.confirmed_sales)} ta sotuv):</b>")
     if not summary.weight_by_product:
         lines.append("<i>Bugun hali tasdiqlangan sotuvlar yo'q</i>")
     else:
@@ -108,10 +150,11 @@ def render_daily_report_text(summary: DailyReportSummary) -> str:
     return "\n".join(lines)
 
 
-def render_period_report_text(p: PeriodReportSummary) -> str:
-    """Format 30-day aggregated Norin sales, profit, and cash flow report."""
+def render_period_report_text(p: PeriodReportSummary, title: Optional[str] = None) -> str:
+    """Format period/monthly aggregated Norin sales, profit, and cash flow report."""
+    header = html.escape(title) if title else f"{p.days} KUNLIK YIG'MA HISOBOT"
     lines = [
-        f"📆 <b>{p.days} KUNLIK YIG'MA HISOBOT</b>",
+        f"📆 <b>{header}</b>",
         f"🗓 Davr: <code>{p.start_date}</code> → <code>{p.end_date}</code>",
         "===============================",
         f"📦 Sotuvlar soni: <b>{p.sales_count} ta</b>",
@@ -147,14 +190,11 @@ async def _download_voice_bytes(message: Message) -> tuple[bytes, str]:
 
 async def _extract_amount_and_note(message: Message) -> tuple[Optional[float], str]:
     if message.voice or message.audio:
+        file_obj = message.voice or message.audio
+        if (getattr(file_obj, "duration", 0) or 0) > _VOICE_MAX_SECONDS:
+            return None, "__TOO_LONG__"
         audio_bytes, mime = await _download_voice_bytes(message)
-        async with async_session_maker() as db:
-            prods = await list_products(db)
-            clis = await list_clients(db)
-        parsed = await parse_norin_voice_or_text(
-            prods, clis, audio_bytes=audio_bytes, mime_type=mime
-        )
-        return parsed.get("amount"), parsed.get("transcript", "")
+        return await extract_amount_from_audio(audio_bytes=audio_bytes, mime_type=mime)
     if message.text:
         return parse_uzbek_amount(message.text), message.text.strip()
     return None, ""
@@ -199,7 +239,24 @@ async def cb_report_period(cb: CallbackQuery) -> None:
     await cb.message.edit_text(
         render_period_report_text(period),
         parse_mode="HTML",
-        reply_markup=period_report_kb(),
+        reply_markup=period_report_kb(days=days),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("rep:month:"))
+async def cb_report_month(cb: CallbackQuery) -> None:
+    which = cb.data.split(":")[-1]
+    if which not in ("cur", "prev"):
+        await cb.answer("Noto'g'ri davr")
+        return
+    start_iso, end_iso, title = _calendar_month_bounds(which)
+    async with async_session_maker() as db:
+        period = await compute_period_summary(db, start_iso=start_iso, end_iso=end_iso)
+    await cb.message.edit_text(
+        render_period_report_text(period, title=title),
+        parse_mode="HTML",
+        reply_markup=period_report_kb(period_key=which),
     )
     await cb.answer()
 
@@ -237,29 +294,49 @@ async def handle_expense_kassa_btn(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "wal:expense")
 async def cb_wal_expense(cb: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(WalletStates.waiting_expense_amount)
+    await state.clear()
     await cb.message.answer(
-        "➖ <b>Sex xarajatini yozing</b> (ovozda yoki matnda, masalan: <i>«Go'shtga 3.5 mln xarajat»</i> yoki <code>450 000 xamir</code>):",
+        "📂 <b>Xarajat kategoriyasini tanlang:</b>",
+        parse_mode="HTML",
+        reply_markup=expense_category_kb(),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("wal:exp_cat:"))
+async def cb_wal_expense_category(cb: CallbackQuery, state: FSMContext) -> None:
+    cat = cb.data.split(":", 2)[-1]
+    await state.set_state(WalletStates.waiting_expense_amount)
+    await state.update_data(expense_category=cat)
+    await cb.message.answer(
+        f"➖ <b>{html.escape(cat)}</b> xarajati summasini kiriting (ovozda yoki matnda, masalan: <i>«450 ming»</i> yoki <code>450 000</code>):",
         parse_mode="HTML",
         reply_markup=cancel_reply_keyboard(),
     )
     await cb.answer()
 
 
-@router.message(WalletStates.waiting_expense_amount, F.chat.type == "private")
+@router.message(WalletStates.waiting_expense_amount, F.chat.type == "private", _VOICE_OR_TEXT_FILTER)
 async def process_expense_input(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
     amount, note = await _extract_amount_and_note(message)
+    if note == "__TOO_LONG__":
+        await message.answer("⚠️ Ovozli xabar 90 soniyadan uzun. Qisqaroq ovoz yuboring yoki raqam yozing:")
+        return
     if not amount or amount <= 0:
         await message.answer("⚠️ Summa tushunilmadi. Masalan: <code>500 000 go'sht</code>:", parse_mode="HTML")
         return
+    cat = (await state.get_data()).get("expense_category") or None
     async with async_session_maker() as db:
-        await add_cash_transaction(db, amount=amount, source_type="expense", note=note)
+        tx = await add_cash_transaction(
+            db, amount=amount, source_type="expense", note=note, category=cat
+        )
         summary = await compute_session_summary(db)
     await state.clear()
     await message.answer(
         f"➖ Xarajat yozildi: <b>{format_uzs(amount)} so'm</b>\n"
+        f"📂 Kategoriya: <b>{html.escape(tx.category)}</b>\n"
         f"📝 Izoh: <i>{html.escape(note or '-')}</i>\n"
         f"💰 Qo'lda qolishi kerak: <b>{format_uzs(summary.expected_cash)} so'm</b>",
         parse_mode="HTML",
@@ -278,11 +355,14 @@ async def cb_wal_cash_in(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-@router.message(WalletStates.waiting_cash_in_amount, F.chat.type == "private")
+@router.message(WalletStates.waiting_cash_in_amount, F.chat.type == "private", _VOICE_OR_TEXT_FILTER)
 async def process_wal_cash_in(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
     amount, note = await _extract_amount_and_note(message)
+    if note == "__TOO_LONG__":
+        await message.answer("⚠️ Ovozli xabar 90 soniyadan uzun. Qisqaroq ovoz yuboring yoki raqam yozing:")
+        return
     if not amount or amount <= 0:
         await message.answer("⚠️ Summa topilmadi. Raqam kiriting:")
         return
@@ -309,11 +389,14 @@ async def cb_wal_kassa_borrow(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-@router.message(WalletStates.waiting_kassa_debt_amount, F.chat.type == "private")
+@router.message(WalletStates.waiting_kassa_debt_amount, F.chat.type == "private", _VOICE_OR_TEXT_FILTER)
 async def process_wal_kassa_borrow(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
     amount, note = await _extract_amount_and_note(message)
+    if note == "__TOO_LONG__":
+        await message.answer("⚠️ Ovozli xabar 90 soniyadan uzun. Qisqaroq ovoz yuboring yoki raqam yozing:")
+        return
     if not amount or amount <= 0:
         await message.answer("⚠️ Summa topilmadi:")
         return
@@ -341,11 +424,14 @@ async def cb_wal_kassa_repay(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-@router.message(WalletStates.waiting_kassa_repay_amount, F.chat.type == "private")
+@router.message(WalletStates.waiting_kassa_repay_amount, F.chat.type == "private", _VOICE_OR_TEXT_FILTER)
 async def process_wal_kassa_repay(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
     amount, note = await _extract_amount_and_note(message)
+    if note == "__TOO_LONG__":
+        await message.answer("⚠️ Ovozli xabar 90 soniyadan uzun. Qisqaroq ovoz yuboring yoki raqam yozing:")
+        return
     if not amount or amount <= 0:
         await message.answer("⚠️ Summa topilmadi:")
         return
@@ -371,12 +457,19 @@ async def process_wal_kassa_repay(message: Message, state: FSMContext) -> None:
 async def handle_close_day_start(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
+    await state.clear()
     async with async_session_maker() as db:
         summary = await compute_session_summary(db)
     await state.set_state(WalletStates.waiting_counted_cash)
     await state.update_data(session_id=summary.session.id)
+    prev_warn = (
+        f"⚠️ <i>Eslatma: {summary.session.report_date} smenasi ochiq turibdi — avval shuni yoping.</i>\n"
+        if summary.session.status == "open" and summary.session.report_date != today_iso()
+        else ""
+    )
     await message.answer(
         f"🏁 <b>KUNNI YAKUNLASH ({summary.session.report_date})</b>\n"
+        f"{prev_warn}"
         "===============================\n"
         f"⚖️ Jami sotilgan: <b>{format_kg(summary.total_kg)} kg</b> ({format_uzs(summary.total_revenue)} so'm)\n"
         f"📈 Bugungi sof foyda: <b>{format_uzs(summary.total_profit)} so'm</b>\n"
@@ -404,13 +497,17 @@ async def cb_close_day_recount(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-@router.message(WalletStates.waiting_counted_cash, F.chat.type == "private")
+@router.message(WalletStates.waiting_counted_cash, F.chat.type == "private", _VOICE_OR_TEXT_FILTER)
 async def process_counted_cash(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
     counted: Optional[float] = None
+    note = ""
     if message.voice or message.audio:
-        counted, _ = await _extract_amount_and_note(message)
+        counted, note = await _extract_amount_and_note(message)
+        if note == "__TOO_LONG__":
+            await message.answer("⚠️ Ovozli xabar 90 soniyadan uzun. Qisqaroq ovoz yuboring yoki raqam yozing:")
+            return
     elif message.text:
         txt = message.text.strip()
         counted = 0.0 if txt == "0" else parse_uzbek_amount(txt)
@@ -432,6 +529,7 @@ async def process_counted_cash(message: Message, state: FSMContext) -> None:
         diff_msg = f"➕ <b>Ortiqcha: +{format_uzs(diff)} so'm</b>"
 
     await state.clear()
+    await message.answer("✅ Sverka tayyor!", reply_markup=main_menu_keyboard())
     await message.answer(
         f"📊 <b>SVERKA NATIJASI ({summary.session.report_date})</b>\n"
         "===============================\n"
@@ -443,7 +541,6 @@ async def process_counted_cash(message: Message, state: FSMContext) -> None:
         parse_mode="HTML",
         reply_markup=close_day_confirm_kb(summary.session.id, counted),
     )
-    await message.answer("👇 Qaroringizni tanlang:", reply_markup=main_menu_keyboard())
 
 
 @router.callback_query(F.data.startswith("close_day:confirm:"))
@@ -611,35 +708,52 @@ async def cb_export_excel(cb: CallbackQuery) -> None:
     parts = cb.data.split(":")
     kind = parts[1]
     async with async_session_maker() as db:
+        sub = await get_subscription_state(db)
+        tenant_name = sub.tenant_name or "Norin Sexi"
+        t_slug = _safe_file_part(tenant_name, "Filial")
         if kind == "daily":
             sess_id = int(parts[2])
             summary = await compute_session_summary(db, sess_id)
             debts = await list_all_client_debts(db)
-            data = build_daily_norin_excel(summary, debts)
-            filename = f"Norin_Hisobot_{summary.session.report_date}.xlsx"
+            data = build_daily_norin_excel(summary, debts, tenant_name=tenant_name)
+            filename = f"{t_slug}_Hisobot_{summary.session.report_date}.xlsx"
         elif kind == "client":
             cid = int(parts[2])
-            debt = await compute_client_debt(db, cid, history_limit=100)
-            data = build_client_statement_excel(debt)
-            safe_name = "".join(ch if ch.isalnum() else "_" for ch in debt.client.name).strip("_") or f"Mijoz_{cid}"
-            filename = f"Sverka_{safe_name}.xlsx"
+            debt = await compute_client_debt(db, cid, history_limit=None)
+            data = build_client_statement_excel(debt, tenant_name=tenant_name)
+            c_slug = _safe_file_part(debt.client.name, f"Mijoz_{cid}")
+            filename = f"{t_slug}_Sverka_{c_slug}.xlsx"
+        elif kind == "period":
+            days = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 30
+            pdata = await get_period_excel_data(db, days=days)
+            data = build_period_excel(pdata)
+            filename = f"{t_slug}_{days}kunlik_{pdata['start_date']}_{pdata['end_date']}.xlsx"
+        elif kind == "month":
+            which = parts[2] if len(parts) > 2 else "cur"
+            if which not in ("cur", "prev"):
+                await cb.answer("Noma'lum oy")
+                return
+            start_iso, end_iso, _ = _calendar_month_bounds(which)
+            pdata = await get_period_excel_data(db, start_iso=start_iso, end_iso=end_iso)
+            data = build_period_excel(pdata)
+            filename = f"{t_slug}_Oylik_{start_iso[:7]}.xlsx"
         elif kind == "history":
             sessions = await list_closed_sessions(db, limit=90)
             if not sessions:
                 summary = await compute_session_summary(db)
                 debts = await list_all_client_debts(db)
-                data = build_daily_norin_excel(summary, debts)
-                filename = f"Norin_Hisobot_{summary.session.report_date}.xlsx"
+                data = build_daily_norin_excel(summary, debts, tenant_name=tenant_name)
+                filename = f"{t_slug}_Hisobot_{summary.session.report_date}.xlsx"
             else:
-                data = build_history_excel(sessions)
-                filename = "Norin_Kunlik_Tarix.xlsx"
+                data = build_history_excel(sessions, tenant_name=tenant_name)
+                filename = f"{t_slug}_Kunlik_Tarix.xlsx"
         else:
             await cb.answer("Noma'lum eksport turi")
             return
 
     await cb.message.answer_document(
         BufferedInputFile(data, filename=filename),
-        caption=f"📥 Tayyor Excel hisobot: <code>{filename}</code>",
+        caption=f"📥 Tayyor Excel hisobot: <code>{html.escape(filename)}</code>",
         parse_mode="HTML",
     )
     await cb.answer("✅ Excel tayyor!")

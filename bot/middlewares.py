@@ -87,6 +87,11 @@ class SubscriptionMiddleware(BaseMiddleware):
             if user_id and user_id in settings.super_admin_id_list:
                 return await _call_handler()
 
+            # Block unauthorized users from pressing any inline callback buttons
+            if isinstance(event, CallbackQuery) and not authorized:
+                await event.answer("⛔ Sizda ushbu tugmani bosish huquqi yo'q!", show_alert=True)
+                return None
+
             # Allow essential commands and renewal/export callbacks even when expired
             if isinstance(event, Message):
                 text = (event.text or "").strip()
