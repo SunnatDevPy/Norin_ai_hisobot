@@ -149,6 +149,7 @@ def pick_client_for_sale_kb(
     prefix: str = "sale:setcli",
     page: int = 0,
     suggested_name: Optional[str] = None,
+    back_cb: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """Paginated 2-column inline list of clients to bind to a pending/confirmed sale."""
     rows: list[list[InlineKeyboardButton]] = []
@@ -175,18 +176,32 @@ def pick_client_for_sale_kb(
     nav = _pagination_row(f"sale:pcli:{sale_id}", max(0, page), len(clients))
     if nav:
         rows.append(nav)
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="➕ Yangi mijoz qo'shish",
-                callback_data=f"cli:add_for_sale:{sale_id}",
-            ),
-            InlineKeyboardButton(
-                text="❌ Bekor qilish",
-                callback_data=f"sale:cancel:{sale_id}",
-            ),
-        ]
-    )
+    if back_cb:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="➕ Yangi mijoz",
+                    callback_data=f"cli:add_for_sale:{sale_id}",
+                ),
+                InlineKeyboardButton(
+                    text="⬅️ Orqaga",
+                    callback_data=back_cb,
+                ),
+            ]
+        )
+    else:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="➕ Yangi mijoz",
+                    callback_data=f"cli:add_for_sale:{sale_id}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Bekor qilish",
+                    callback_data=f"sale:cancel:{sale_id}",
+                ),
+            ]
+        )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -194,9 +209,9 @@ def sale_confirm_kb(sale: Sale) -> InlineKeyboardMarkup:
     """Confirmation inline keyboard supporting multi-item weight/price/product edits."""
     has_group = bool(sale.client and sale.client.group_chat_id)
     confirm_lbl = (
-        "✅ Tasdiqlash (Mijoz guruhiga yuborish)"
+        "✅ Tasdiqlash (Guruhga yuborish)"
         if has_group
-        else "✅ Tasdiqlash (Bazaga saqlash)"
+        else "✅ Tasdiqlash (Saqlash)"
     )
     rows = [
         [
@@ -210,17 +225,23 @@ def sale_confirm_kb(sale: Sale) -> InlineKeyboardMarkup:
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="⏭ Guruhsiz saqlash (Faqat baza)",
+                    text="⏭ Guruhsiz saqlash",
                     callback_data=f"sale:save_only:{sale.id}",
                 )
             ]
         )
 
+    multi = len(sale.items) > 1
     for item in sale.items:
+        w_lbl = (
+            f"⚖️ {item.product_name[:7]} {format_kg(item.weight_kg)}kg"
+            if multi
+            else f"⚖️ {format_kg(item.weight_kg)} kg"
+        )
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"⚖️ {item.product_name[:12]} ({format_kg(item.weight_kg)}kg)",
+                    text=w_lbl,
                     callback_data=f"sale:edit_w:{item.id}",
                 ),
                 InlineKeyboardButton(
@@ -237,7 +258,7 @@ def sale_confirm_kb(sale: Sale) -> InlineKeyboardMarkup:
     rows.append(
         [
             InlineKeyboardButton(
-                text="🏪 Mijoz tanlash / almashtirish",
+                text="🏪 Mijoz",
                 callback_data=f"sale:pick_cli:{sale.id}",
             ),
             InlineKeyboardButton(
@@ -254,15 +275,21 @@ def auto_confirmed_sale_kb(
 ) -> InlineKeyboardMarkup:
     """Quick edit/undo/quick-pay controls shown after instant auto-confirmation or group calc."""
     rows: List[List[InlineKeyboardButton]] = []
+    multi = len(sale.items) > 1
     for item in sale.items:
+        w_lbl = (
+            f"⚖️ {item.product_name[:7]} {format_kg(item.weight_kg)}kg"
+            if multi
+            else f"⚖️ {format_kg(item.weight_kg)} kg"
+        )
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"⚖️ {item.product_name[:12]}: {format_kg(item.weight_kg)}kg",
+                    text=w_lbl,
                     callback_data=f"sale:edit_w:{item.id}",
                 ),
                 InlineKeyboardButton(
-                    text="💰 Narx",
+                    text=f"💰 {format_uzs(item.unit_sell_price)}",
                     callback_data=f"sale:edit_p:{item.id}",
                 ),
                 InlineKeyboardButton(
@@ -311,11 +338,17 @@ def auto_confirmed_sale_kb(
 def confirmed_sale_edit_kb(sale: Sale) -> InlineKeyboardMarkup:
     """Full edit controls for an already confirmed Sale (supports multi-item sales)."""
     rows: List[List[InlineKeyboardButton]] = []
+    multi = len(sale.items) > 1
     for item in sale.items:
+        w_lbl = (
+            f"⚖️ {item.product_name[:7]} {format_kg(item.weight_kg)}kg"
+            if multi
+            else f"⚖️ {format_kg(item.weight_kg)} kg"
+        )
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"⚖️ {item.product_name[:12]}: {format_kg(item.weight_kg)} kg",
+                    text=w_lbl,
                     callback_data=f"sale:edit_w:{item.id}",
                 ),
                 InlineKeyboardButton(
@@ -329,40 +362,36 @@ def confirmed_sale_edit_kb(sale: Sale) -> InlineKeyboardMarkup:
             ]
         )
 
-    in_group = bool(sale.group_chat_id and sale.group_message_id)
-    has_client_group = bool(sale.client and sale.client.group_chat_id)
-    grp_btn = (
-        InlineKeyboardButton(
-            text="🙈 Guruhdan olish",
-            callback_data=f"sale:unpost_group:{sale.id}",
-        )
-        if in_group
-        else (
-            InlineKeyboardButton(
-                text="📤 Guruhga yuborish",
-                callback_data=f"sale:repost_group:{sale.id}",
-            )
-            if has_client_group
-            else InlineKeyboardButton(
-                text="🏪 Mijoz tanlash",
-                callback_data=f"sale:pick_cli:{sale.id}",
-            )
-        )
-    )
     mid_row = [
-        InlineKeyboardButton(text="🏪 Mijozni almashtirish", callback_data=f"sale:pick_cli:{sale.id}")
+        InlineKeyboardButton(text="🏪 Mijoz", callback_data=f"sale:pick_cli:{sale.id}")
     ]
     if sale.client_id:
         mid_row.append(
             InlineKeyboardButton(text="💵 Pulini oldim", callback_data=f"sale:quick_pay:{sale.id}")
         )
     rows.append(mid_row)
-    rows.append(
-        [
-            grp_btn,
-            InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"sale:delete_conf:{sale.id}"),
-        ]
+
+    in_group = bool(sale.group_chat_id and sale.group_message_id)
+    has_client_group = bool(sale.client and sale.client.group_chat_id)
+    bottom_row: List[InlineKeyboardButton] = []
+    if in_group:
+        bottom_row.append(
+            InlineKeyboardButton(
+                text="🙈 Guruhdan olish",
+                callback_data=f"sale:unpost_group:{sale.id}",
+            )
+        )
+    elif has_client_group:
+        bottom_row.append(
+            InlineKeyboardButton(
+                text="📤 Guruhga yuborish",
+                callback_data=f"sale:repost_group:{sale.id}",
+            )
+        )
+    bottom_row.append(
+        InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"sale:delete_conf:{sale.id}")
     )
+    rows.append(bottom_row)
     rows.append([InlineKeyboardButton(text="⬅️ Ro'yxatga qaytish", callback_data="edit_menu:open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -541,7 +570,7 @@ def payment_edit_kb(payment_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="💰 Summani o'zgartirish", callback_data=f"pay:edit_amt:{payment_id}"),
+                InlineKeyboardButton(text="✏️ Summa", callback_data=f"pay:edit_amt:{payment_id}"),
                 InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"pay:delete:{payment_id}"),
             ],
             [InlineKeyboardButton(text="⬅️ Ro'yxatga qaytish", callback_data="edit_menu:open")],
@@ -554,7 +583,7 @@ def cash_tx_edit_kb(tx_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="💰 Summani o'zgartirish", callback_data=f"cash:edit_amt:{tx_id}"),
+                InlineKeyboardButton(text="✏️ Summa", callback_data=f"cash:edit_amt:{tx_id}"),
                 InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"cash:delete:{tx_id}"),
             ],
             [InlineKeyboardButton(text="⬅️ Ro'yxatga qaytish", callback_data="edit_menu:open")],
@@ -572,12 +601,12 @@ def daily_report_kb(session_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="📆 7 / 30 kunlik hisobot", callback_data="rep:period:30"),
-                InlineKeyboardButton(text="📥 Excel yuklash", callback_data=f"export:daily:{session_id}"),
+                InlineKeyboardButton(text="📆 Davriy hisobot", callback_data="rep:period:30"),
+                InlineKeyboardButton(text="📥 Kunlik Excel", callback_data=f"export:daily:{session_id}"),
             ],
             [
                 InlineKeyboardButton(text="✏️ Tahrirlash", callback_data="edit_menu:open"),
-                InlineKeyboardButton(text="📜 Arxiv / History", callback_data="set:history"),
+                InlineKeyboardButton(text="📜 Arxiv / Tarix", callback_data="set:history"),
             ],
         ]
     )
@@ -587,14 +616,19 @@ def period_report_kb(
     days: int = 30, period_key: Optional[str] = None
 ) -> InlineKeyboardMarkup:
     """Period selector and Excel export actions under period analytics."""
+    active = period_key if period_key in ("cur", "prev") else str(days)
+
+    def _lbl(key: str, text: str) -> str:
+        return f"• {text} •" if active == key else text
+
     export_cb = f"export:month:{period_key}" if period_key in ("cur", "prev") else f"export:period:{days}"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="7 kun", callback_data="rep:period:7"),
-                InlineKeyboardButton(text="Shu oy", callback_data="rep:month:cur"),
-                InlineKeyboardButton(text="O'tgan oy", callback_data="rep:month:prev"),
-                InlineKeyboardButton(text="30 kun", callback_data="rep:period:30"),
+                InlineKeyboardButton(text=_lbl("7", "7 kun"), callback_data="rep:period:7"),
+                InlineKeyboardButton(text=_lbl("cur", "Shu oy"), callback_data="rep:month:cur"),
+                InlineKeyboardButton(text=_lbl("prev", "O'tgan oy"), callback_data="rep:month:prev"),
+                InlineKeyboardButton(text=_lbl("30", "30 kun"), callback_data="rep:period:30"),
             ],
             [
                 InlineKeyboardButton(text="📊 Bugungi hisobot", callback_data="rep:today"),
@@ -610,21 +644,36 @@ def wallet_expense_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="➖ Xarajat yozish (Go'sht/Xamir)", callback_data="wal:expense"),
-                InlineKeyboardButton(text="➕ Asosiy pul kiritish", callback_data="wal:cash_in"),
+                InlineKeyboardButton(text="➖ Xarajat", callback_data="wal:expense"),
+                InlineKeyboardButton(text="➕ Pul kiritish", callback_data="wal:cash_in"),
             ],
             [
-                InlineKeyboardButton(text="🏦 Kassadan qarz olish", callback_data="wal:kassa_borrow"),
+                InlineKeyboardButton(text="🏦 Kassadan olish", callback_data="wal:kassa_borrow"),
                 InlineKeyboardButton(text="↩️ Kassaga qaytarish", callback_data="wal:kassa_repay"),
             ],
+            [InlineKeyboardButton(text="🔙 Yopish", callback_data="menu:dismiss")],
         ]
     )
+
+
+_EXPENSE_CATEGORY_ICONS = {
+    "Go'sht": "🥩",
+    "Xamir": "🥟",
+    "Ziravor": "🧂",
+    "Ish haqi": "👷",
+    "Transport": "🚚",
+    "Ijara": "🏠",
+    "Boshqa": "📦",
+}
 
 
 def expense_category_kb() -> InlineKeyboardMarkup:
     """Category picker when recording a production expense."""
     btns = [
-        InlineKeyboardButton(text=cat, callback_data=f"wal:exp_cat:{cat}")
+        InlineKeyboardButton(
+            text=f"{_EXPENSE_CATEGORY_ICONS.get(cat, '📂')} {cat}",
+            callback_data=f"wal:exp_cat:{cat}",
+        )
         for cat in EXPENSE_CATEGORIES
     ]
     rows = _chunk_2col(btns)
@@ -660,16 +709,16 @@ def settings_menu_kb(is_super_admin: bool = False) -> InlineKeyboardMarkup:
     """Settings & History inline menu."""
     rows = [
         [
-            InlineKeyboardButton(text="🥩 Mahsulotlar & Tannarx", callback_data="set:products"),
-            InlineKeyboardButton(text="🏪 Mijozlar & Narx/Guruh", callback_data="set:clients"),
+            InlineKeyboardButton(text="🥩 Mahsulotlar", callback_data="set:products"),
+            InlineKeyboardButton(text="🏪 Mijozlar", callback_data="set:clients"),
         ],
         [
-            InlineKeyboardButton(text="📊 Rahbariyat hisobot guruhi", callback_data="set:report_group"),
-            InlineKeyboardButton(text="⚡ Tez rejim & Yaxlitlash", callback_data="set:ai_prefs"),
+            InlineKeyboardButton(text="📊 Hisobot guruhi", callback_data="set:report_group"),
+            InlineKeyboardButton(text="⚡ Avto & Yaxlitlash", callback_data="set:ai_prefs"),
         ],
         [
-            InlineKeyboardButton(text="📜 Arxiv / History", callback_data="set:history"),
-            InlineKeyboardButton(text="📥 Tarixni Excel yuklash", callback_data="export:history"),
+            InlineKeyboardButton(text="📜 Arxiv / Tarix", callback_data="set:history"),
+            InlineKeyboardButton(text="📥 Tarix Excel", callback_data="export:history"),
         ],
         [
             InlineKeyboardButton(text="💎 Obuna holati", callback_data="sub:status"),
@@ -677,7 +726,7 @@ def settings_menu_kb(is_super_admin: bool = False) -> InlineKeyboardMarkup:
     ]
     if is_super_admin:
         rows.append(
-            [InlineKeyboardButton(text="👑 Super Admin (Obuna boshqaruvi)", callback_data="sa:menu")]
+            [InlineKeyboardButton(text="👑 Super Admin", callback_data="sa:menu")]
         )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -811,8 +860,8 @@ def client_detail_kb(
         )
         rows.append(
             [
-                InlineKeyboardButton(text="🆔 ID o'zgartirish", callback_data=f"cli:set_gid:{client.id}"),
-                InlineKeyboardButton(text="🔗 Sinonim qo'shish", callback_data=f"cli:alias:{client.id}"),
+                InlineKeyboardButton(text="🆔 Guruh ID", callback_data=f"cli:set_gid:{client.id}"),
+                InlineKeyboardButton(text="🔗 Sinonim", callback_data=f"cli:alias:{client.id}"),
             ]
         )
     else:
@@ -826,18 +875,18 @@ def client_detail_kb(
         )
         rows.append(
             [
-                InlineKeyboardButton(text="🆔 Guruh ID kiritish", callback_data=f"cli:set_gid:{client.id}"),
-                InlineKeyboardButton(text="🔗 Sinonim qo'shish", callback_data=f"cli:alias:{client.id}"),
+                InlineKeyboardButton(text="🆔 Guruh ID", callback_data=f"cli:set_gid:{client.id}"),
+                InlineKeyboardButton(text="🔗 Sinonim", callback_data=f"cli:alias:{client.id}"),
             ]
         )
     rows.extend(
         [
             [
-                InlineKeyboardButton(text="📤 Guruhga Akt Sverka", callback_data=f"cli:send_sverka:{client.id}"),
+                InlineKeyboardButton(text="📤 Akt Sverka", callback_data=f"cli:send_sverka:{client.id}"),
                 InlineKeyboardButton(text="📥 Mijoz Excel", callback_data=f"export:client:{client.id}"),
             ],
             [
-                InlineKeyboardButton(text="✏️ Profil (Nom/Tel/Qarz)", callback_data=f"cli:edit_menu:{client.id}"),
+                InlineKeyboardButton(text="✏️ Profil", callback_data=f"cli:edit_menu:{client.id}"),
                 InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"cli:del:{client.id}"),
             ],
             [InlineKeyboardButton(text="⬅️ Mijozlarga", callback_data="set:clients")],
@@ -851,11 +900,11 @@ def client_edit_menu_kb(client_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✏️ Nomni o'zgartirish", callback_data=f"cli:edit_name:{client_id}"),
-                InlineKeyboardButton(text="📞 Telefonni o'zgartirish", callback_data=f"cli:edit_phone:{client_id}"),
+                InlineKeyboardButton(text="✏️ Nom", callback_data=f"cli:edit_name:{client_id}"),
+                InlineKeyboardButton(text="📞 Telefon", callback_data=f"cli:edit_phone:{client_id}"),
             ],
             [
-                InlineKeyboardButton(text="💳 Boshlang'ich qarzni o'zgartirish", callback_data=f"cli:edit_debt:{client_id}"),
+                InlineKeyboardButton(text="💳 Boshlang'ich qarz", callback_data=f"cli:edit_debt:{client_id}"),
             ],
             [InlineKeyboardButton(text="⬅️ Mijoz kartasiga", callback_data=f"cli:view:{client_id}")],
         ]
@@ -1091,24 +1140,24 @@ def superadmin_quick_menu_kb(tenant_id: int, tenant_count: int) -> InlineKeyboar
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="👑 Super Admin Panel", callback_data="sa:menu"),
-                InlineKeyboardButton(text=f"🏢 Filiallar ({tenant_count} ta)", callback_data="sa:tenants"),
+                InlineKeyboardButton(text="👑 Bosh panel", callback_data="sa:menu"),
+                InlineKeyboardButton(text=f"🏢 Filiallar ({tenant_count})", callback_data="sa:tenants"),
             ],
             [
-                InlineKeyboardButton(text="🆕 Yangi mijoz + Filial", callback_data="sa:add_user_new"),
-                InlineKeyboardButton(text="🔗 Filialga odam bog'lash", callback_data="sa:add_user"),
+                InlineKeyboardButton(text="🆕 Yangi mijoz", callback_data="sa:add_user_new"),
+                InlineKeyboardButton(text="🔗 Odam bog'lash", callback_data="sa:add_user"),
             ],
             [
-                InlineKeyboardButton(text=f"⚙️ Filial sozlamalari (#{tenant_id})", callback_data="sa:settings"),
-                InlineKeyboardButton(text=f"👥 Filial odamlari (#{tenant_id})", callback_data="sa:users"),
+                InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="sa:settings"),
+                InlineKeyboardButton(text="👥 Odamlari", callback_data="sa:users"),
             ],
             [
-                InlineKeyboardButton(text=f"➕ +30 kun (#{tenant_id})", callback_data="sa:ext:30"),
-                InlineKeyboardButton(text="📢 Barchaga e'lon", callback_data="sa:broadcast"),
+                InlineKeyboardButton(text="➕ +30 kun", callback_data="sa:ext:30"),
+                InlineKeyboardButton(text="📢 E'lon yuborish", callback_data="sa:broadcast"),
             ],
             [
                 InlineKeyboardButton(text="📊 Kunlik hisobot", callback_data="rep:today"),
-                InlineKeyboardButton(text=f"🧹 Bazani tozalash (#{tenant_id})", callback_data="sa:clear_menu"),
+                InlineKeyboardButton(text="🧹 Baza tozalash", callback_data="sa:clear_menu"),
             ],
         ]
     )
@@ -1121,18 +1170,18 @@ def superadmin_menu_kb(
 ) -> InlineKeyboardMarkup:
     """Super Admin subscription & multi-tenant user access control panel."""
     suspend_btn = (
-        InlineKeyboardButton(text="▶️ Botni faollashtirish", callback_data="sa:toggle_suspend")
+        InlineKeyboardButton(text="▶️ Yoqish", callback_data="sa:toggle_suspend")
         if is_suspended
-        else InlineKeyboardButton(text="⏸ Botni bloklash", callback_data="sa:toggle_suspend")
+        else InlineKeyboardButton(text="⏸ Bloklash", callback_data="sa:toggle_suspend")
     )
     rows = [
         [
             InlineKeyboardButton(text=f"🏢 {tenant_label}", callback_data="sa:tenants"),
-            InlineKeyboardButton(text="🆕 Yangi mijoz + Filial", callback_data="sa:add_user_new"),
+            InlineKeyboardButton(text="🆕 Yangi mijoz", callback_data="sa:add_user_new"),
         ],
         [
-            InlineKeyboardButton(text="👥 Odamlari / Bog'lash", callback_data="sa:users"),
-            InlineKeyboardButton(text="⚙️ Filial sozlamalari", callback_data="sa:settings"),
+            InlineKeyboardButton(text="👥 Odamlari", callback_data="sa:users"),
+            InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="sa:settings"),
         ],
         [
             InlineKeyboardButton(text="➕ +7 kun", callback_data="sa:ext:7"),
@@ -1141,16 +1190,16 @@ def superadmin_menu_kb(
         ],
         [
             InlineKeyboardButton(text="🗓 Boshqa kun", callback_data="sa:ext_custom"),
-            InlineKeyboardButton(text="📜 To'lovlar tarixi", callback_data="sa:payments"),
+            InlineKeyboardButton(text="📜 To'lovlar", callback_data="sa:payments"),
         ],
         [
             suspend_btn,
             InlineKeyboardButton(text="🔔 Eslatma", callback_data="sa:send_reminder"),
         ],
         [
-            InlineKeyboardButton(text="📢 Barchaga e'lon", callback_data="sa:broadcast"),
+            InlineKeyboardButton(text="📢 E'lon yuborish", callback_data="sa:broadcast"),
             InlineKeyboardButton(
-                text=f"🧹 Bazani tozalash (#{tenant_id})",
+                text=f"🧹 Baza tozalash (#{tenant_id})",
                 callback_data="sa:clear_menu",
             ),
         ],
@@ -1250,13 +1299,13 @@ def superadmin_tenants_kb(
         )
     rows.append(
         [
-            InlineKeyboardButton(text="🆕 Yangi mijoz + yangi filial", callback_data="sa:add_user_new"),
+            InlineKeyboardButton(text="🆕 Yangi mijoz + Filial", callback_data="sa:add_user_new"),
         ]
     )
     rows.append(
         [
-            InlineKeyboardButton(text="➕ Bo'sh filial ochish", callback_data="sa:new_tenant"),
-            InlineKeyboardButton(text="⬅️ Super Admin menyu", callback_data="sa:menu"),
+            InlineKeyboardButton(text="➕ Bo'sh filial", callback_data="sa:new_tenant"),
+            InlineKeyboardButton(text="⬅️ Orqaga", callback_data="sa:menu"),
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -1268,13 +1317,13 @@ def superadmin_clear_confirm_kb() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🧹 Faqat test savdo/qarz/kassa (Mijozlar qoladi)",
+                    text="🧹 Test savdo/qarzni tozalash",
                     callback_data="sa:clear_exec:tx",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="💣 To'liq tozalash (Hammasi 0 dan)",
+                    text="💣 To'liq tozalash (0 dan)",
                     callback_data="sa:clear_exec:full",
                 )
             ],
@@ -1301,7 +1350,7 @@ def superadmin_users_kb(
     rows.append(
         [
             InlineKeyboardButton(
-                text=f"🔗 Shu filialga odam bog'lash (#{tenant_id})",
+                text=f"🔗 Odam bog'lash (#{tenant_id})",
                 callback_data="sa:add_user",
             ),
         ]
@@ -1309,10 +1358,10 @@ def superadmin_users_kb(
     rows.append(
         [
             InlineKeyboardButton(
-                text="🆕 Yangi mijoz + yangi filial",
+                text="🆕 Yangi mijoz",
                 callback_data="sa:add_user_new",
             ),
-            InlineKeyboardButton(text="⬅️ Super Admin", callback_data="sa:menu"),
+            InlineKeyboardButton(text="⬅️ Orqaga", callback_data="sa:menu"),
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)

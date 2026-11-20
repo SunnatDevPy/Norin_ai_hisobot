@@ -759,6 +759,7 @@ async def cb_sale_pick_client(cb: CallbackQuery) -> None:
             prefix="sale:setcli",
             page=0,
             suggested_name=_PENDING_SALE_SUGGESTED_CLIENT.get(sale_id),
+            back_cb=f"sale:back_card:{sale_id}",
         )
     )
     await cb.answer()
@@ -770,7 +771,9 @@ async def cb_sale_pick_client_page(cb: CallbackQuery) -> None:
     sale_id = int(parts[2])
     page = int(parts[3])
     async with async_session_maker() as db:
+        sale = await get_sale(db, sale_id)
         clients = await list_clients(db, active_only=True)
+    has_card = bool(sale and (sale.status == "confirmed" or sale.client_id is not None))
     await cb.message.edit_reply_markup(
         reply_markup=pick_client_for_sale_kb(
             sale_id,
@@ -778,6 +781,7 @@ async def cb_sale_pick_client_page(cb: CallbackQuery) -> None:
             prefix="sale:setcli",
             page=page,
             suggested_name=_PENDING_SALE_SUGGESTED_CLIENT.get(sale_id) if page == 0 else None,
+            back_cb=f"sale:back_card:{sale_id}" if has_card else None,
         )
     )
     await cb.answer()
@@ -1193,6 +1197,19 @@ async def cb_sale_done(cb: CallbackQuery) -> None:
 async def cb_sale_cancel(cb: CallbackQuery) -> None:
     sale_id = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
+        sale = await get_sale(db, sale_id)
+        if not sale or sale.status == "deleted":
+            await cb.answer("Sotuv topilmadi", show_alert=True)
+            return
+        if sale.status == "confirmed":
+            await cb.message.edit_text(
+                f"⚠️ <b>Sotuv #{sale.id}</b> ({format_kg(sale.total_weight_kg)} kg — {format_uzs(sale.total_amount)} so'm) "
+                "allaqachon tasdiqlangan!\nRostdan ham o'chirasizmi?",
+                parse_mode="HTML",
+                reply_markup=confirm_delete_kb(f"sale:delete_ok:{sale_id}", f"sale_view:{sale_id}"),
+            )
+            await cb.answer()
+            return
         await delete_sale(db, sale_id)
     await cb.message.edit_text("❌ Sotuv bekor qilindi (hisobga olinmadi).", reply_markup=None)
     await cb.answer("Bekor qilindi")

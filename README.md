@@ -6,112 +6,171 @@
 [![Gemini AI](https://img.shields.io/badge/Gemini-Multimodal%20AI-8E75B2?logo=googlegemini&logoColor=white)](https://ai.google.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/)
 
-Norin ishlab chiqaruvchilar va ulgurji go'sht/ovqat yetkazib beruvchilar uchun **tarozi cheki rasmidan faqat kg ni o'qib (chekdagi do'kon narxini e'tiborsiz qoldirib) mijozning individual narxida hisoblaydigan**, har bir mijozning alohida Telegram guruhiga izoh bilan yuboradigan, **qarz daftari, kunlik sof foyda, kassa sverkasi va oylik obuna (`/superadmin`)** tizimiga ega Telegram bot.
+Norin ishlab chiqaruvchi sexlar va ulgurji go‘sht/oziq-ovqat yetkazib beruvchilar uchun **tarozi/nakladnoy rasmidan faqat kg va mahsulot turini o‘qib**, har bir mijozning **individual narxida** hisoblaydigan, mijozning Telegram guruhiga **tannarx va foydasiz** yuboradigan, **qarz daftari, kunlik sof foyda, kassa sverkasi, Excel hisobotlari va ko‘p filialli (Multi-Tenant) SaaS obuna boshqaruvi**ga ega Telegram bot.
 
 ---
 
 ## ✨ Asosiy Imkoniyatlar
 
-### 1. 📸 AI Chek / Ovoz / Matn orqali KG Sotuv Hisobi (`Gemini Flash`)
-- **Faqat KG o'qish:** Chekdagi do'konning chakana narxlarini tashlab, faqat **kg miqdori** va **go'sht turini** (`Ot go'shtli` / `Mol go'shtli`) aniqlaydi. Bitta rasmda bir nechta nakleyka bo'lsa, hammasini jamlab chiqaradi (`8.25 + 9.1 + 7.65 = 25 kg`).
-- **Ovoz va Matn:** *"Iftiqor 80 notin ot 25 kg"* yoki *"ot 12.5 kg mol 8 kg"* deb yuborish kifoya.
-- **Guruhga Avto-Yuborish & Jonli Tahrirlash:** Tasdiqlangan sotuv mijozning guruhiga rasm tagidagi chiroyli izoh bilan yuboriladi. **Tannarx va foyda hech qachon mijoz guruhida ko'rsatilmaydi!** Keyinchalik kg/narx/mijoz tahrirlansa yoki o'chirilsa, guruhdagi xabar ham avtomatik yangilanadi.
-- **Guruh ichida Avto-Hisob:** Admin mijoz guruhining o'ziga rasm yoki matn tashlasa, bot darhol javob (reply) qilib hisobni yozadi, adminning shaxsiy chatiga esa sof foyda va tahrir tugmalarini yuboradi.
+### 1. 📸 AI Faqat Rasm & Ovoz Uchun (Matn & Hisobotlar — 0 Token)
+- **Tarozi cheki / Nakladnoy rasmi (Gemini Vision):** Chekdagi do‘konning so‘m narxlarini e’tiborsiz qoldirib, faqat **kg vazni** va **mahsulot turini** (`Ot` / `Mol`) o‘qiydi. Bir nechta tarozi nakleykasi bitta rasmda bo‘lsa, barchasini jamlab beradi (`8.25 + 9.1 + 7.65 = 25 kg`).
+- **Rasm tagidagi (Caption) Postavshik / Mijoz ustuvorligi:** Nakladnoyda postavshik nomi bo‘lmasa yoki xato bosilgan bo‘lsa, rasm tagiga mijoz/postavshik nomini yozib yuborish kifoya — bot chekdagi bosma nomni tashlab, rasm tagidagi nomni oladi (bazada bo‘lmasa 1 bosishda **yangi mijoz** qilib qo‘shish tugmasini chiqaradi).
+- **Matn & Caption — 0 Token:** Shaxsiy chat va guruhdagi matnli buyurtmalar (`"Iftiqor ot 25 yarim kg"`), `"3 yarim million"`, `"yarim mln"` kabi iboralar hamda barcha hisobotlar AI chaqirmasdan mahalliy parser orqali qayta ishlanadi.
+- **Ovozli xabarlar:** 90 soniyagacha bo‘lgan ovozli xabarlarni Gemini Audio orqali tushunadi; to‘lov/xarajat/kassa bosqichlarida yengil `extract_amount_from_audio` ishlatiladi.
+- **Barqarorlik va Sarf Nazorati:** Yo‘q (`404`) modellar avtomatik 1 soatga keshlanadi (`gemini-flash-lite-latest` → `gemini-2.5-flash-lite` → `gemini-2.5-flash`), har bir rasm/ovoz so‘rovi `ai_usage_logs` jadvalida tokenlari bilan saqlanadi.
 
-### 2. 🥩 Mahsulotlar (Tannarx) & 🏪 Mijozlar (Individual Narx + Guruh)
-- Har bir mahsulot uchun **tannarx** va **standart sotuv narxi** sozlanadi.
-- Har bir mijoz uchun alohida kg narx (masalan: A do'kon — `112 000`, B do'kon — `118 000`) va alohida Telegram guruhi biriktiriladi (1-bosishda **Admin Deep-Link** orqali).
+### 2. 🥩 Mahsulotlar, 🏪 Mijozlar & 🔗 Guruh Sinxronizatsiyasi
+- **Mahsulot katalogi:** Har bir mahsulot uchun **tannarx**, **standart sotuv narxi**, **nom o‘zgartirish** va **sinonimlar (alias)** sozlanadi.
+- **Mijozlar bazasi:** Telefon raqam, boshlang‘ich qarz, sinonimlar va mijozga xos **individual narx/kg** (masalan, A do‘kon — `112 000`, B do‘kon — `118 000`).
+- **1-bosishda Guruh Ulash:** Admin Deep-Link orqali botni mijoz guruhiga qo‘shib bog‘lash; guruhga yuboriladigan caption va Akt Sverkada **tannarx, sof foyda va marja hech qachon chiqarilmaydi**.
+- **Jonli Sinxronizatsiya:** Sotuvda kg, narx, mahsulot turi (`🥩 Tur`), mijoz almashtirilsa yoki sotuv/to‘lov o‘chirilsa — mijoz guruhidagi xabar va yangilangan qarz qoldig‘i avtomatik tahrirlanadi.
+- **Tezkor To‘lov (`💵 Pulini oldim`):** Tasdiqlangan sotuv kartasining o‘zidan 1 bosishda `Naqd / Karta / Perechesleniye` to‘lovini yozish.
 
-### 3. 💳 Qarz Daftari, Pul Oldi-Berdi & Akt Sverka
-- Mijozlardan **Naqd / Karta (Click/Payme) / Perechesleniye** ko'rinishida pul qabul qilish.
-- Har bir mijozning joriy qarz qoldig'i, yuklar tarixi va to'lovlar **Akt Sverkasi** (Telegram guruhga yuborish yoki tannarxsiz Mijoz Excel yuklab olish).
+### 3. 💳 Qarz Daftari, Xarajatlar & Kun Yakuni (Sverka)
+- **Pul oldi-berdi:** Mijozlardan **Naqd / Karta / Perechesleniye** to‘lovlari, sex xarajatlari **7 ta kategoriya** bo‘yicha (`Go'sht`, `Xamir`, `Ziravor`, `Ish haqi`, `Transport`, `Ijara`, `Boshqa`), asosiy pul kiritish va kassa qarzi hisobi.
+- **Kechagi ochiq smena ogohlantirishi:** Oldingi kun yopilmagan bo‘lsa, Kunlik hisobot va Kunni yakunlash oynasida eslatma chiqadi.
+- **🏁 Kunni yakunlash:** Qo‘ldagi naqd pulni sanab kassa bilan solishtirish (kamomad/ortiqcha) va qoldiqni keyingi kunga o‘tkazish.
 
-### 4. 📊 Kunlik Foyda, Xarajatlar, Sverka & Excel
-- Kunlik va 30 kunlik hisobot: jami kg, tushum, tannarx, **sof foyda va marja (%)**, xarajatlar, kassa qarzi va qo'ldagi naqd pul.
-- **🏁 Kunni yakunlash:** Qo'ldagi naqd pulni sanab sverka qilish, ertangi kunga qoldiq o'tkazish va **4 varaqli `.xlsx` Excel** yuklab olish.
+### 4. 📊 Hisobotlar & Jonli Formulali `.xlsx` Excel Eksporti
+- **Davriy analitika:** **Bugungi**, **7 kun**, **30 kun**, **Shu oy** va **O'tgan oy** hisobotlari (jami kg, tushum, tannarx, sof foyda, marja `%`, to‘lov turlari va xarajatlar).
+- **Professional Excel fayllar (`OpenPyXL`):**
+  - **Kunlik & Davriy 4 varaqli Excel:** Barcha jadvallarda jonli `=SUM(...)` (`JAMI`) va satr formulalari, raqamli `0.0%` marja, `Kirim (+)` / `Chiqim (-)` va xarajat `Kategoriya`si, hoshiyalar, zebra ranglar, muzlatilgan sarlavha, filtr va A4 chop etish sozlamalari.
+  - **Cheklanmagan Akt Sverka:** 100 qator cheklovisiz to‘liq xronologik tarix, jonli qoldiq formulasi (`=H...+F...-G...`) — mijozga yuborish uchun tannarxsiz toza ko‘rinishda.
 
-### 5. 💎 Oylik SaaS Obuna va `/superadmin` Boshqaruvi
-- Sinov/oylik muddat, 3 kunlik grace period, avtomatik eslatmalar va muddat tugaganda bloklash.
-- Mijoz `"💳 To'lov qildim"` tugmasini bosganda Super Adminga (dasturchiga) **1 bosishda `+30 kun` tasdiqlash** xabari boradi.
-- `/myid` — foydalanuvchi Telegram ID sini bilish buyrug'i.
-- `/superadmin` — obunani uzaytirish, narx/kontakt o'zgartirish, ruxsat etilgan ID larni qo'shish/o'chirish va to'lovlar tarixi.
+### 5. 🏢 Multi-Tenant SaaS, `/superadmin` & Super Admin `/menu`
+- **Har bir mijozga alohida izolyatsiyalangan baza (`tenant_id`):** Har bir filial o‘z mahsulotlari, mijozlari, guruhlari, kassasi, obunasi va sozlamalariga ega. Super Admin `#1 Test Filial` da qoladi.
+- **Telegramdan Odam Tanlash (`KeyboardButtonRequestUsers`):** Alohida ID aniqlovchi botsiz, **«👤 Telegramdan odam tanlash»** tugmasi orqali kontakt ro‘yxatidan odam tanlanadi — bot ID va profilini avto oladi (shuningdek forward va qo‘lda `ID Ism` kiritish ham ishlaydi).
+- **Foydalanuvchi & Filial Boshqaruvi:** Rolni almashtirish (`owner` ↔ `staff`), xodimni boshqa filialga ko‘chirish, har bir filial uchun alohida tarif/grace/avto-tasdiq/yaxlitlash sozlamalari (`sa:settings`), 30 kunlik AI sarfini ko‘rish, barcha foydalanuvchilarga e’lon (`sa:broadcast`), tanlangan filialni tozalash (`/clear`) yoki o‘chirish.
+- **Maxsus Komandalar Chegarasi:** `BotCommandScopeChat` orqali `/menu`, `/superadmin`, `/clear` faqat Super Admin menyusida chiqadi va boshqalar uchun yopiq bo‘ladi.
+- **Kunlik Avtomatik Zaxira (`norin-backup`):** Har 24 soatda PostgreSQL bazasidan gzip siqilgan `pg_dump` olib, 14 kunlik nusxalarni saqlaydi.
 
 ---
 
-## 🏗 Loyiha Tuzilmasi
+## 🤖 Buyruqlar Ro‘yxati
+
+| Buyruq | Kimlar uchun | Vazifasi |
+|---|---|---|
+| `/start` | Barcha ruxsat etilganlar | Asosiy menyu va guruh bog‘lash (`startgroup`) |
+| `/myid` | Barcha foydalanuvchilar | Telegram foydalanuvchi va chat ID sini ko‘rsatish |
+| `/cancel` | Barcha foydalanuvchilar | Faol kiritish jarayonini (FSM) bekor qilish |
+| `/menu` | **Faqat Super Admin** | Filiallar, foydalanuvchilar, obuna va hisobot uchun tezkor boshqaruv menyusi |
+| `/superadmin` | **Faqat Super Admin** | Multi-Tenant SaaS boshqaruv paneli (`/supaeradmin` ham ishlaydi) |
+| `/clear` | **Faqat Super Admin** | Tanlangan filial savdolarini yoki bazasini 0 dan tozalash |
+
+---
+
+## 🏗 Tizim Arxitekturasi
+
+```mermaid
+flowchart TD
+    U["Telegram DM / Guruhlar"] --> MW["SubscriptionMiddleware (Tenant & Auth Tekshiruvi)"]
+    MW --> R["Aiogram 3 Routerlari"]
+    R --> CP["clients_products.py (Mijoz, Narx, Mahsulot, Qarz)"]
+    R --> WR["wallet_reports.py (Hisobot, Xarajat, Kassa, Excel)"]
+    R --> SN["sales_norin.py (Rasm/Ovoz/Matn Sotuv & Tahrir)"]
+    R --> SA["superadmin.py (/menu, /superadmin, Tenant & Odamlar)"]
+    SN --> AI["gemini_ai.py (Faqat Rasm/Ovoz AI + 0-Token Lokal Matn Parser)"]
+    WR --> EX["excel_export.py (OpenPyXL Formulali Excel & Akt Sverka)"]
+    CP & WR & SN & SA --> DB["crud.py + SQLAlchemy Async"]
+    DB --> PG["PostgreSQL 16 (Multi-Tenant Baza)"]
+    PG --> BK["norin-backup (Har 24 soatda pg_dump -> .sql.gz)"]
+```
+
+---
+
+## 📁 Loyiha Tuzilmasi
 
 ```text
 Norin_AI_hisobot/
-├── main.py                       # Bot kirish nuqtasi (Aiogram 3 + Middleware + Obuna kuzatuvchisi)
-├── config.py                     # Pydantic Settings (.env konfiguratsiyasi)
+├── main.py                       # Bot kirish nuqtasi, BotCommandScope, Middleware & Obuna kuzatuvchisi
+├── config.py                     # Pydantic Settings (.env konfiguratsiyasi va ADMIN_IDS parseri)
 ├── requirements.txt              # Python kutubxonalari
-├── Dockerfile                    # Production konteyner obrazi
-├── docker-compose.yml            # Izolyatsiyalangan norin-postgres + norin-bot stack
-├── REJA.md                       # Biznes tahlil, SaaS strategiyasi va texnik reja
+├── Dockerfile                    # Production konteyner obrazi (Python 3.12-slim)
+├── docker-compose.yml            # norin-postgres + norin-bot + norin-backup (kunlik pg_dump)
+├── .env.example                  # Muhit o'zgaruvchilari namunasi
+├── REJA.md                       # Dastlabki biznes va arxitektura rejasi
+├── README.md                     # Loyiha hujjati
 ├── database/
-│   ├── models.py                 # SQLAlchemy 2.0 ORM modellari
-│   ├── session.py                # Async engine, init_db, boshlang'ich mahsulotlar & obuna seed
-│   └── crud.py                   # Mahsulot, mijoz, narx, sotuv, qarz, kassa va obuna CRUD
+│   ├── models.py                 # SQLAlchemy 2.0 ORM modellari (Tenant, Sale, AIUsageLog va b.)
+│   ├── session.py                # Async engine, idempotent PostgreSQL migratsiya & seed
+│   └── crud.py                   # Tenant-izolyatsiyali CRUD, qarz/sverka, AI loglar & hisob-kitob
 ├── services/
-│   ├── gemini_ai.py              # Gemini Vision (faqat KG OCR), ovoz/matn va kg parseri
-│   └── excel_export.py           # OpenPyXL 4 varaqli kunlik va mijoz Akt Sverka Excel eksporti
+│   ├── gemini_ai.py              # Rasm/Ovoz Gemini AI + 0-token Uzbek matn/caption parseri
+│   └── excel_export.py           # Formulali 4 varaqli kunlik/davriy Excel & to'liq Akt Sverka
 ├── bot/
 │   ├── states.py                 # Aiogram FSM holatlari
-│   ├── middlewares.py            # Oylik obuna tekshiruvchi middleware
-│   ├── keyboards.py              # Reply va Inline tugmalar + Admin Deep-Link
+│   ├── middlewares.py            # Obuna va ruxsat tekshiruvi (DM, guruh va CallbackQuery)
+│   ├── keyboards.py              # Reply/Inline tugmalar, Telegram user-picker & Deep-Link
 │   └── handlers/
-│       ├── __init__.py           # Routerlarni ulash
-│       ├── superadmin.py         # /myid, /superadmin paneli, obunani 1-bosishda tasdiqlash
-│       ├── clients_products.py   # /start, mahsulotlar, mijozlar, individual narx, guruh ulash, qarzlar
-│       ├── wallet_reports.py     # Kunlik/30 kunlik foyda hisoboti, xarajat, kassa sverka, history, Excel
-│       └── sales_norin.py        # AI rasm/ovoz/matn sotuv, mijoz to'lovi, tahrirlash & guruh avto-hisob
+│       ├── __init__.py           # Routerlarni ustuvorlik tartibida ulash
+│       ├── superadmin.py         # /menu, /superadmin, /clear, /myid, tenant & odam boshqaruvi
+│       ├── clients_products.py   # /start, mahsulotlar, mijozlar, narxlar, guruh ulash, qarzlar
+│       ├── wallet_reports.py     # Kunlik/oylik hisobot, xarajat kategoriyasi, kassa, Excel
+│       └── sales_norin.py        # AI rasm/ovoz/matn sotuv, caption postavshik, to'lov & tahrir
 └── tests/
-    └── test_all.py               # Avtomatik Pytest testlari
+    └── test_all.py               # Avtomatik Pytest testlar to'plami (19 ta test)
 ```
 
 ---
 
 ## 🚀 Ishga Tushirish
 
-### 1-usul: Lokal Python muhiti
+### 1-usul: Lokal Python muhiti (SQLite bilan tezkor test)
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate      # Linux/Mac: source .venv/bin/activate
+# Windows:
+.venv\Scripts\activate
+# Linux/Mac:
+source .venv/bin/activate
+
 pip install -r requirements.txt
-cp .env.example .env        # BOT_TOKEN, SUPER_ADMIN_IDS, GEMINI_API_KEY ni to'ldiring
+cp .env.example .env   # BOT_TOKEN, SUPER_ADMIN_IDS, GEMINI_API_KEY ni kiriting
 python main.py
 ```
 
-### 2-usul: Docker Compose + PostgreSQL 16 (VPS uchun)
+### 2-usul: Docker Compose + PostgreSQL 16 + Avtomatik Backup (Production / VPS)
 
 ```bash
 cp .env.example .env
-# .env ichida DATABASE_URL=postgresql+asyncpg://norin:parol@norin-postgres:5432/norin_db qilib sozlang
+# .env ichida quyidagicha PostgreSQL ulanishini belgilang:
+# POSTGRES_USER=norin
+# POSTGRES_PASSWORD=kuchli_parol
+# POSTGRES_DB=norin_db
+# DATABASE_URL=postgresql+asyncpg://norin:kuchli_parol@norin-postgres:5432/norin_db
+
 docker compose up -d --build
+docker compose ps
 docker compose logs -f norin-bot
 ```
 
+> Zaxira fayllari avtomatik ravishda `./data/backups/norin_YYYY-MM-DD_HHMM.sql.gz` ko‘rinishida saqlanadi va 14 kundan eskisi tozalanadi.
+
 ---
 
-## ⚙️ Muhit O'zgaruvchilari (`.env`)
+## ⚙️ Muhit O‘zgaruvchilari (`.env`)
 
-| O'zgaruvchi | Tavsif | Standart / Namuna |
+| O‘zgaruvchi | Tavsif | Standart / Namuna |
 |---|---|---|
 | `BOT_TOKEN` | `@BotFather` dan olingan Telegram bot tokeni | Majburiy |
-| `SUPER_ADMIN_IDS` | Dasturchi / loyiha egasi Telegram ID lari (vergul bilan) | `5649321700` |
-| `ADMIN_IDS` | Buyurtmachi va ishchilar Telegram ID lari (vergul bilan) | `""` |
-| `OWNER_CONTACT` | Obuna tugaganda ko'rsatiladigan bog'lanish manzili | `@SunnatDevPy` |
-| `DEFAULT_MONTHLY_PRICE` | Standart oylik obuna narxi (so'm) | `400000` |
-| `DEFAULT_TRIAL_DAYS` | Boshlang'ich sinov muddati (kun) | `30` |
-| `DATABASE_URL` | SQLite (`aiosqlite`) yoki PostgreSQL (`asyncpg`) manzili | `sqlite+aiosqlite:///./data/norin_bot.db` |
-| `GEMINI_API_KEY` | Google Gemini API kaliti (rasm va ovoz o'qish uchun) | Majburiy |
+| `SUPER_ADMIN_IDS` | Loyiha egasi / Super Admin Telegram ID lari (vergul bilan) | `5649321700` |
+| `ADMIN_IDS` | `#1` Test filial admin/xodimlari ID lari (ixtiyoriy `:Ism` bilan) | `5649321700:Asad` |
+| `OWNER_CONTACT` | Obuna eslatmalarida ko‘rsatiladigan aloqa | `@your_username` |
+| `DEFAULT_MONTHLY_PRICE` | Standart oylik obuna narxi (so‘m) | `400000` |
+| `DEFAULT_TRIAL_DAYS` | Boshlang‘ich sinov muddati (kun) | `30` |
+| `DATABASE_URL` | SQLite (`aiosqlite`) yoki PostgreSQL (`asyncpg`) ulanish satri | `sqlite+aiosqlite:///./data/norin_bot.db` |
+| `POSTGRES_USER` | Docker PostgreSQL foydalanuvchisi | `norin` |
+| `POSTGRES_PASSWORD` | Docker PostgreSQL paroli | `change_me_strong_password` |
+| `POSTGRES_DB` | Docker PostgreSQL baza nomi | `norin_db` |
+| `GEMINI_API_KEY` | Google Gemini API kaliti (rasm va ovoz o‘qish uchun) | Majburiy |
 | `GEMINI_MODEL` | Asosiy Gemini modeli | `gemini-flash-lite-latest` |
-| `TIMEZONE` | Mahalliy vaqt mintaqasi | `Asia/Tashkent` |
+| `TIMEZONE` | Mahalliy vaqt mintaqasi (kunlik smena va hisobotlar uchun) | `Asia/Tashkent` |
 
 ---
 
 ## 🧪 Avtomatik Testlar
+
+Loyihada barcha asosiy modullar (parserlar, 0-token matn rejimi, multi-tenant izolyatsiya, rasm tagidagi postavshik nomi, Excel formulalari, to‘liq Akt Sverka, UI tugmalar xavfsizligi va Super Admin funksiyalari) bo‘yicha 19 ta avtomatik test mavjud:
 
 ```bash
 python -m pytest tests/test_all.py -v

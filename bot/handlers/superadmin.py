@@ -414,26 +414,23 @@ async def process_superadmin_new_tenant(message: Message, state: FSMContext) -> 
     await _set_sa_tenant(uid, sub.id)
     await state.clear()
     text, kb = await _superadmin_panel(uid)
+    merged_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔗 Shu filialga odam bog'lash (Telegramdan tanlash)",
+                    callback_data="sa:add_user",
+                )
+            ],
+            *kb.inline_keyboard,
+        ]
+    )
     await message.answer(
         f"✅ Yangi filial yaratildi: <b>#{sub.id} {html.escape(sub.tenant_name)}</b>!",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
     )
-    await message.answer(
-        f"👤 Endi <b>#{sub.id} {html.escape(sub.tenant_name)}</b> filialiga egasini/xodimni Telegramdan tanlab bog'laysizmi?",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="🔗 Shu filialga odam bog'lash (Telegramdan tanlash)",
-                        callback_data="sa:add_user",
-                    )
-                ]
-            ]
-        ),
-    )
-    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await message.answer(text, parse_mode="HTML", reply_markup=merged_kb)
 
 
 @router.callback_query(F.data.startswith("sa:ext:"))
@@ -547,7 +544,7 @@ async def process_superadmin_price(message: Message, state: FSMContext) -> None:
     async with async_session_maker() as db:
         await update_subscription_settings(db, monthly_price=amt, tenant_id=tid)
     await state.clear()
-    text, kb = await _superadmin_panel(uid)
+    text, kb = await _render_tenant_settings_view(tid)
     await message.answer(f"✅ Oylik narx yangilandi: {format_uzs(amt)} so'm", reply_markup=main_menu_keyboard())
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
@@ -586,7 +583,7 @@ async def process_superadmin_tenant(message: Message, state: FSMContext) -> None
     async with async_session_maker() as db:
         await update_subscription_settings(db, tenant_name=name, tenant_id=tid)
     await state.clear()
-    text, kb = await _superadmin_panel(uid)
+    text, kb = await _render_tenant_settings_view(tid)
     await message.answer(
         f"✅ Filial #{tid} nomi yangilandi: {html.escape(name)}",
         reply_markup=main_menu_keyboard(),
@@ -628,7 +625,7 @@ async def process_superadmin_contact(message: Message, state: FSMContext) -> Non
     async with async_session_maker() as db:
         await update_subscription_settings(db, owner_contact=contact, tenant_id=tid)
     await state.clear()
-    text, kb = await _superadmin_panel(uid)
+    text, kb = await _render_tenant_settings_view(tid)
     await message.answer("✅ Kontakt yangilandi!", reply_markup=main_menu_keyboard())
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
@@ -1386,7 +1383,13 @@ async def cb_superadmin_payments(cb: CallbackQuery) -> None:
         lines.append(
             f"{idx}) <code>{dt}</code> | +{p.days_added} kun | <b>{format_uzs(p.amount)} so'm</b> <i>({html.escape(p.note or p.plan_name)})</i>"
         )
-    await cb.message.answer("\n".join(lines), parse_mode="HTML")
+    await cb.message.edit_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Super Admin", callback_data="sa:menu")]]
+        ),
+    )
     await cb.answer()
 
 

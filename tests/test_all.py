@@ -923,3 +923,51 @@ def test_superadmin_user_reassign_settings_and_keyboards(tmp_path: Path):
         assert sale_kb.inline_keyboard[0][0].callback_data == "sale:newcli_cap:99"
 
     asyncio.run(_run_with_db(tmp_path, _logic))
+
+
+def test_ui_keyboards_safe_cancel_no_duplicate_active_period_and_icons(tmp_path: Path):
+    """Verify UI polish: safe back_cb on pick_client, no duplicate pick_cli, active period pill, expense icons."""
+    from bot.keyboards import (
+        confirmed_sale_edit_kb,
+        expense_category_kb,
+        period_report_kb,
+        pick_client_for_sale_kb,
+    )
+
+    async def _logic(db):
+        cli = await create_client(db, "Bozor-NoGrp")
+        prods = await list_products(db)
+        sale = await create_pending_sale(
+            db, client_id=cli.id, items_spec=[{"product_id": prods[0].id, "weight_kg": 5.0}]
+        )
+        await confirm_sale(db, sale.id)
+        sale_loaded = await get_or_create_open_session(db)
+        assert sale_loaded is not None
+
+        # P0-1: back_cb renders 'Orqaga' instead of dangerous sale:cancel
+        back_kb = pick_client_for_sale_kb(sale.id, [cli], back_cb=f"sale:back_card:{sale.id}")
+        flat_cbs = [b.callback_data for row in back_kb.inline_keyboard for b in row if b.callback_data]
+        assert f"sale:back_card:{sale.id}" in flat_cbs
+        assert f"sale:cancel:{sale.id}" not in flat_cbs
+
+        # P0-2: confirmed_sale_edit_kb renders sale:pick_cli only ONCE even without group
+        from database.crud import get_sale
+
+        full_sale = await get_sale(db, sale.id)
+        assert full_sale is not None
+        edit_kb = confirmed_sale_edit_kb(full_sale)
+        edit_cbs = [b.callback_data for row in edit_kb.inline_keyboard for b in row if b.callback_data]
+        assert edit_cbs.count(f"sale:pick_cli:{sale.id}") == 1
+
+        # P1-4: active period indicator
+        p7 = period_report_kb(days=7)
+        assert p7.inline_keyboard[0][0].text == "• 7 kun •"
+        p_cur = period_report_kb(period_key="cur")
+        assert p_cur.inline_keyboard[0][1].text == "• Shu oy •"
+
+        # P2-5: expense icons preserve exact callback_data
+        exp_kb = expense_category_kb()
+        exp_btns = [b for row in exp_kb.inline_keyboard for b in row]
+        assert any(b.text == "🥩 Go'sht" and b.callback_data == "wal:exp_cat:Go'sht" for b in exp_btns)
+
+    asyncio.run(_run_with_db(tmp_path, _logic))
