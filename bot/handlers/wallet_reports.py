@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import io
 import logging
@@ -13,6 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from bot.handlers.clients_products import is_authorized_async
+from bot.ui_helpers import fast_edit, send_inline_panel
 from bot.keyboards import (
     BTN_CLOSE_DAY,
     BTN_DAILY_REPORT,
@@ -212,10 +214,11 @@ async def handle_daily_report_btn(message: Message, state: FSMContext) -> None:
     await state.clear()
     async with async_session_maker() as db:
         summary = await compute_session_summary(db)
-    await message.answer(
+    await send_inline_panel(
+        message,
         render_daily_report_text(summary),
-        parse_mode="HTML",
         reply_markup=daily_report_kb(summary.session.id),
+        delete_prev=False,
     )
 
 
@@ -223,12 +226,11 @@ async def handle_daily_report_btn(message: Message, state: FSMContext) -> None:
 async def cb_report_today(cb: CallbackQuery) -> None:
     async with async_session_maker() as db:
         summary = await compute_session_summary(db)
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         render_daily_report_text(summary),
-        parse_mode="HTML",
         reply_markup=daily_report_kb(summary.session.id),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("rep:period:"))
@@ -236,12 +238,11 @@ async def cb_report_period(cb: CallbackQuery) -> None:
     days = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
         period = await compute_period_summary(db, days=days)
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         render_period_report_text(period),
-        parse_mode="HTML",
         reply_markup=period_report_kb(days=days),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("rep:month:"))
@@ -253,12 +254,11 @@ async def cb_report_month(cb: CallbackQuery) -> None:
     start_iso, end_iso, title = _calendar_month_bounds(which)
     async with async_session_maker() as db:
         period = await compute_period_summary(db, start_iso=start_iso, end_iso=end_iso)
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         render_period_report_text(period, title=title),
-        parse_mode="HTML",
         reply_markup=period_report_kb(period_key=which),
     )
-    await cb.answer()
 
 
 # ---------------------------------------------------------------------------
@@ -285,10 +285,11 @@ async def handle_expense_kassa_btn(message: Message, state: FSMContext) -> None:
         f"⚠️ <b>Jami kassa qarzi qoldig'i: {format_uzs(kstats['outstanding'])} so'm</b>",
         f"💰 Qo'ldagi naqd qolishi kerak: <b>{format_uzs(summary.expected_cash)} so'm</b>",
     ]
-    await message.answer(
+    await send_inline_panel(
+        message,
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=wallet_expense_kb(),
+        delete_prev=True,
     )
 
 
@@ -707,6 +708,16 @@ async def cb_history_all_pays(cb: CallbackQuery) -> None:
 async def cb_export_excel(cb: CallbackQuery) -> None:
     parts = cb.data.split(":")
     kind = parts[1]
+    if kind not in ("daily", "client", "period", "month", "history"):
+        await cb.answer("Noma'lum eksport turi")
+        return
+    if kind == "month" and (parts[2] if len(parts) > 2 else "cur") not in ("cur", "prev"):
+        await cb.answer("Noma'lum oy")
+        return
+
+    # Answer callback immediately so Telegram clears the spinner at once
+    await cb.answer("⏳ Excel tayyorlanmoqda...")
+
     async with async_session_maker() as db:
         sub = await get_subscription_state(db)
         tenant_name = sub.tenant_name or "Norin Sexi"
@@ -715,45 +726,46 @@ async def cb_export_excel(cb: CallbackQuery) -> None:
             sess_id = int(parts[2])
             summary = await compute_session_summary(db, sess_id)
             debts = await list_all_client_debts(db)
-            data = build_daily_norin_excel(summary, debts, tenant_name=tenant_name)
+            data = await asyncio.to_thread(
+                build_daily_norin_excel, summary, debts, tenant_name=tenant_name
+            )
             filename = f"{t_slug}_Hisobot_{summary.session.report_date}.xlsx"
         elif kind == "client":
             cid = int(parts[2])
             debt = await compute_client_debt(db, cid, history_limit=None)
-            data = build_client_statement_excel(debt, tenant_name=tenant_name)
+            data = await asyncio.to_thread(
+                build_client_statement_excel, debt, tenant_name=tenant_name
+            )
             c_slug = _safe_file_part(debt.client.name, f"Mijoz_{cid}")
             filename = f"{t_slug}_Sverka_{c_slug}.xlsx"
         elif kind == "period":
             days = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 30
             pdata = await get_period_excel_data(db, days=days)
-            data = build_period_excel(pdata)
+            data = await asyncio.to_thread(build_period_excel, pdata)
             filename = f"{t_slug}_{days}kunlik_{pdata['start_date']}_{pdata['end_date']}.xlsx"
         elif kind == "month":
             which = parts[2] if len(parts) > 2 else "cur"
-            if which not in ("cur", "prev"):
-                await cb.answer("Noma'lum oy")
-                return
             start_iso, end_iso, _ = _calendar_month_bounds(which)
             pdata = await get_period_excel_data(db, start_iso=start_iso, end_iso=end_iso)
-            data = build_period_excel(pdata)
+            data = await asyncio.to_thread(build_period_excel, pdata)
             filename = f"{t_slug}_Oylik_{start_iso[:7]}.xlsx"
-        elif kind == "history":
+        else:
             sessions = await list_closed_sessions(db, limit=90)
             if not sessions:
                 summary = await compute_session_summary(db)
                 debts = await list_all_client_debts(db)
-                data = build_daily_norin_excel(summary, debts, tenant_name=tenant_name)
+                data = await asyncio.to_thread(
+                    build_daily_norin_excel, summary, debts, tenant_name=tenant_name
+                )
                 filename = f"{t_slug}_Hisobot_{summary.session.report_date}.xlsx"
             else:
-                data = build_history_excel(sessions, tenant_name=tenant_name)
+                data = await asyncio.to_thread(
+                    build_history_excel, sessions, tenant_name=tenant_name
+                )
                 filename = f"{t_slug}_Kunlik_Tarix.xlsx"
-        else:
-            await cb.answer("Noma'lum eksport turi")
-            return
 
     await cb.message.answer_document(
         BufferedInputFile(data, filename=filename),
         caption=f"📥 Tayyor Excel hisobot: <code>{html.escape(filename)}</code>",
         parse_mode="HTML",
     )
-    await cb.answer("✅ Excel tayyor!")

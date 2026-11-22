@@ -38,7 +38,9 @@ from bot.keyboards import (
     skip_or_cancel_keyboard,
 )
 from bot.states import ClientStates, ProductStates, WalletStates
+from bot.ui_helpers import fast_edit, mark_reply_kb_sent, send_inline_panel
 from database.crud import (
+    CURRENT_USER_AUTHORIZED,
     ClientDebtSummary,
     append_product_alias,
     bind_client_group,
@@ -107,6 +109,13 @@ async def _refresh_open_client_card(bot, user_id: Optional[int], client_id: int)
         pass
 
 
+def set_cached_bot_username(username: Optional[str]) -> None:
+    """Pre-populate the cached bot @username during startup."""
+    global _BOT_USERNAME
+    if username:
+        _BOT_USERNAME = username.lstrip("@")
+
+
 async def get_bot_username(bot) -> str:
     """Fetch and cache the bot username."""
     global _BOT_USERNAME
@@ -119,7 +128,11 @@ async def get_bot_username(bot) -> str:
 async def is_authorized_async(
     user_id: Optional[int], allow_group_anon: bool = False
 ) -> bool:
-    """Check if Telegram user is authorized via .env or database AuthorizedUser."""
+    """Check if Telegram user is authorized, reusing middleware auth ContextVar with 0 extra DB queries."""
+    cached = CURRENT_USER_AUTHORIZED.get()
+    if cached is not None:
+        if cached or not allow_group_anon:
+            return cached
     async with async_session_maker() as db:
         return await is_user_authorized(db, user_id, allow_group_anon=allow_group_anon)
 
@@ -232,6 +245,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
     )
+    mark_reply_kb_sent(message.chat.id)
 
 
 @router.message(F.text == "❌ Bekor qilish", F.chat.type == "private")
@@ -241,6 +255,7 @@ async def cancel_any_state(message: Message, state: FSMContext) -> None:
         return
     await state.clear()
     await message.answer("❌ Amal bekor qilindi.", reply_markup=main_menu_keyboard())
+    mark_reply_kb_sent(message.chat.id)
 
 
 # ---------------------------------------------------------------------------
@@ -436,10 +451,11 @@ async def open_settings_menu(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(uid):
         return
     await state.clear()
-    await message.answer(
+    await send_inline_panel(
+        message,
         "⚙️ <b>Sozlamalar, Mahsulotlar, Mijozlar va Arxiv</b>\nKerakli bo'limni tanlang:",
-        parse_mode="HTML",
         reply_markup=settings_menu_kb(is_super_admin=is_super_admin(uid)),
+        delete_prev=True,
     )
 
 
@@ -447,12 +463,11 @@ async def open_settings_menu(message: Message, state: FSMContext) -> None:
 async def cb_settings_back(cb: CallbackQuery, state: FSMContext) -> None:
     uid = cb.from_user.id if cb.from_user else None
     await state.clear()
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         "⚙️ <b>Sozlamalar, Mahsulotlar, Mijozlar va Arxiv</b>\nKerakli bo'limni tanlang:",
-        parse_mode="HTML",
         reply_markup=settings_menu_kb(is_super_admin=is_super_admin(uid)),
     )
-    await cb.answer()
 
 
 async def _render_ai_prefs() -> tuple[str, bool, bool, str]:
@@ -1588,10 +1603,11 @@ async def handle_debts_btn(message: Message, state: FSMContext) -> None:
     await state.clear()
     async with async_session_maker() as db:
         debts = await list_all_client_debts(db)
-    await message.answer(
+    await send_inline_panel(
+        message,
         render_debts_overview_text(debts),
-        parse_mode="HTML",
         reply_markup=debts_list_kb(debts),
+        delete_prev=False,
     )
 
 
@@ -1599,12 +1615,11 @@ async def handle_debts_btn(message: Message, state: FSMContext) -> None:
 async def cb_debts_list(cb: CallbackQuery) -> None:
     async with async_session_maker() as db:
         debts = await list_all_client_debts(db)
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         render_debts_overview_text(debts),
-        parse_mode="HTML",
         reply_markup=debts_list_kb(debts, page=0),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("debt:list:p:"))
@@ -1612,8 +1627,11 @@ async def cb_debts_list_page(cb: CallbackQuery) -> None:
     page = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
         debts = await list_all_client_debts(db)
-    await cb.message.edit_reply_markup(reply_markup=debts_list_kb(debts, page=page))
-    await cb.answer()
+    await asyncio.gather(
+        cb.message.edit_reply_markup(reply_markup=debts_list_kb(debts, page=page)),
+        cb.answer(),
+        return_exceptions=True,
+    )
 
 
 @router.callback_query(F.data.startswith("debt:view:"))
@@ -1621,9 +1639,8 @@ async def cb_debt_client_detail(cb: CallbackQuery) -> None:
     cid = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
         debt = await compute_client_debt(db, cid, history_limit=10)
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         render_client_sverka_text(debt, for_group=False),
-        parse_mode="HTML",
         reply_markup=client_debt_detail_kb(cid, has_group=bool(debt.client.group_chat_id)),
     )
-    await cb.answer()

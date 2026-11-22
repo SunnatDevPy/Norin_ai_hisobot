@@ -37,7 +37,23 @@ from contextvars import ContextVar
 
 ANONYMOUS_ADMIN_BOT_ID = 1087968824
 CURRENT_TENANT_ID: ContextVar[int] = ContextVar("norin_current_tenant_id", default=1)
+CURRENT_USER_AUTHORIZED: ContextVar[Optional[bool]] = ContextVar(
+    "norin_current_user_authorized", default=None
+)
 _ADD_USER_LOCK = asyncio.Lock()
+_AUTH_CACHE_EPOCH = 0
+
+
+def get_auth_cache_epoch() -> int:
+    """Return monotonic epoch incremented whenever auth, group, or subscription state changes."""
+    return _AUTH_CACHE_EPOCH
+
+
+def bump_auth_cache_epoch() -> int:
+    """Invalidate short-lived middleware subscription/auth caches immediately."""
+    global _AUTH_CACHE_EPOCH
+    _AUTH_CACHE_EPOCH += 1
+    return _AUTH_CACHE_EPOCH
 
 
 def get_current_tenant_id(tenant_id: Optional[int] = None) -> int:
@@ -125,6 +141,7 @@ class ClientDebtSummary:
     total_kg: float
     recent_sales: List[Sale]
     recent_payments: List[ClientPayment]
+    last_payment_at: Optional[datetime] = None
 
 
 @dataclass
@@ -514,6 +531,7 @@ async def bind_client_group(
     client.group_title = title.strip() or f"Guruh ({chat_id})"
     await db.commit()
     await db.refresh(client)
+    bump_auth_cache_epoch()
     return client
 
 
@@ -528,6 +546,7 @@ async def unbind_client_group(
     client.group_title = ""
     await db.commit()
     await db.refresh(client)
+    bump_auth_cache_epoch()
     return client
 
 
@@ -663,40 +682,109 @@ async def compute_client_debt(
     if client is None:
         raise ValueError(f"Client {client_id} not found")
 
-    sales = list(
-        (
-            await db.scalars(
-                select(Sale)
-                .options(selectinload(Sale.items))
-                .where(
+    opening = float(client.opening_debt or 0.0)
+    if history_limit is None:
+        sales = list(
+            (
+                await db.scalars(
+                    select(Sale)
+                    .options(selectinload(Sale.items))
+                    .where(
+                        Sale.tenant_id == tid,
+                        Sale.client_id == client_id,
+                        Sale.status == "confirmed",
+                    )
+                    .order_by(desc(Sale.id))
+                )
+            ).all()
+        )
+        payments = list(
+            (
+                await db.scalars(
+                    select(ClientPayment)
+                    .where(
+                        ClientPayment.tenant_id == tid,
+                        ClientPayment.client_id == client_id,
+                        ClientPayment.is_deleted.is_(False),
+                    )
+                    .order_by(desc(ClientPayment.id))
+                )
+            ).all()
+        )
+        total_sales = sum(float(s.total_amount) for s in sales)
+        total_paid = sum(float(p.amount) for p in payments)
+        total_kg = round(sum(float(s.total_weight_kg) for s in sales), 3)
+        last_pay_at = payments[0].created_at if payments else None
+        recent_sales = sales
+        recent_payments = payments
+    else:
+        lim = max(0, int(history_limit))
+        s_amt, s_kg = (
+            await db.execute(
+                select(
+                    sa_func.coalesce(sa_func.sum(Sale.total_amount), 0.0),
+                    sa_func.coalesce(sa_func.sum(Sale.total_weight_kg), 0.0),
+                ).where(
                     Sale.tenant_id == tid,
                     Sale.client_id == client_id,
                     Sale.status == "confirmed",
                 )
-                .order_by(desc(Sale.id))
             )
-        ).all()
-    )
-    payments = list(
-        (
-            await db.scalars(
-                select(ClientPayment)
-                .where(
+        ).one()
+        p_amt, last_pay_at = (
+            await db.execute(
+                select(
+                    sa_func.coalesce(sa_func.sum(ClientPayment.amount), 0.0),
+                    sa_func.max(ClientPayment.created_at),
+                ).where(
                     ClientPayment.tenant_id == tid,
                     ClientPayment.client_id == client_id,
                     ClientPayment.is_deleted.is_(False),
                 )
-                .order_by(desc(ClientPayment.id))
             )
-        ).all()
-    )
+        ).one()
+        total_sales = float(s_amt or 0.0)
+        total_kg = round(float(s_kg or 0.0), 3)
+        total_paid = float(p_amt or 0.0)
+        recent_sales = (
+            list(
+                (
+                    await db.scalars(
+                        select(Sale)
+                        .options(selectinload(Sale.items))
+                        .where(
+                            Sale.tenant_id == tid,
+                            Sale.client_id == client_id,
+                            Sale.status == "confirmed",
+                        )
+                        .order_by(desc(Sale.id))
+                        .limit(lim)
+                    )
+                ).all()
+            )
+            if lim > 0
+            else []
+        )
+        recent_payments = (
+            list(
+                (
+                    await db.scalars(
+                        select(ClientPayment)
+                        .where(
+                            ClientPayment.tenant_id == tid,
+                            ClientPayment.client_id == client_id,
+                            ClientPayment.is_deleted.is_(False),
+                        )
+                        .order_by(desc(ClientPayment.id))
+                        .limit(lim)
+                    )
+                ).all()
+            )
+            if lim > 0
+            else []
+        )
 
-    opening = float(client.opening_debt or 0.0)
-    total_sales = sum(float(s.total_amount) for s in sales)
-    total_paid = sum(float(p.amount) for p in payments)
-    total_kg = round(sum(float(s.total_weight_kg) for s in sales), 3)
     current_debt = round(opening + total_sales - total_paid, 2)
-
     return ClientDebtSummary(
         client=client,
         opening_debt=opening,
@@ -704,8 +792,9 @@ async def compute_client_debt(
         total_paid=total_paid,
         current_debt=current_debt,
         total_kg=total_kg,
-        recent_sales=sales if history_limit is None else sales[:history_limit],
-        recent_payments=payments if history_limit is None else payments[:history_limit],
+        recent_sales=recent_sales,
+        recent_payments=recent_payments,
+        last_payment_at=last_pay_at,
     )
 
 
@@ -718,50 +807,47 @@ async def list_all_client_debts(
     if not clients:
         return []
 
-    sales = list(
-        (
-            await db.scalars(
-                select(Sale)
-                .options(selectinload(Sale.items))
-                .where(
-                    Sale.tenant_id == tid,
-                    Sale.status == "confirmed",
-                    Sale.client_id.is_not(None),
-                )
-                .order_by(desc(Sale.id))
+    active_ids = [c.id for c in clients]
+    sales_rows = (
+        await db.execute(
+            select(
+                Sale.client_id,
+                sa_func.coalesce(sa_func.sum(Sale.total_amount), 0.0),
+                sa_func.coalesce(sa_func.sum(Sale.total_weight_kg), 0.0),
             )
-        ).all()
-    )
-    payments = list(
-        (
-            await db.scalars(
-                select(ClientPayment)
-                .where(
-                    ClientPayment.tenant_id == tid,
-                    ClientPayment.is_deleted.is_(False),
-                )
-                .order_by(desc(ClientPayment.id))
+            .where(
+                Sale.tenant_id == tid,
+                Sale.status == "confirmed",
+                Sale.client_id.in_(active_ids),
             )
-        ).all()
-    )
+            .group_by(Sale.client_id)
+        )
+    ).all()
+    pay_rows = (
+        await db.execute(
+            select(
+                ClientPayment.client_id,
+                sa_func.coalesce(sa_func.sum(ClientPayment.amount), 0.0),
+                sa_func.max(ClientPayment.created_at),
+            )
+            .where(
+                ClientPayment.tenant_id == tid,
+                ClientPayment.is_deleted.is_(False),
+                ClientPayment.client_id.in_(active_ids),
+            )
+            .group_by(ClientPayment.client_id)
+        )
+    ).all()
 
-    sales_by_cli: Dict[int, List[Sale]] = {}
-    for s in sales:
-        if s.client_id is not None:
-            sales_by_cli.setdefault(s.client_id, []).append(s)
-
-    pay_by_cli: Dict[int, List[ClientPayment]] = {}
-    for p in payments:
-        pay_by_cli.setdefault(p.client_id, []).append(p)
+    sales_agg = {int(cid): (float(amt or 0.0), float(kg or 0.0)) for cid, amt, kg in sales_rows}
+    pay_agg = {int(cid): (float(amt or 0.0), last_dt) for cid, amt, last_dt in pay_rows}
 
     summaries: List[ClientDebtSummary] = []
     for cli in clients:
-        c_sales = sales_by_cli.get(cli.id, [])
-        c_pays = pay_by_cli.get(cli.id, [])
+        t_sales, raw_kg = sales_agg.get(cli.id, (0.0, 0.0))
+        t_paid, last_dt = pay_agg.get(cli.id, (0.0, None))
         opening = float(cli.opening_debt or 0.0)
-        t_sales = sum(float(s.total_amount) for s in c_sales)
-        t_paid = sum(float(p.amount) for p in c_pays)
-        t_kg = round(sum(float(s.total_weight_kg) for s in c_sales), 3)
+        t_kg = round(raw_kg, 3)
         summaries.append(
             ClientDebtSummary(
                 client=cli,
@@ -770,8 +856,9 @@ async def list_all_client_debts(
                 total_paid=t_paid,
                 current_debt=round(opening + t_sales - t_paid, 2),
                 total_kg=t_kg,
-                recent_sales=c_sales[:10],
-                recent_payments=c_pays[:10],
+                recent_sales=[],
+                recent_payments=[],
+                last_payment_at=last_dt,
             )
         )
 
@@ -1276,18 +1363,22 @@ async def get_outstanding_kassa_debt(
 ) -> float:
     """Compute cumulative unpaid debt borrowed from Kassa for this tenant."""
     tid = get_current_tenant_id(tenant_id)
-    txs = (
-        await db.scalars(
-            select(CashTransaction).where(
+    rows = (
+        await db.execute(
+            select(
+                CashTransaction.source_type,
+                sa_func.coalesce(sa_func.sum(CashTransaction.amount), 0.0),
+            )
+            .where(
                 CashTransaction.tenant_id == tid,
                 CashTransaction.is_deleted.is_(False),
                 CashTransaction.source_type.in_(["kassa_debt", "kassa_repay"]),
             )
+            .group_by(CashTransaction.source_type)
         )
     ).all()
-    debt = sum(float(t.amount) for t in txs if t.source_type == "kassa_debt")
-    repaid = sum(float(t.amount) for t in txs if t.source_type == "kassa_repay")
-    return debt - repaid
+    sums = {str(src): float(amt or 0.0) for src, amt in rows}
+    return sums.get("kassa_debt", 0.0) - sums.get("kassa_repay", 0.0)
 
 
 async def get_kassa_debt_stats(
@@ -1321,35 +1412,37 @@ async def get_kassa_debt_stats(
 async def get_total_all_clients_debt(
     db: AsyncSession, tenant_id: Optional[int] = None
 ) -> float:
-    """Quickly compute total unpaid debt across all active clients of this tenant."""
+    """Quickly compute total unpaid debt across all active clients of this tenant via SQL SUM."""
     tid = get_current_tenant_id(tenant_id)
-    clients = await list_clients(db, active_only=True, tenant_id=tid)
-    if not clients:
-        return 0.0
-    opening = sum(float(c.opening_debt or 0.0) for c in clients)
-    active_ids = {c.id for c in clients}
-
-    sales_rows = (
-        await db.scalars(
-            select(Sale).where(
+    active_ids_sub = select(Client.id).where(Client.tenant_id == tid, Client.is_active.is_(True))
+    opening = float(
+        await db.scalar(
+            select(sa_func.coalesce(sa_func.sum(Client.opening_debt), 0.0)).where(
+                Client.tenant_id == tid, Client.is_active.is_(True)
+            )
+        )
+        or 0.0
+    )
+    total_sales = float(
+        await db.scalar(
+            select(sa_func.coalesce(sa_func.sum(Sale.total_amount), 0.0)).where(
                 Sale.tenant_id == tid,
                 Sale.status == "confirmed",
-                Sale.client_id.in_(active_ids),
+                Sale.client_id.in_(active_ids_sub),
             )
         )
-    ).all()
-    pay_rows = (
-        await db.scalars(
-            select(ClientPayment).where(
+        or 0.0
+    )
+    total_paid = float(
+        await db.scalar(
+            select(sa_func.coalesce(sa_func.sum(ClientPayment.amount), 0.0)).where(
                 ClientPayment.tenant_id == tid,
                 ClientPayment.is_deleted.is_(False),
-                ClientPayment.client_id.in_(active_ids),
+                ClientPayment.client_id.in_(active_ids_sub),
             )
         )
-    ).all()
-
-    total_sales = sum(float(s.total_amount) for s in sales_rows)
-    total_paid = sum(float(p.amount) for p in pay_rows)
+        or 0.0
+    )
     return round(opening + total_sales - total_paid, 2)
 
 
@@ -1990,6 +2083,7 @@ async def set_group_config(
         obj.title = title
     await db.commit()
     await db.refresh(obj)
+    bump_auth_cache_epoch()
     return obj
 
 
@@ -2040,6 +2134,7 @@ async def set_app_setting(
         obj.value = value
     await db.commit()
     await db.refresh(obj)
+    bump_auth_cache_epoch()
     return obj
 
 
@@ -2135,6 +2230,7 @@ async def create_tenant(
     await db.commit()
     await db.refresh(sub)
     await seed_default_products(db, tenant_id=sub.id)
+    bump_auth_cache_epoch()
     return sub
 
 
@@ -2220,6 +2316,7 @@ async def extend_subscription(
     db.add(payment)
     await db.commit()
     await db.refresh(sub)
+    bump_auth_cache_epoch()
     return sub
 
 
@@ -2249,6 +2346,7 @@ async def update_subscription_settings(
         sub.grace_days = max(0, int(grace_days))
     await db.commit()
     await db.refresh(sub)
+    bump_auth_cache_epoch()
     return sub
 
 
@@ -2327,6 +2425,7 @@ async def add_authorized_user(
             existing.role = role
             await db.commit()
             await db.refresh(existing)
+            bump_auth_cache_epoch()
             return existing
 
         user = AuthorizedUser(
@@ -2339,6 +2438,7 @@ async def add_authorized_user(
         db.add(user)
         await db.commit()
         await db.refresh(user)
+        bump_auth_cache_epoch()
         return user
 
 
@@ -2354,6 +2454,7 @@ async def remove_authorized_user(
         return False
     await db.delete(existing)
     await db.commit()
+    bump_auth_cache_epoch()
     return True
 
 
@@ -2385,60 +2486,41 @@ async def reassign_authorized_user(
         existing.role = role.strip()
     await db.commit()
     await db.refresh(existing)
+    bump_auth_cache_epoch()
     return existing
 
 
 async def get_tenant_overview_stats(db: AsyncSession, tenant_id: int) -> dict:
-    """Return high-level counts of users, clients, groups, products, and confirmed sales."""
+    """Return high-level counts of users, clients, groups, products, and confirmed sales in 1 query."""
     tid = int(tenant_id)
-    users_cnt = int(
-        await db.scalar(
-            select(sa_func.count(AuthorizedUser.id)).where(
-                AuthorizedUser.tenant_id == tid, AuthorizedUser.is_active.is_(True)
-            )
+    stmt = select(
+        select(sa_func.count(AuthorizedUser.id))
+        .where(AuthorizedUser.tenant_id == tid, AuthorizedUser.is_active.is_(True))
+        .scalar_subquery(),
+        select(sa_func.count(Client.id))
+        .where(Client.tenant_id == tid, Client.is_active.is_(True))
+        .scalar_subquery(),
+        select(sa_func.count(Client.id))
+        .where(
+            Client.tenant_id == tid,
+            Client.is_active.is_(True),
+            Client.group_chat_id.is_not(None),
         )
-        or 0
+        .scalar_subquery(),
+        select(sa_func.count(Product.id))
+        .where(Product.tenant_id == tid, Product.is_active.is_(True))
+        .scalar_subquery(),
+        select(sa_func.count(Sale.id))
+        .where(Sale.tenant_id == tid, Sale.status == "confirmed")
+        .scalar_subquery(),
     )
-    clients_cnt = int(
-        await db.scalar(
-            select(sa_func.count(Client.id)).where(
-                Client.tenant_id == tid, Client.is_active.is_(True)
-            )
-        )
-        or 0
-    )
-    groups_cnt = int(
-        await db.scalar(
-            select(sa_func.count(Client.id)).where(
-                Client.tenant_id == tid,
-                Client.is_active.is_(True),
-                Client.group_chat_id.is_not(None),
-            )
-        )
-        or 0
-    )
-    products_cnt = int(
-        await db.scalar(
-            select(sa_func.count(Product.id)).where(
-                Product.tenant_id == tid, Product.is_active.is_(True)
-            )
-        )
-        or 0
-    )
-    sales_cnt = int(
-        await db.scalar(
-            select(sa_func.count(Sale.id)).where(
-                Sale.tenant_id == tid, Sale.status == "confirmed"
-            )
-        )
-        or 0
-    )
+    row = (await db.execute(stmt)).one()
     return {
-        "users": users_cnt,
-        "clients": clients_cnt,
-        "groups": groups_cnt,
-        "products": products_cnt,
-        "sales": sales_cnt,
+        "users": int(row[0] or 0),
+        "clients": int(row[1] or 0),
+        "groups": int(row[2] or 0),
+        "products": int(row[3] or 0),
+        "sales": int(row[4] or 0),
     }
 
 
@@ -2644,6 +2726,7 @@ async def reset_full_database(
     await db.commit()
 
     await seed_default_products(db, tenant_id=tid)
+    bump_auth_cache_epoch()
 
     return {
         "sales": sales_cnt,
@@ -2682,6 +2765,7 @@ async def delete_tenant(db: AsyncSession, tenant_id: int) -> bool:
     await db.execute(delete(AppSetting).where(AppSetting.key.like(f"t{tid}:%")))
     await db.execute(delete(SubscriptionState).where(SubscriptionState.id == tid))
     await db.commit()
+    bump_auth_cache_epoch()
     return True
 
 
@@ -2766,4 +2850,5 @@ async def set_raw_app_setting(db: AsyncSession, key: str, value: str) -> AppSett
         obj.value = value
     await db.commit()
     await db.refresh(obj)
+    bump_auth_cache_epoch()
     return obj

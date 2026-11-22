@@ -42,7 +42,17 @@ def create_engine_and_session(
 ) -> Tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     """Create an AsyncEngine and async_sessionmaker for the given URL."""
     url = database_url or get_settings().DATABASE_URL
-    eng = create_async_engine(url, echo=False, future=True)
+    eng_kwargs: dict = {"echo": False, "future": True}
+    if url.startswith("postgresql"):
+        eng_kwargs.update(
+            {
+                "pool_pre_ping": True,
+                "pool_recycle": 300,
+                "pool_size": 10,
+                "max_overflow": 20,
+            }
+        )
+    eng = create_async_engine(url, **eng_kwargs)
     maker = async_sessionmaker(eng, expire_on_commit=False, class_=AsyncSession)
     return eng, maker
 
@@ -153,3 +163,6 @@ async def init_db(
     async with target_maker() as session:
         await seed_default_products(session, tenant_id=1)
         await seed_default_subscription(session)
+    from database.crud import bump_auth_cache_epoch
+
+    bump_auth_cache_epoch()

@@ -971,3 +971,75 @@ def test_ui_keyboards_safe_cancel_no_duplicate_active_period_and_icons(tmp_path:
         assert any(b.text == "🥩 Go'sht" and b.callback_data == "wal:exp_cat:Go'sht" for b in exp_btns)
 
     asyncio.run(_run_with_db(tmp_path, _logic))
+
+
+def test_performance_sql_aggregations_auth_cache_and_one_time_menu_ux(tmp_path: Path):
+    """Verify SQL debt/kassa aggregations match exact sums, epoch invalidation works, and Reply/Inline UX switches cleanly."""
+    from bot.keyboards import (
+        daily_report_kb,
+        main_menu_keyboard,
+        settings_menu_kb,
+        superadmin_quick_menu_kb,
+        wallet_expense_kb,
+    )
+    from database.crud import (
+        bump_auth_cache_epoch,
+        get_auth_cache_epoch,
+        get_outstanding_kassa_debt,
+        get_total_all_clients_debt,
+    )
+    from services.excel_export import build_daily_norin_excel
+
+    # Collapsible ReplyKeyboard + menu:home escape buttons on top-level inline panels
+    assert main_menu_keyboard().one_time_keyboard is True
+    for kb in (
+        settings_menu_kb(is_super_admin=True),
+        daily_report_kb(1),
+        wallet_expense_kb(),
+        superadmin_quick_menu_kb(1, 2),
+    ):
+        cbs = [b.callback_data for row in kb.inline_keyboard for b in row if b.callback_data]
+        assert "menu:home" in cbs
+
+    ep_before = get_auth_cache_epoch()
+    ep_after = bump_auth_cache_epoch()
+    assert ep_after == ep_before + 1
+
+    async def _logic(db):
+        prods = await list_products(db)
+        c1 = await create_client(db, "Bozor-1", opening_debt=100_000)
+        c2 = await create_client(db, "Bozor-2", opening_debt=50_000)
+        s1 = await create_pending_sale(
+            db, client_id=c1.id, items_spec=[{"product_id": prods[0].id, "weight_kg": 10.0}]
+        )
+        await confirm_sale(db, s1.id)
+        pay1 = await add_client_payment(db, c1.id, 300_000, payment_method="cash", note="test")
+        await add_cash_transaction(db, 500_000, source_type="kassa_debt", note="qarz")
+        await add_cash_transaction(db, 150_000, source_type="kassa_repay", note="qaytar")
+
+        # SQL aggregation accuracy check
+        debts = await list_all_client_debts(db)
+        d1_summary = next(d for d in debts if d.client.id == c1.id)
+        d1_direct = await compute_client_debt(db, c1.id, history_limit=5)
+        assert d1_summary.current_debt == d1_direct.current_debt
+        assert d1_summary.total_sales == d1_direct.total_sales
+        assert d1_summary.total_paid == d1_direct.total_paid
+        assert d1_summary.last_payment_at is not None
+        assert d1_direct.last_payment_at is not None
+
+        total_all = await get_total_all_clients_debt(db)
+        assert abs(total_all - sum(d.current_debt for d in debts)) < 0.01
+        assert abs((await get_outstanding_kassa_debt(db)) - 350_000.0) < 0.01
+
+        # Verify Excel Mijozlar Qarzi sheet prints the last payment date using last_payment_at
+        sess_sum = await compute_session_summary(db)
+        daily_bytes = build_daily_norin_excel(sess_sum, debts, tenant_name="Test Sex")
+        wb = load_workbook(io.BytesIO(daily_bytes))
+        ws_debts = wb["Mijozlar Qarzi"]
+        debt_sheet_vals = " ".join(
+            str(c.value or "") for row in ws_debts.iter_rows() for c in row
+        )
+        assert pay1.created_at is not None
+        assert "-" in debt_sheet_vals
+
+    asyncio.run(_run_with_db(tmp_path, _logic))

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import html
 import io
 import logging
@@ -40,6 +42,7 @@ from bot.keyboards import (
     sale_confirm_kb,
 )
 from bot.states import SaleStates, WalletStates
+from bot.ui_helpers import clear_active_panel, fast_edit, mark_reply_kb_sent, send_inline_panel
 from config import get_settings
 from database.crud import (
     add_cash_transaction,
@@ -1426,10 +1429,11 @@ async def handle_client_pay_btn(message: Message, state: FSMContext) -> None:
     if not clients:
         await message.answer("ℹ️ Avval Sozlamalar → Mijozlar bo'limidan mijoz qo'shing.")
         return
-    await message.answer(
+    await send_inline_panel(
+        message,
         "💵 <b>Qaysi mijozdan pul oldingiz?</b>\nMijozni tanlang (yoki ovoz/matnda <i>«Iftiqordan 2 mln karta oldim»</i> deb yuboring):",
-        parse_mode="HTML",
         reply_markup=pick_client_for_payment_kb(clients, page=0),
+        delete_prev=True,
     )
 
 
@@ -1574,14 +1578,15 @@ async def handle_edit_btn(message: Message, state: FSMContext) -> None:
     ):
         await message.answer("ℹ️ Bugungi ochiq smenada hali tahrirlanadigan yozuvlar yo'q.")
         return
-    await message.answer(
+    await send_inline_panel(
+        message,
         "✏️ <b>Bugungi Yozuvlarni Tahrirlash:</b>\n"
         "O'zgartirmoqchi bo'lgan sotuv, to'lov yoki xarajatni tanlang\n"
         "<i>(Sotuv o'zgarsa mijoz guruhidagi xabar ham avtomatik yangilanadi)</i>:",
-        parse_mode="HTML",
         reply_markup=edit_items_list_kb(
             summary.confirmed_sales, summary.client_payments, summary.cash_transactions
         ),
+        delete_prev=True,
     )
 
 
@@ -1596,14 +1601,13 @@ async def cb_edit_menu_open(cb: CallbackQuery) -> None:
     ):
         await cb.answer("Bugungi smenada yozuvlar yo'q.", show_alert=True)
         return
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         "✏️ <b>Bugungi Yozuvlarni Tahrirlash:</b>\nKerakli qatorni tanlang:",
-        parse_mode="HTML",
         reply_markup=edit_items_list_kb(
             summary.confirmed_sales, summary.client_payments, summary.cash_transactions
         ),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("edit_menu:p:"))
@@ -1611,21 +1615,44 @@ async def cb_edit_menu_page(cb: CallbackQuery) -> None:
     page = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
         summary = await compute_session_summary(db)
-    await cb.message.edit_reply_markup(
-        reply_markup=edit_items_list_kb(
-            summary.confirmed_sales, summary.client_payments, summary.cash_transactions, page=page
-        )
+    await asyncio.gather(
+        cb.message.edit_reply_markup(
+            reply_markup=edit_items_list_kb(
+                summary.confirmed_sales, summary.client_payments, summary.cash_transactions, page=page
+            )
+        ),
+        cb.answer(),
+        return_exceptions=True,
     )
-    await cb.answer()
+
+
+@router.callback_query(F.data == "menu:home")
+async def cb_menu_home(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    chat_id = cb.message.chat.id if cb.message else None
+    clear_active_panel(chat_id)
+    with contextlib.suppress(Exception):
+        await cb.message.edit_reply_markup(reply_markup=None)
+    await asyncio.gather(
+        cb.answer(),
+        cb.message.answer(
+            "🏠 <b>Asosiy menyu</b> — pastdagi tugmalardan tanlang:",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        ),
+        return_exceptions=True,
+    )
+    mark_reply_kb_sent(chat_id)
 
 
 @router.callback_query(F.data == "menu:dismiss")
 async def cb_menu_dismiss(cb: CallbackQuery) -> None:
-    try:
-        await cb.message.delete()
-    except Exception:
-        pass
-    await cb.answer()
+    clear_active_panel(cb.message.chat.id if cb.message else None)
+    await asyncio.gather(
+        cb.message.delete(),
+        cb.answer(),
+        return_exceptions=True,
+    )
 
 
 @router.callback_query(F.data.startswith("sale_view:"))

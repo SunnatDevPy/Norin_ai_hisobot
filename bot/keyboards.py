@@ -55,7 +55,7 @@ PAGE_SIZE = 12
 
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
-    """Main persistent bottom menu for Norin wholesale management."""
+    """Collapsible bottom main menu so ReplyKeyboard closes cleanly when inline panels open."""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_ADD_SALE), KeyboardButton(text=BTN_CLIENT_PAY)],
@@ -64,6 +64,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_CLOSE_DAY), KeyboardButton(text=BTN_SETTINGS)],
         ],
         resize_keyboard=True,
+        one_time_keyboard=True,
     )
 
 
@@ -461,7 +462,12 @@ def pick_client_for_payment_kb(
     nav = _pagination_row("pay:list:p", max(0, page), len(clients))
     if nav:
         rows.append(nav)
-    rows.append([InlineKeyboardButton(text="🔙 Yopish", callback_data="menu:dismiss")])
+    rows.append(
+        [
+            InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
+            InlineKeyboardButton(text="🔙 Yopish", callback_data="menu:dismiss"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -561,7 +567,12 @@ def edit_items_list_kb(
     nav = _pagination_row("edit_menu:p", max(0, page), len(all_rows))
     if nav:
         buttons.append(nav)
-    buttons.append([InlineKeyboardButton(text="🔙 Yopish", callback_data="menu:dismiss")])
+    buttons.append(
+        [
+            InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
+            InlineKeyboardButton(text="🔙 Yopish", callback_data="menu:dismiss"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -608,6 +619,7 @@ def daily_report_kb(session_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="✏️ Tahrirlash", callback_data="edit_menu:open"),
                 InlineKeyboardButton(text="📜 Arxiv / Tarix", callback_data="set:history"),
             ],
+            [InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home")],
         ]
     )
 
@@ -651,7 +663,10 @@ def wallet_expense_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🏦 Kassadan olish", callback_data="wal:kassa_borrow"),
                 InlineKeyboardButton(text="↩️ Kassaga qaytarish", callback_data="wal:kassa_repay"),
             ],
-            [InlineKeyboardButton(text="🔙 Yopish", callback_data="menu:dismiss")],
+            [
+                InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
+                InlineKeyboardButton(text="🔙 Yopish", callback_data="menu:dismiss"),
+            ],
         ]
     )
 
@@ -728,6 +743,7 @@ def settings_menu_kb(is_super_admin: bool = False) -> InlineKeyboardMarkup:
         rows.append(
             [InlineKeyboardButton(text="👑 Super Admin", callback_data="sa:menu")]
         )
+    rows.append([InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -858,12 +874,6 @@ def client_detail_kb(
                 ),
             ]
         )
-        rows.append(
-            [
-                InlineKeyboardButton(text="🆔 Guruh ID", callback_data=f"cli:set_gid:{client.id}"),
-                InlineKeyboardButton(text="🔗 Sinonim", callback_data=f"cli:alias:{client.id}"),
-            ]
-        )
     else:
         rows.append(
             [
@@ -873,12 +883,6 @@ def client_detail_kb(
                 )
             ]
         )
-        rows.append(
-            [
-                InlineKeyboardButton(text="🆔 Guruh ID", callback_data=f"cli:set_gid:{client.id}"),
-                InlineKeyboardButton(text="🔗 Sinonim", callback_data=f"cli:alias:{client.id}"),
-            ]
-        )
     rows.extend(
         [
             [
@@ -886,7 +890,7 @@ def client_detail_kb(
                 InlineKeyboardButton(text="📥 Mijoz Excel", callback_data=f"export:client:{client.id}"),
             ],
             [
-                InlineKeyboardButton(text="✏️ Profil", callback_data=f"cli:edit_menu:{client.id}"),
+                InlineKeyboardButton(text="✏️ Profil / Guruh ID", callback_data=f"cli:edit_menu:{client.id}"),
                 InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"cli:del:{client.id}"),
             ],
             [InlineKeyboardButton(text="⬅️ Mijozlarga", callback_data="set:clients")],
@@ -896,12 +900,16 @@ def client_detail_kb(
 
 
 def client_edit_menu_kb(client_id: int) -> InlineKeyboardMarkup:
-    """Profile edit options (name, phone, opening debt) for a client."""
+    """Profile, alias, opening debt, and group ID edit options for a client."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="✏️ Nom", callback_data=f"cli:edit_name:{client_id}"),
                 InlineKeyboardButton(text="📞 Telefon", callback_data=f"cli:edit_phone:{client_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="🆔 Guruh ID", callback_data=f"cli:set_gid:{client_id}"),
+                InlineKeyboardButton(text="🔗 Sinonim", callback_data=f"cli:alias:{client_id}"),
             ],
             [
                 InlineKeyboardButton(text="💳 Boshlang'ich qarz", callback_data=f"cli:edit_debt:{client_id}"),
@@ -996,7 +1004,12 @@ def debts_list_kb(
     nav = _pagination_row("debt:list:p", max(0, page), len(debts))
     if nav:
         rows.append(nav)
-    rows.append([InlineKeyboardButton(text="➕ Yangi mijoz qo'shish", callback_data="cli:add")])
+    rows.append(
+        [
+            InlineKeyboardButton(text="➕ Yangi mijoz", callback_data="cli:add"),
+            InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1159,6 +1172,7 @@ def superadmin_quick_menu_kb(tenant_id: int, tenant_count: int) -> InlineKeyboar
                 InlineKeyboardButton(text="📊 Kunlik hisobot", callback_data="rep:today"),
                 InlineKeyboardButton(text="🧹 Baza tozalash", callback_data="sa:clear_menu"),
             ],
+            [InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home")],
         ]
     )
 

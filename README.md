@@ -101,6 +101,7 @@ Norin_AI_hisobot/
 │   ├── states.py                 # Aiogram FSM holatlari
 │   ├── middlewares.py            # Obuna va ruxsat tekshiruvi (DM, guruh va CallbackQuery)
 │   ├── keyboards.py              # Reply/Inline tugmalar, Telegram user-picker & Deep-Link
+│   ├── ui_helpers.py             # Tezkor parallel callback javoblari va yagona inline UI boshqaruvi
 │   └── handlers/
 │       ├── __init__.py           # Routerlarni ustuvorlik tartibida ulash
 │       ├── superadmin.py         # /menu, /superadmin, /clear, /myid, tenant & odam boshqaruvi
@@ -108,7 +109,7 @@ Norin_AI_hisobot/
 │       ├── wallet_reports.py     # Kunlik/oylik hisobot, xarajat kategoriyasi, kassa, Excel
 │       └── sales_norin.py        # AI rasm/ovoz/matn sotuv, caption postavshik, to'lov & tahrir
 └── tests/
-    └── test_all.py               # Avtomatik Pytest testlar to'plami (19 ta test)
+    └── test_all.py               # Avtomatik Pytest testlar to'plami (20 ta test)
 ```
 
 ---
@@ -170,7 +171,7 @@ docker compose logs -f norin-bot
 
 ## 🧪 Avtomatik Testlar
 
-Loyihada barcha asosiy modullar (parserlar, 0-token matn rejimi, multi-tenant izolyatsiya, rasm tagidagi postavshik nomi, Excel formulalari, to‘liq Akt Sverka, UI tugmalar xavfsizligi va Super Admin funksiyalari) bo‘yicha 19 ta avtomatik test mavjud:
+Loyihada barcha asosiy modullar (parserlar, 0-token matn rejimi, multi-tenant izolyatsiya, rasm tagidagi postavshik nomi, Excel formulalari, to‘liq Akt Sverka, SQL agregatlar & UI tugmalar xavfsizligi hamda Super Admin funksiyalari) bo‘yicha 20 ta avtomatik test mavjud:
 
 ```bash
 python -m pytest tests/test_all.py -v

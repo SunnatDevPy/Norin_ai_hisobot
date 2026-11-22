@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import html
-from typing import Any, Awaitable, Callable, Dict
+import time
+from typing import Any, Awaitable, Callable, Dict, Tuple
 
 from aiogram import BaseMiddleware
 from aiogram.exceptions import TelegramBadRequest
@@ -11,14 +12,24 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config import get_settings
 from database.crud import (
+    CURRENT_USER_AUTHORIZED,
+    SubscriptionStatus,
     evaluate_subscription_status,
     format_local_dt,
+    get_auth_cache_epoch,
     is_user_authorized,
     resolve_user_tenant_id,
     tenant_scope,
 )
 from database.session import async_session_maker
 from services.gemini_ai import format_uzs
+
+_MW_CACHE_TTL_SEC = 15.0
+_MW_CACHE_MAX_SIZE = 512
+# Key: (user_id, chat_id, chat_type) -> (expires_at_mono, epoch, tid, sub_status, authorized)
+_MW_CACHE: Dict[
+    Tuple[int, int, str], Tuple[float, int, int, SubscriptionStatus, bool]
+] = {}
 
 
 def build_subscription_blocked_kb() -> InlineKeyboardMarkup:
@@ -59,16 +70,33 @@ class SubscriptionMiddleware(BaseMiddleware):
         chat_id = chat.id if chat else None
         chat_type = getattr(chat, "type", "private") if chat else "private"
 
-        async with async_session_maker() as db:
-            tid = await resolve_user_tenant_id(
-                db, user_id=user_id, chat_id=chat_id, chat_type=chat_type
-            )
-            sub_status = await evaluate_subscription_status(db, tenant_id=tid)
-            authorized = await is_user_authorized(
-                db, user_id, allow_group_anon=True, tenant_id=tid
+        cache_key = (int(user_id or 0), int(chat_id or 0), str(chat_type))
+        now_m = time.monotonic()
+        epoch = get_auth_cache_epoch()
+        cached = _MW_CACHE.get(cache_key)
+        if cached is not None and cached[0] > now_m and cached[1] == epoch:
+            _, _, tid, sub_status, authorized = cached
+        else:
+            async with async_session_maker() as db:
+                tid = await resolve_user_tenant_id(
+                    db, user_id=user_id, chat_id=chat_id, chat_type=chat_type
+                )
+                sub_status = await evaluate_subscription_status(db, tenant_id=tid)
+                authorized = await is_user_authorized(
+                    db, user_id, allow_group_anon=True, tenant_id=tid
+                )
+            if len(_MW_CACHE) >= _MW_CACHE_MAX_SIZE:
+                _MW_CACHE.clear()
+            _MW_CACHE[cache_key] = (
+                now_m + _MW_CACHE_TTL_SEC,
+                epoch,
+                tid,
+                sub_status,
+                authorized,
             )
 
         async def _call_handler() -> Any:
+            auth_token = CURRENT_USER_AUTHORIZED.set(authorized)
             try:
                 return await handler(event, data)
             except TelegramBadRequest as exc:
@@ -80,6 +108,8 @@ class SubscriptionMiddleware(BaseMiddleware):
                 ):
                     return None
                 raise
+            finally:
+                CURRENT_USER_AUTHORIZED.reset(auth_token)
 
         data["tenant_id"] = tid
         with tenant_scope(tid):

@@ -30,6 +30,7 @@ from bot.keyboards import (
     superadmin_users_kb,
 )
 from bot.states import SuperAdminStates
+from bot.ui_helpers import fast_edit, mark_reply_kb_sent, send_inline_panel
 from config import get_settings
 from database.crud import (
     add_authorized_user,
@@ -288,6 +289,7 @@ async def cancel_superadmin_or_any_state(message: Message, state: FSMContext) ->
     cur = await state.get_state()
     await state.clear()
     await message.answer("❌ Amal bekor qilindi.", reply_markup=main_menu_keyboard())
+    mark_reply_kb_sent(message.chat.id)
     if is_super_admin(uid) and cur and cur.startswith("SuperAdminStates:"):
         text, kb = await _superadmin_panel(uid)
         await message.answer(text, parse_mode="HTML", reply_markup=kb)
@@ -307,12 +309,14 @@ async def cmd_superadmin_quick_menu(message: Message, state: FSMContext) -> None
     sub = sub_status.state
     if sub.id != tid:
         await _set_sa_tenant(uid, sub.id)
-    await message.answer(
+    await send_inline_panel(
+        message,
         "⚡ <b>SUPER ADMIN TEZKOR MENYUSI</b>\n"
         f"🎯 Tanlangan filial: <b>#{sub.id} {html.escape(sub.tenant_name)}</b> (Jami: <b>{len(tenants)} ta</b>)\n"
         "Kerakli tezkor amalni tanlang:",
-        parse_mode="HTML",
         reply_markup=superadmin_quick_menu_kb(sub.id, len(tenants)),
+        delete_prev=True,
+        force_hide_kb=True,
     )
 
 
@@ -325,7 +329,13 @@ async def cmd_superadmin(message: Message, state: FSMContext) -> None:
         return
     await state.clear()
     text, kb = await _superadmin_panel(uid)
-    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+    await send_inline_panel(
+        message,
+        text,
+        reply_markup=kb,
+        delete_prev=True,
+        force_hide_kb=True,
+    )
 
 
 @router.callback_query(F.data == "sa:menu")
@@ -336,8 +346,7 @@ async def cb_superadmin_menu(cb: CallbackQuery, state: FSMContext) -> None:
         return
     await state.clear()
     text, kb = await _superadmin_panel(uid)
-    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-    await cb.answer()
+    await fast_edit(cb, text, reply_markup=kb)
 
 
 @router.callback_query(F.data == "sa:tenants")
@@ -356,12 +365,11 @@ async def cb_superadmin_tenants(cb: CallbackQuery, state: FSMContext) -> None:
         mark = "✅ " if t.id == sel_id else ""
         lines.append(f"{mark}<b>#{t.id} {html.escape(t.tenant_name)}</b> — {st}")
     lines.append("\n<i>Boshqarish uchun filialni tanlang yoki yangi mijozga alohida filial oching:</i>")
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=superadmin_tenants_kb(tenants, selected_id=sel_id),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("sa:sel_ten:"))
@@ -674,8 +682,7 @@ async def cb_superadmin_tenant_settings(cb: CallbackQuery, state: FSMContext) ->
     await state.clear()
     tid = await _get_sa_tenant(uid)
     text, kb = await _render_tenant_settings_view(tid)
-    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-    await cb.answer()
+    await fast_edit(cb, text, reply_markup=kb)
 
 
 @router.callback_query(F.data == "sa:edit_plan")
@@ -822,15 +829,14 @@ async def cb_superadmin_users(cb: CallbackQuery) -> None:
         if sub_status.state.id == 1
         else ""
     )
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         f"👥 <b>#{sub_status.state.id} {html.escape(sub_status.state.tenant_name)} — Foydalanuvchilar</b>\n\n"
         f"{env_block}"
         "• Foydalanuvchini boshqarish (rol, boshqa filialga ko'chirish, o'chirish) uchun ustiga bosing.\n"
         "• Telegramdan odam tanlab bog'lash uchun pastdagi <b>«🔗 Shu filialga odam bog'lash»</b> yoki <b>«🆕 Yangi mijoz + yangi filial»</b> ni bosing.",
-        parse_mode="HTML",
         reply_markup=superadmin_users_kb(users, tenant_id=sub_status.state.id),
     )
-    await cb.answer()
 
 
 async def _render_user_detail_view(tg_id: int) -> Optional[tuple[str, InlineKeyboardMarkup]]:

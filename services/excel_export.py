@@ -282,11 +282,10 @@ def build_daily_norin_excel(
                 c.font = RED_FONT
         ck = ws3.cell(row=d_row, column=8, value=round(d.total_kg, 3))
         ck.number_format = KG_FORMAT
-        last_pay_str = (
-            format_local_dt(d.recent_payments[0].created_at, "%d.%m.%Y")
-            if d.recent_payments and d.recent_payments[0].created_at
-            else "-"
+        last_dt = d.last_payment_at or (
+            d.recent_payments[0].created_at if d.recent_payments else None
         )
+        last_pay_str = format_local_dt(last_dt, "%d.%m.%Y") if last_dt else "-"
         ws3.cell(row=d_row, column=9, value=last_pay_str)
         _style_data_row(ws3, d_row, 9, zebra=(d_row % 2 == 1))
         d_row += 1
