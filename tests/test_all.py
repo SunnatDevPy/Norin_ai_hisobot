@@ -1043,3 +1043,209 @@ def test_performance_sql_aggregations_auth_cache_and_one_time_menu_ux(tmp_path: 
         assert "-" in debt_sheet_vals
 
     asyncio.run(_run_with_db(tmp_path, _logic))
+
+
+def test_persistent_database_fsm_storage(tmp_path: Path):
+    """Verify DatabaseFSMStorage persists state/data across fresh storage instances (restarts) and cleans up on clear."""
+    from aiogram.fsm.storage.base import StorageKey
+    from bot.states import SaleStates
+    from database.fsm_storage import DatabaseFSMStorage
+
+    async def _run() -> None:
+        db_file = tmp_path / "fsm_test.db"
+        eng, maker = create_engine_and_session(f"sqlite+aiosqlite:///{db_file.as_posix()}")
+        try:
+            await init_db(engine_override=eng, session_maker_override=maker)
+            s1 = DatabaseFSMStorage(maker)
+            key = StorageKey(bot_id=1, chat_id=555, user_id=555)
+
+            await s1.set_state(key, SaleStates.waiting_return_weight)
+            await s1.set_data(key, {"ret_client_id": 7, "ret_product_id": 2})
+
+            # Fresh storage instance (empty RAM cache) simulates Docker restart
+            s2 = DatabaseFSMStorage(maker)
+            assert await s2.get_state(key) == SaleStates.waiting_return_weight.state
+            assert await s2.get_data(key) == {"ret_client_id": 7, "ret_product_id": 2}
+
+            # Clearing state and data removes record cleanly
+            await s2.set_state(key, None)
+            await s2.set_data(key, {})
+            s3 = DatabaseFSMStorage(maker)
+            assert await s3.get_state(key) is None
+            assert await s3.get_data(key) == {}
+            await s1.close()
+            await s2.close()
+            await s3.close()
+        finally:
+            await eng.dispose()
+
+    asyncio.run(_run())
+
+
+def test_product_return_vozvrat_accounting_privacy_and_excel(tmp_path: Path):
+    """Verify Vozvrat reduces debt & net daily/period totals, deletes cleanly, and omits cost from group & Akt Sverka."""
+    from bot.handlers.sales_norin import (
+        _parse_return_weight_and_reason,
+        render_return_delete_group_notice,
+        render_return_group_caption,
+    )
+    from bot.keyboards import client_debt_detail_kb, edit_items_list_kb
+    from database.crud import add_product_return, delete_product_return
+    from services.excel_export import build_client_statement_excel, build_daily_norin_excel
+
+    w1, rsn1 = _parse_return_weight_and_reason("2.5 brak")
+    assert w1 == 2.5 and rsn1 == "brak"
+    w2, rsn2 = _parse_return_weight_and_reason("1 yarim kg ortiqcha")
+    assert w2 == 1.5 and rsn2 == "ortiqcha"
+
+    async def _logic(db: AsyncSession) -> None:
+        prods = await list_products(db)
+        ot = match_product("ot", prods)
+        assert ot is not None
+        cli = await create_client(db, "Iftiqor Return")
+        await bind_client_group(db, cli.id, -100333444, "Return Guruh")
+
+        # 10 kg * 115,000 = 1,150,000; cost = 900,000; profit = 250,000
+        sale = await create_pending_sale(
+            db, client_id=cli.id, items_spec=[{"product": ot, "weight_kg": 10.0}]
+        )
+        await confirm_sale(db, sale.id)
+
+        # Return 2 kg * 115,000 = 230,000; cost = 180,000
+        ret = await add_product_return(
+            db, client_id=cli.id, product_id=ot.id, weight_kg=2.0, reason="brak"
+        )
+        assert ret.total_amount == 230_000
+        assert ret.total_cost == 180_000
+
+        debt = await compute_client_debt(db, cli.id, history_limit=None)
+        assert debt.total_returns == 230_000
+        assert debt.total_return_kg == 2.0
+        assert debt.current_debt == 920_000  # 1,150,000 - 230,000
+
+        all_debts = await list_all_client_debts(db)
+        assert next(d for d in all_debts if d.client.id == cli.id).current_debt == 920_000
+
+        summary = await compute_session_summary(db)
+        assert summary.total_kg == 8.0
+        assert summary.total_revenue == 920_000
+        assert summary.total_cost == 720_000
+        assert summary.total_profit == 200_000
+        assert summary.total_return_amount == 230_000
+
+        period = await compute_period_summary(db, days=30)
+        assert period.returns_count == 1
+        assert period.total_kg == 8.0
+        assert period.total_revenue == 920_000
+
+        # STRICT CLIENT PRIVACY CHECK on group captions & Akt Sverka Excel
+        grp_msg = render_return_group_caption(ret, debt.current_debt)
+        assert "VOZVRAT" in grp_msg and "920 000" in grp_msg
+        assert "tannarx" not in grp_msg.lower() and "foyda" not in grp_msg.lower()
+        assert "180 000" not in grp_msg
+
+        del_notice = render_return_delete_group_notice(ret, 1_150_000)
+        assert "BEKOR QILINDI" in del_notice and "180 000" not in del_notice
+
+        edit_kb = edit_items_list_kb(summary.confirmed_sales, [], [], returns=summary.returns)
+        assert any(
+            btn.callback_data == f"ret_view:{ret.id}"
+            for row in edit_kb.inline_keyboard
+            for btn in row
+        )
+        debt_kb = client_debt_detail_kb(cli.id, True)
+        assert any(
+            btn.callback_data == f"ret:cli:{cli.id}"
+            for row in debt_kb.inline_keyboard
+            for btn in row
+        )
+
+        # Daily Excel adds Vozvratlar sheet; Akt Sverka lists Vozvrat with NO cost leak
+        daily_xlsx = build_daily_norin_excel(summary, all_debts, tenant_name="Test")
+        wb_d = load_workbook(io.BytesIO(daily_xlsx), data_only=False)
+        assert "Vozvratlar" in wb_d.sheetnames
+
+        stmt_xlsx = build_client_statement_excel(debt, tenant_name="Test")
+        wb_s = load_workbook(io.BytesIO(stmt_xlsx), data_only=False)
+        ws_s = wb_s["Akt Sverka"]
+        stmt_text = " ".join(
+            str(c.value or "") for row in ws_s.iter_rows() for c in row
+        ).lower()
+        assert f"vozvrat #{ret.id}".lower() in stmt_text
+        assert "tannarx" not in stmt_text and "foyda" not in stmt_text and "marja" not in stmt_text
+
+        # Delete return restores exact debt & revenue
+        await delete_product_return(db, ret.id)
+        assert (await compute_client_debt(db, cli.id)).current_debt == 1_150_000
+        assert (await compute_session_summary(db)).total_revenue == 1_150_000
+
+    asyncio.run(_run_with_db(tmp_path, _logic))
+
+
+def test_saas_global_analytics_product_unit_and_ai_quota(monkeypatch, tmp_path: Path):
+    """Verify global SaaS MRR analytics, product unit editing, and per-tenant daily AI quota block."""
+    import database.session as db_sess
+    import services.gemini_ai as gai
+    from bot.keyboards import product_unit_kb, superadmin_menu_kb
+    from config import get_settings
+    from database.crud import check_tenant_ai_quota, get_global_saas_analytics
+
+    async def _run() -> None:
+        db_file = tmp_path / "saas_quota.db"
+        eng, maker = create_engine_and_session(f"sqlite+aiosqlite:///{db_file.as_posix()}")
+        monkeypatch.setattr(db_sess, "async_session_maker", maker)
+        monkeypatch.setenv("GEMINI_API_KEY", "test-quota-key")
+        get_settings.cache_clear()
+        try:
+            await init_db(engine_override=eng, session_maker_override=maker)
+            async with maker() as db:
+                prods = await list_products(db)
+                updated_p = await update_product(db, prods[0].id, unit="dona")
+                assert updated_p is not None and updated_p.unit == "dona"
+                ukb = product_unit_kb(prods[0].id, "dona")
+                assert any(b.text == "✅ dona" for row in ukb.inline_keyboard for b in row)
+
+                # Tenant #2 paying 500,000 + Tenant #1 (400,000 default)
+                await add_authorized_user(
+                    db,
+                    telegram_id=888555222,
+                    full_name="Samarqand",
+                    role="owner",
+                    create_new_tenant=True,
+                    new_tenant_name="Samarqand Sexi",
+                )
+                await update_subscription_settings(db, monthly_price=500_000, tenant_id=2)
+                await extend_subscription(db, days=30, amount=500_000, recorded_by=5649321700, tenant_id=2)
+
+                analytics = await get_global_saas_analytics(db, days=30)
+                assert analytics["total_tenants"] == 2
+                assert analytics["paying_tenants"] == 1
+                assert analytics["paying_mrr"] == 500_000
+                assert analytics["collected_30d"] == 500_000
+                assert any(
+                    b.callback_data == "sa:analytics"
+                    for row in superadmin_menu_kb(False).inline_keyboard
+                    for b in row
+                )
+
+                # Enforce daily AI quota=2 on tenant #1
+                await set_app_setting(db, "ai_daily_limit", "2", tenant_id=1)
+                await log_ai_usage(db, "image", "gemini-2.5-flash", 10, 5, 15, tenant_id=1)
+                allowed1, used1, lim1 = await check_tenant_ai_quota(db, tenant_id=1)
+                assert allowed1 is True and used1 == 1 and lim1 == 2
+
+                await log_ai_usage(db, "audio", "gemini-2.5-flash-lite", 10, 5, 15, tenant_id=1)
+                allowed2, used2, lim2 = await check_tenant_ai_quota(db, tenant_id=1)
+                assert allowed2 is False and used2 == 2 and lim2 == 2
+
+                def _fail_http():
+                    raise AssertionError("HTTP client MUST NOT be invoked after quota exceeded!")
+
+                monkeypatch.setattr(gai, "_get_http_client", _fail_http)
+                res = await gai._call_gemini([{"text": "blocked"}], kind="image")
+                assert "Kunlik AI limiti (2/2)" in res.get("error", "")
+        finally:
+            get_settings.cache_clear()
+            await eng.dispose()
+
+    asyncio.run(_run())

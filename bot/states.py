@@ -10,6 +10,7 @@ class SaleStates(StatesGroup):
     waiting_edit_item_price = State()
     waiting_client_payment_amount = State()
     waiting_edit_payment_amount = State()
+    waiting_return_weight = State()
 
 
 class ClientStates(StatesGroup):

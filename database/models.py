@@ -15,7 +15,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -75,6 +74,9 @@ class Client(Base):
     )
     sales: Mapped[List["Sale"]] = relationship(back_populates="client")
     payments: Mapped[List["ClientPayment"]] = relationship(
+        back_populates="client", cascade="all, delete-orphan"
+    )
+    product_returns: Mapped[List["ProductReturn"]] = relationship(
         back_populates="client", cascade="all, delete-orphan"
     )
 
@@ -143,6 +145,9 @@ class DailyCashSession(Base):
         back_populates="session", cascade="all, delete-orphan"
     )
     cash_transactions: Mapped[List["CashTransaction"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+    product_returns: Mapped[List["ProductReturn"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
 
@@ -333,4 +338,52 @@ class AIUsageLog(Base):
     total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ProductReturn(Base):
+    """Returned meat/Norin goods (Vozvrat) reducing client debt & net session profit cleanly."""
+
+    __tablename__ = "product_returns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("daily_cash_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    client_id: Mapped[int] = mapped_column(
+        ForeignKey("clients.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    product_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("products.id", ondelete="SET NULL"), nullable=True
+    )
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    weight_kg: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    unit_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    unit_sell_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    reason: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    group_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    group_message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    report_date: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    session: Mapped["DailyCashSession"] = relationship(back_populates="product_returns")
+    client: Mapped["Client"] = relationship(back_populates="product_returns")
+
+
+class FSMStateRecord(Base):
+    """Persistent Aiogram FSM state and JSON data record surviving container restarts."""
+
+    __tablename__ = "fsm_states"
+
+    storage_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    state: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    data_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

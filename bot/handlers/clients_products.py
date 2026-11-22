@@ -31,6 +31,7 @@ from bot.keyboards import (
     debts_list_kb,
     main_menu_keyboard,
     product_detail_kb,
+    product_unit_kb,
     products_list_kb,
     report_group_config_kb,
     sale_confirm_kb,
@@ -178,9 +179,17 @@ def render_client_sverka_text(
         "===============================",
         f"📌 Boshlang'ich qarz: {format_uzs(debt.opening_debt)} so'm",
         f"🥩 Jami yuk ({format_kg(debt.total_kg)} kg): <b>{format_uzs(debt.total_sales)} so'm</b>",
-        f"💵 Jami to'langan: <b>{format_uzs(debt.total_paid)} so'm</b>",
-        f"💳 <b>Hozirgi qarz qoldig'i: {format_uzs(debt.current_debt)} so'm</b>",
     ]
+    if debt.total_returns > 0:
+        lines.append(
+            f"↩️ Jami vozvrat ({format_kg(debt.total_return_kg)} kg): <b>-{format_uzs(debt.total_returns)} so'm</b>"
+        )
+    lines.extend(
+        [
+            f"💵 Jami to'langan: <b>{format_uzs(debt.total_paid)} so'm</b>",
+            f"💳 <b>Hozirgi qarz qoldig'i: {format_uzs(debt.current_debt)} so'm</b>",
+        ]
+    )
     if debt.recent_sales:
         lines.append("\n📦 <b>Oxirgi yuklar:</b>")
         for s in debt.recent_sales[:8]:
@@ -648,6 +657,7 @@ async def _render_product_card_text(product_id: int) -> tuple[str, Optional[obje
     text = (
         f"🥩 <b>{html.escape(prod.name)}</b>\n"
         "===============================\n"
+        f"📏 O'lchov birligi: <b>{html.escape(prod.unit)}</b>\n"
         f"📉 Tannarx (1 {html.escape(prod.unit)}): <b>{format_uzs(prod.cost_price)} so'm</b>\n"
         f"💰 Standart sotuv narxi: <b>{format_uzs(prod.default_sell_price)} so'm</b>\n"
         f"📈 Standart foyda: <b>{format_uzs(margin)} so'm</b>\n"
@@ -682,6 +692,45 @@ async def cb_product_detail(cb: CallbackQuery) -> None:
         reply_markup=product_detail_kb(pid),
     )
     await cb.answer()
+
+
+@router.callback_query(F.data.startswith("prd:unit:"))
+async def cb_product_unit_menu(cb: CallbackQuery) -> None:
+    pid = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        prod = await get_product(db, pid)
+    if not prod or not prod.is_active:
+        await cb.answer("Mahsulot topilmadi", show_alert=True)
+        return
+    await fast_edit(
+        cb,
+        f"📏 <b>{html.escape(prod.name)}</b> — O'lchov birligini tanlang:\n"
+        f"Hozirgi birlik: <b>{html.escape(prod.unit)}</b>",
+        reply_markup=product_unit_kb(pid, prod.unit),
+    )
+
+
+@router.callback_query(F.data.startswith("prd:set_unit:"))
+async def cb_product_set_unit(cb: CallbackQuery) -> None:
+    parts = cb.data.split(":")
+    pid = int(parts[2])
+    new_unit = parts[3].strip().lower()
+    if new_unit not in ("kg", "dona", "porsiya", "litr"):
+        await cb.answer("Noto'g'ri birlik", show_alert=True)
+        return
+    async with async_session_maker() as db:
+        prod = await update_product(db, pid, unit=new_unit)
+    if not prod:
+        await cb.answer("Mahsulot topilmadi", show_alert=True)
+        return
+    text, loaded = await _render_product_card_text(pid)
+    if loaded:
+        await fast_edit(
+            cb,
+            text,
+            reply_markup=product_detail_kb(pid),
+            toast=f"✅ Birlik: {new_unit}",
+        )
 
 
 @router.callback_query(F.data == "prd:add")

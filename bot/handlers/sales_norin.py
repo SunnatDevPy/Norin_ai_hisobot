@@ -7,11 +7,12 @@ import contextlib
 import html
 import io
 import logging
+import re
 from typing import Any, Dict, List, Optional, Sequence
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.handlers.clients_products import (
     is_authorized_async,
@@ -36,9 +37,13 @@ from bot.keyboards import (
     payment_edit_kb,
     payment_method_kb,
     pick_client_for_payment_kb,
+    pick_client_for_return_kb,
     pick_client_for_sale_kb,
     pick_product_for_item_kb,
+    pick_product_for_return_kb,
     quick_sale_payment_kb,
+    return_after_record_kb,
+    return_edit_kb,
     sale_confirm_kb,
 )
 from bot.states import SaleStates, WalletStates
@@ -47,6 +52,7 @@ from config import get_settings
 from database.crud import (
     add_cash_transaction,
     add_client_payment,
+    add_product_return,
     compute_client_debt,
     compute_session_summary,
     confirm_sale,
@@ -54,6 +60,7 @@ from database.crud import (
     create_pending_sale,
     delete_cash_transaction,
     delete_client_payment,
+    delete_product_return,
     delete_sale,
     find_duplicate_confirmed_sale,
     format_local_dt,
@@ -62,8 +69,10 @@ from database.crud import (
     get_client,
     get_client_by_group,
     get_client_payment,
+    get_client_prices_map,
     get_open_session,
     get_product,
+    get_product_return,
     get_sale,
     list_all_client_debts,
     list_authorized_users,
@@ -73,6 +82,7 @@ from database.crud import (
     match_product,
     round_amount,
     set_client_payment_group_message,
+    set_product_return_group_message,
     set_sale_group_message,
     today_iso,
     update_cash_transaction,
@@ -80,7 +90,14 @@ from database.crud import (
     update_sale_client,
     update_sale_item,
 )
-from database.models import CashTransaction, ClientPayment, Product, Sale, SaleItem
+from database.models import (
+    CashTransaction,
+    ClientPayment,
+    Product,
+    ProductReturn,
+    Sale,
+    SaleItem,
+)
 from database.session import async_session_maker
 from services.gemini_ai import (
     _heuristic_parse_norin_text,
@@ -243,6 +260,38 @@ def render_payment_edit_group_notice(
         f"✏️ <b>TO'LOV #{payment.id} TAHRIRLANDI</b>\n"
         f"🏪 Mijoz: <b>{html.escape(cname)}</b>\n"
         f"{amt_line}\n"
+        f"💳 Yangilangan qarz qoldig'i: <b>{format_uzs(current_debt)} so'm</b>"
+    )
+
+
+def render_return_group_caption(ret: ProductReturn, current_debt: float) -> str:
+    """
+    Client-safe Vozvrat receipt posted to a client's Telegram group.
+
+    STRICT SAFETY RULE: Never include unit_cost, total_cost, profit, or margin!
+    """
+    cname = ret.client.name if ret.client else f"Mijoz #{ret.client_id}"
+    dt = format_local_dt(ret.created_at, "%d.%m.%Y %H:%M") if ret.created_at else ret.report_date
+    reason_line = f"\n📝 Sabab: <i>{html.escape(ret.reason)}</i>" if ret.reason else ""
+    return (
+        f"↩️ <b>VOZVRAT QABUL QILINDI (#{ret.id})</b>\n"
+        f"🏪 Mijoz: <b>{html.escape(cname)}</b>\n"
+        f"🥩 Mahsulot: <b>{html.escape(ret.product_name)}</b>\n"
+        f"⚖️ Vazn: <b>-{format_kg(ret.weight_kg)} kg</b> × {format_uzs(ret.unit_sell_price)}\n"
+        f"💰 Qarzdan ayirildi: <b>-{format_uzs(ret.total_amount)} so'm</b>"
+        f"{reason_line}\n"
+        f"📅 Vaqt: {dt}\n"
+        f"💳 Yangilangan qarz qoldig'i: <b>{format_uzs(current_debt)} so'm</b>"
+    )
+
+
+def render_return_delete_group_notice(ret: ProductReturn, current_debt: float) -> str:
+    """Client-safe visible notice sent to group when a Vozvrat entry is deleted."""
+    cname = ret.client.name if ret.client else f"Mijoz #{ret.client_id}"
+    return (
+        f"❌ <b>VOZVRAT #{ret.id} BEKOR QILINDI</b>\n"
+        f"🏪 Mijoz: <b>{html.escape(cname)}</b>\n"
+        f"🥩 {html.escape(ret.product_name)}: <s>-{format_kg(ret.weight_kg)} kg</s> (<s>-{format_uzs(ret.total_amount)} so'm</s>)\n"
         f"💳 Yangilangan qarz qoldig'i: <b>{format_uzs(current_debt)} so'm</b>"
     )
 
@@ -611,6 +660,14 @@ async def handle_add_sale_btn(message: Message, state: FSMContext) -> None:
         f"{warn_prev}",
         parse_mode="HTML",
         reply_markup=cancel_reply_keyboard(),
+    )
+    await message.answer(
+        "Yoki qaytarilgan mahsulot (Vozvrat) kiritish:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="↩️ Vozvrat qayd etish", callback_data="ret:pick_cli")]
+            ]
+        ),
     )
 
 
@@ -1575,16 +1632,20 @@ async def handle_edit_btn(message: Message, state: FSMContext) -> None:
         not summary.confirmed_sales
         and not summary.client_payments
         and not summary.cash_transactions
+        and not summary.returns
     ):
         await message.answer("ℹ️ Bugungi ochiq smenada hali tahrirlanadigan yozuvlar yo'q.")
         return
     await send_inline_panel(
         message,
         "✏️ <b>Bugungi Yozuvlarni Tahrirlash:</b>\n"
-        "O'zgartirmoqchi bo'lgan sotuv, to'lov yoki xarajatni tanlang\n"
-        "<i>(Sotuv o'zgarsa mijoz guruhidagi xabar ham avtomatik yangilanadi)</i>:",
+        "O'zgartirmoqchi bo'lgan sotuv, to'lov, vozvrat yoki xarajatni tanlang\n"
+        "<i>(Sotuv/vozvrat o'zgarsa mijoz guruhidagi xabar ham yangilanadi)</i>:",
         reply_markup=edit_items_list_kb(
-            summary.confirmed_sales, summary.client_payments, summary.cash_transactions
+            summary.confirmed_sales,
+            summary.client_payments,
+            summary.cash_transactions,
+            returns=summary.returns,
         ),
         delete_prev=True,
     )
@@ -1598,6 +1659,7 @@ async def cb_edit_menu_open(cb: CallbackQuery) -> None:
         not summary.confirmed_sales
         and not summary.client_payments
         and not summary.cash_transactions
+        and not summary.returns
     ):
         await cb.answer("Bugungi smenada yozuvlar yo'q.", show_alert=True)
         return
@@ -1605,7 +1667,10 @@ async def cb_edit_menu_open(cb: CallbackQuery) -> None:
         cb,
         "✏️ <b>Bugungi Yozuvlarni Tahrirlash:</b>\nKerakli qatorni tanlang:",
         reply_markup=edit_items_list_kb(
-            summary.confirmed_sales, summary.client_payments, summary.cash_transactions
+            summary.confirmed_sales,
+            summary.client_payments,
+            summary.cash_transactions,
+            returns=summary.returns,
         ),
     )
 
@@ -1618,7 +1683,11 @@ async def cb_edit_menu_page(cb: CallbackQuery) -> None:
     await asyncio.gather(
         cb.message.edit_reply_markup(
             reply_markup=edit_items_list_kb(
-                summary.confirmed_sales, summary.client_payments, summary.cash_transactions, page=page
+                summary.confirmed_sales,
+                summary.client_payments,
+                summary.cash_transactions,
+                page=page,
+                returns=summary.returns,
             )
         ),
         cb.answer(),
@@ -1877,6 +1946,235 @@ async def cb_cash_delete(cb: CallbackQuery) -> None:
     await cb.message.edit_text(
         f"🗑 Yozuv ({format_uzs(tx.amount)} so'm) o'chirildi!\n"
         f"💰 Yangilangan kassa qoldig'i: <b>{format_uzs(summary.expected_cash)} so'm</b>",
+        parse_mode="HTML",
+    )
+    await cb.answer("O'chirildi!")
+
+
+# ---------------------------------------------------------------------------
+# Product Returns (Vozvrat / Brak)
+# ---------------------------------------------------------------------------
+
+
+def _parse_return_weight_and_reason(raw_text: str) -> tuple[Optional[float], str]:
+    """Extract leading kg/sum weight expression and optional reason text with 0 AI tokens."""
+    txt = (raw_text or "").strip()
+    if not txt:
+        return None, ""
+    m = re.match(
+        r"^\s*((?:\d+(?:[.,]\d+)?\s+yarim|yarim|\d+(?:[.,]\d+)?(?:\s*\+\s*\d+(?:[.,]\d+)?)*)(?:\s*(?:kg|кг))?)(?:\s+(.*))?$",
+        txt,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        w = parse_weight_kg(m.group(1))
+        reason = (m.group(2) or "").strip()
+        if w and w > 0:
+            return w, reason
+    w = parse_weight_kg(txt)
+    if w and w > 0:
+        return w, ""
+    return None, ""
+
+
+@router.callback_query(F.data == "ret:pick_cli")
+async def cb_return_pick_client_list(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    async with async_session_maker() as db:
+        clients = await list_clients(db, active_only=True)
+    if not clients:
+        await cb.answer("Avval mijoz qo'shing!", show_alert=True)
+        return
+    await fast_edit(
+        cb,
+        "↩️ <b>Qaytarilgan mahsulot (Vozvrat)</b>\nQaysi mijozdan mahsulot qaytdi?",
+        reply_markup=pick_client_for_return_kb(clients, page=0),
+    )
+
+
+@router.callback_query(F.data.startswith("ret:list:p:"))
+async def cb_return_clients_page(cb: CallbackQuery) -> None:
+    page = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        clients = await list_clients(db, active_only=True)
+    await asyncio.gather(
+        cb.message.edit_reply_markup(reply_markup=pick_client_for_return_kb(clients, page=page)),
+        cb.answer(),
+        return_exceptions=True,
+    )
+
+
+@router.callback_query(F.data.startswith("ret:cli:"))
+async def cb_return_pick_product(cb: CallbackQuery) -> None:
+    cid = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        cli = await get_client(db, cid)
+        if not cli:
+            await cb.answer("Mijoz topilmadi", show_alert=True)
+            return
+        products = await list_products(db, active_only=True)
+        custom_map = await get_client_prices_map(db, cid)
+    await fast_edit(
+        cb,
+        f"↩️ <b>Vozvrat — {html.escape(cli.name)}</b>\nQaysi mahsulot qaytarildi?",
+        reply_markup=pick_product_for_return_kb(cid, products, custom_map),
+    )
+
+
+@router.callback_query(F.data.startswith("ret:prod:"))
+async def cb_return_weight_prompt(cb: CallbackQuery, state: FSMContext) -> None:
+    parts = cb.data.split(":")
+    cid = int(parts[2])
+    pid = int(parts[3])
+    async with async_session_maker() as db:
+        cli = await get_client(db, cid)
+        prod = await get_product(db, pid)
+    if not cli or not prod:
+        await cb.answer("Topilmadi", show_alert=True)
+        return
+    await state.set_state(SaleStates.waiting_return_weight)
+    await state.update_data(ret_client_id=cid, ret_product_id=pid)
+    await cb.message.answer(
+        f"↩️ <b>{html.escape(cli.name)}</b> ← <b>{html.escape(prod.name)}</b>\n\n"
+        f"Necha <b>{html.escape(prod.unit)}</b> qaytdi? (ixtiyoriy sabab bilan yozing, masalan: <code>2.5</code> yoki <code>2.5 brak</code>):",
+        parse_mode="HTML",
+        reply_markup=cancel_reply_keyboard(),
+    )
+    await cb.answer()
+
+
+@router.message(
+    SaleStates.waiting_return_weight,
+    F.chat.type == "private",
+    F.text,
+    ~F.text.startswith("/"),
+    ~F.text.in_(MAIN_MENU_BUTTONS),
+    F.text != "❌ Bekor qilish",
+)
+async def process_return_weight(message: Message, state: FSMContext) -> None:
+    if not await is_authorized_async(message.from_user.id if message.from_user else None):
+        return
+    w, reason = _parse_return_weight_and_reason(message.text or "")
+    if not w or w <= 0:
+        await message.answer(
+            "⚠️ To'g'ri miqdor kiriting (masalan: <code>2.5</code> yoki <code>2.5 brak</code>):",
+            parse_mode="HTML",
+        )
+        return
+    data = await state.get_data()
+    cid = int(data["ret_client_id"])
+    pid = int(data["ret_product_id"])
+    async with async_session_maker() as db:
+        ret = await add_product_return(db, client_id=cid, product_id=pid, weight_kg=w, reason=reason)
+        debt = await compute_client_debt(db, cid, history_limit=1)
+    await state.clear()
+    await message.answer("✅ Vozvrat qayd etildi!", reply_markup=main_menu_keyboard())
+    reason_line = f"\n📝 Sabab: <i>{html.escape(ret.reason)}</i>" if ret.reason else ""
+    await message.answer(
+        f"↩️ <b>Vozvrat #{ret.id}</b> — 🏪 <b>{html.escape(debt.client.name)}</b>\n"
+        f"🥩 {html.escape(ret.product_name)}: <b>-{format_kg(ret.weight_kg)} kg</b> × {format_uzs(ret.unit_sell_price)}\n"
+        f"💰 Qarzdan ayirildi: <b>-{format_uzs(ret.total_amount)} so'm</b>"
+        f"{reason_line}\n"
+        f"💳 Yangi qarz qoldig'i: <b>{format_uzs(debt.current_debt)} so'm</b>",
+        parse_mode="HTML",
+        reply_markup=return_after_record_kb(ret.id, has_group=bool(debt.client.group_chat_id)),
+    )
+
+
+@router.callback_query(F.data.startswith("ret:post_grp:"))
+async def cb_return_post_group(cb: CallbackQuery) -> None:
+    ret_id = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        ret = await get_product_return(db, ret_id)
+        if not ret or ret.is_deleted:
+            await cb.answer("Topilmadi", show_alert=True)
+            return
+        debt = await compute_client_debt(db, ret.client_id, history_limit=1)
+    if not debt.client.group_chat_id:
+        await cb.answer("Mijoz guruhi ulanmagan", show_alert=True)
+        return
+    caption = render_return_group_caption(ret, debt.current_debt)
+    try:
+        sent = await cb.bot.send_message(
+            chat_id=debt.client.group_chat_id,
+            text=caption,
+            parse_mode="HTML",
+        )
+        async with async_session_maker() as db:
+            await set_product_return_group_message(
+                db, ret.id, debt.client.group_chat_id, sent.message_id
+            )
+        await cb.message.edit_text(
+            f"✅ Vozvrat xabari <b>{html.escape(debt.client.name)}</b> guruhiga yuborildi!\n\n{caption}",
+            parse_mode="HTML",
+        )
+        await cb.answer("📤 Yuborildi!")
+    except Exception as exc:
+        await cb.answer(f"❌ Xatolik: {exc}", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("ret_view:"))
+async def cb_return_edit_view(cb: CallbackQuery) -> None:
+    ret_id = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        ret = await get_product_return(db, ret_id)
+    if not ret or ret.is_deleted:
+        await cb.answer("Topilmadi", show_alert=True)
+        return
+    cname = ret.client.name if ret.client else f"Mijoz #{ret.client_id}"
+    await cb.message.edit_text(
+        f"↩️ <b>Vozvrat #{ret.id}</b>\n"
+        f"🏪 Mijoz: <b>{html.escape(cname)}</b>\n"
+        f"🥩 {html.escape(ret.product_name)}: <b>-{format_kg(ret.weight_kg)} kg</b> × {format_uzs(ret.unit_sell_price)}\n"
+        f"💰 Summa: <b>-{format_uzs(ret.total_amount)} so'm</b>\n"
+        f"📝 Sabab: <i>{html.escape(ret.reason or '-')}</i>",
+        parse_mode="HTML",
+        reply_markup=return_edit_kb(ret.id),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("ret:delete:"))
+async def cb_return_delete_confirm(cb: CallbackQuery) -> None:
+    ret_id = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        ret = await get_product_return(db, ret_id)
+    if not ret or ret.is_deleted:
+        await cb.answer("Topilmadi", show_alert=True)
+        return
+    await cb.message.edit_text(
+        f"⚠️ <b>Vozvrat #{ret.id}</b> (-{format_kg(ret.weight_kg)} kg / -{format_uzs(ret.total_amount)} so'm) rostdan ham o'chirasizmi?",
+        parse_mode="HTML",
+        reply_markup=confirm_delete_kb(f"ret:delete_ok:{ret_id}", f"ret_view:{ret_id}"),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("ret:delete_ok:"))
+async def cb_return_delete(cb: CallbackQuery) -> None:
+    ret_id = int(cb.data.split(":")[-1])
+    async with async_session_maker() as db:
+        ret = await delete_product_return(db, ret_id)
+        if not ret:
+            await cb.answer("Topilmadi", show_alert=True)
+            return
+        debt = await compute_client_debt(db, ret.client_id, history_limit=1)
+    notice_info = ""
+    target_grp = ret.group_chat_id or (debt.client.group_chat_id if ret.client else None)
+    if target_grp and ret.group_message_id:
+        try:
+            await cb.bot.send_message(
+                chat_id=target_grp,
+                text=render_return_delete_group_notice(ret, debt.current_debt),
+                parse_mode="HTML",
+            )
+            notice_info = "\n📤 <i>Mijoz guruhiga bekor qilingani haqida xabar yuborildi.</i>"
+        except Exception:
+            pass
+    await cb.message.edit_text(
+        f"🗑 Vozvrat #{ret.id} ({format_kg(ret.weight_kg)} kg) o'chirildi!\n"
+        f"💳 Yangilangan qarz: <b>{format_uzs(debt.current_debt)} so'm</b>"
+        f"{notice_info}",
         parse_mode="HTML",
     )
     await cb.answer("O'chirildi!")

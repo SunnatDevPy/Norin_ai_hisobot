@@ -118,19 +118,30 @@ def build_daily_norin_excel(
         ("Jami tannarx (so'm):", round(summary.total_cost)),
         ("Sof foyda (so'm):", round(summary.total_profit)),
         ("Marja (%):", round(summary.margin_pct, 2) / 100.0),
-        ("Kechadan naqd qoldiq:", round(summary.opening_balance)),
-        ("Mijozlardan naqd tushum:", round(summary.client_cash_in)),
-        ("Mijozlardan karta/Click tushum:", round(summary.client_card_in)),
-        ("Mijozlardan perechesleniye:", round(summary.client_transfer_in)),
-        ("Qo'shimcha kiritilgan pul:", round(summary.main_cash_in)),
-        ("Kassadan olingan qarz:", round(summary.kassa_debt_today)),
-        ("Kassaga qaytarilgan:", round(summary.kassa_repay_today)),
-        ("Sex xarajatlari (rasxod):", round(summary.total_expenses)),
-        ("Qo'lda qolishi kerak (naqd):", round(summary.expected_cash)),
-        ("Sanalgan naqd pul:", round(summary.session.actual_counted_cash or 0)),
-        ("Sverka farqi:", diff_val),
-        ("Barcha mijozlarning jami qarzi:", round(summary.total_all_clients_debt)),
     ]
+    if summary.total_return_amount > 0:
+        overview.extend(
+            [
+                ("Vozvrat (qaytgan vazn, kg):", -round(summary.total_return_kg, 3)),
+                ("Vozvrat (qaytgan summa, so'm):", -round(summary.total_return_amount)),
+            ]
+        )
+    overview.extend(
+        [
+            ("Kechadan naqd qoldiq:", round(summary.opening_balance)),
+            ("Mijozlardan naqd tushum:", round(summary.client_cash_in)),
+            ("Mijozlardan karta/Click tushum:", round(summary.client_card_in)),
+            ("Mijozlardan perechesleniye:", round(summary.client_transfer_in)),
+            ("Qo'shimcha kiritilgan pul:", round(summary.main_cash_in)),
+            ("Kassadan olingan qarz:", round(summary.kassa_debt_today)),
+            ("Kassaga qaytarilgan:", round(summary.kassa_repay_today)),
+            ("Sex xarajatlari (rasxod):", round(summary.total_expenses)),
+            ("Qo'lda qolishi kerak (naqd):", round(summary.expected_cash)),
+            ("Sanalgan naqd pul:", round(summary.session.actual_counted_cash or 0)),
+            ("Sverka farqi:", diff_val),
+            ("Barcha mijozlarning jami qarzi:", round(summary.total_all_clients_debt)),
+        ]
+    )
     for idx, (lbl, val) in enumerate(overview, start=3):
         c_lbl = ws1.cell(row=idx, column=1, value=lbl)
         c_lbl.font = BOLD_FONT
@@ -399,6 +410,56 @@ def build_daily_norin_excel(
         ws4.column_dimensions[col_letter].width = width
     _apply_print_and_grid(ws4, freeze_cell="A2", filter_ref=f"A1:G{max(1, last_pay_row)}")
 
+    # Optional Sheet 5: Vozvratlar (created only when returns exist)
+    if summary.returns:
+        ws5 = wb.create_sheet("Vozvratlar")
+        _style_header_row(
+            ws5,
+            1,
+            ["#", "Vaqt", "Mijoz", "Mahsulot", "Kg", "Narx/kg", "Summa", "Sabab"],
+        )
+        rr = 2
+        for ret in summary.returns:
+            cname = ret.client.name if ret.client else f"Mijoz #{ret.client_id}"
+            tm = format_local_dt(ret.created_at, "%d.%m %H:%M") if ret.created_at else ret.report_date
+            ws5.cell(row=rr, column=1, value=ret.id)
+            ws5.cell(row=rr, column=2, value=tm)
+            ws5.cell(row=rr, column=3, value=cname)
+            ws5.cell(row=rr, column=4, value=ret.product_name)
+            ws5.cell(row=rr, column=5, value=round(ret.weight_kg, 3)).number_format = KG_FORMAT
+            ws5.cell(row=rr, column=6, value=round(ret.unit_sell_price)).number_format = MONEY_FORMAT
+            cs = ws5.cell(row=rr, column=7, value=f"=ROUND(E{rr}*F{rr},0)")
+            cs.number_format = MONEY_FORMAT
+            cs.font = RED_FONT
+            ws5.cell(row=rr, column=8, value=ret.reason or "-")
+            _style_data_row(ws5, rr, 8, zebra=(rr % 2 == 1))
+            rr += 1
+        last_rr = rr - 1
+        ws5.cell(row=rr, column=1, value="JAMI:")
+        ws5.cell(
+            row=rr,
+            column=5,
+            value=f"=SUM(E2:E{last_rr})" if last_rr >= 2 else 0,
+        ).number_format = KG_FORMAT
+        ws5.cell(
+            row=rr,
+            column=7,
+            value=f"=SUM(G2:G{last_rr})" if last_rr >= 2 else 0,
+        ).number_format = MONEY_FORMAT
+        _style_total_row(ws5, rr, 8)
+        for col_letter, width in (
+            ("A", 8),
+            ("B", 16),
+            ("C", 22),
+            ("D", 24),
+            ("E", 10),
+            ("F", 14),
+            ("G", 16),
+            ("H", 26),
+        ):
+            ws5.column_dimensions[col_letter].width = width
+        _apply_print_and_grid(ws5, freeze_cell="A2", filter_ref=f"A1:H{max(1, last_rr)}")
+
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -430,8 +491,10 @@ def build_client_statement_excel(
         ("Jami olgan mahsuloti (kg):", round(debt_summary.total_kg, 3)),
         ("Jami yuk summasi (so'm):", round(debt_summary.total_sales)),
         ("Jami to'lagan summasi (so'm):", round(debt_summary.total_paid)),
-        ("Hozirgi qarz qoldig'i (so'm):", round(debt_summary.current_debt)),
     ]
+    if debt_summary.total_returns > 0:
+        summary_rows.append(("Jami vozvrat (so'm):", round(debt_summary.total_returns)))
+    summary_rows.append(("Hozirgi qarz qoldig'i (so'm):", round(debt_summary.current_debt)))
     for idx, (lbl, val) in enumerate(summary_rows, start=3):
         ws.cell(row=idx, column=1, value=lbl).font = BOLD_FONT
         c = ws.cell(row=idx, column=2, value=val)
@@ -441,7 +504,7 @@ def build_client_statement_excel(
         if lbl == "Hozirgi qarz qoldig'i (so'm):" and debt_summary.current_debt > 0:
             c.font = RED_FONT
 
-    start_row = 12
+    start_row = 3 + len(summary_rows) + 2
     _style_header_row(
         ws,
         start_row,
@@ -457,7 +520,7 @@ def build_client_statement_excel(
         ],
     )
 
-    # Row 13: Boshlang'ich qoldiq anchor for live running-balance formulas
+    # Boshlang'ich qoldiq anchor for live running-balance formulas
     init_row = start_row + 1
     ws.cell(row=init_row, column=1, value="-")
     ws.cell(row=init_row, column=2, value="Saldo")
@@ -505,6 +568,24 @@ def build_client_statement_excel(
                 None,
                 0,
                 round(pay.amount),
+            )
+        )
+    for ret in debt_summary.recent_returns:
+        dt_sort = to_utc_dt(ret.created_at)
+        tm = format_local_dt(ret.created_at, "%d.%m.%Y %H:%M") if ret.created_at else ret.report_date
+        reason_str = f" — {ret.reason}" if ret.reason else ""
+        events.append(
+            (
+                dt_sort,
+                2,
+                ret.id,
+                tm,
+                f"Vozvrat #{ret.id}",
+                f"Vozvrat: {ret.product_name}{reason_str}",
+                -round(ret.weight_kg, 3),
+                round(ret.unit_sell_price),
+                0,
+                round(ret.total_amount),
             )
         )
 
@@ -559,7 +640,11 @@ def build_client_statement_excel(
         ("H", 18),
     ):
         ws.column_dimensions[col_letter].width = width
-    _apply_print_and_grid(ws, freeze_cell="A13", filter_ref=f"A12:H{max(13, last_ev_row)}")
+    _apply_print_and_grid(
+        ws,
+        freeze_cell=f"A{start_row + 1}",
+        filter_ref=f"A{start_row}:H{max(start_row + 1, last_ev_row)}",
+    )
 
     # Sheet 2: To'lovlar
     ws_pay = wb.create_sheet("To'lovlar")

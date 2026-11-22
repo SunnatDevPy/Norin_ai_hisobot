@@ -7,15 +7,11 @@ import contextlib
 import html
 import logging
 import socket
-import time
 
-from aiohttp import ClientError
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramNetworkError
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     BotCommand,
     BotCommandScopeChat,
@@ -36,6 +32,7 @@ from database.crud import (
     mark_reminder_sent,
     today_iso,
 )
+from database.fsm_storage import DatabaseFSMStorage
 from database.session import async_session_maker, init_db
 from services.gemini_ai import format_uzs
 
@@ -48,7 +45,7 @@ logger = logging.getLogger("norin_bot")
 
 
 class IPv4AiohttpSession(AiohttpSession):
-    """Force IPv4 connections and recycle long-poll getUpdates sockets every 4 minutes."""
+    """Force IPv4 connections and bound getUpdates request timeout so VPS network blips recover fast."""
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -57,37 +54,11 @@ class IPv4AiohttpSession(AiohttpSession):
         self._connector_init["ttl_dns_cache"] = 300
         self._connector_init["enable_cleanup_closed"] = True
         self._connector_init["limit"] = 30
-        self._last_poll_recycle = time.monotonic()
 
     async def make_request(self, bot: Bot, method, timeout: int | None = None):
-        if (
-            getattr(method, "__api_method__", None) == "getUpdates"
-            and (time.monotonic() - self._last_poll_recycle) >= 240.0
-        ):
-            self._last_poll_recycle = time.monotonic()
-            session = await self.create_session()
-            url = self.api.api_url(token=bot.token, method=method.__api_method__)
-            form = self.build_form_data(bot=bot, method=method)
-            eff_timeout = self.timeout if timeout is None else timeout
-            try:
-                async with session.post(
-                    url,
-                    data=form,
-                    timeout=eff_timeout,
-                    headers={"Connection": "close"},
-                ) as resp:
-                    raw_result = await resp.text()
-            except asyncio.TimeoutError as exc:
-                raise TelegramNetworkError(method=method, message="Request timeout error") from exc
-            except ClientError as exc:
-                raise TelegramNetworkError(method=method, message=f"{type(exc).__name__}: {exc}") from exc
-            response = self.check_response(
-                bot=bot,
-                method=method,
-                status_code=resp.status,
-                content=raw_result,
-            )
-            return response.result
+        if getattr(method, "__api_method__", None) == "getUpdates":
+            poll_sec = int(getattr(method, "timeout", 10) or 10)
+            timeout = poll_sec + 6
         return await super().make_request(bot, method, timeout=timeout)
 
 
@@ -193,10 +164,10 @@ async def run_bot() -> None:
 
     bot = Bot(
         token=settings.BOT_TOKEN,
-        session=IPv4AiohttpSession(timeout=25),
+        session=IPv4AiohttpSession(timeout=30),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher(storage=DatabaseFSMStorage(async_session_maker))
 
     @dp.error()
     async def global_error_handler(event: ErrorEvent) -> bool:
@@ -227,7 +198,7 @@ async def run_bot() -> None:
         await _configure_bot_commands(bot)
         await dp.start_polling(
             bot,
-            polling_timeout=15,
+            polling_timeout=10,
             allowed_updates=dp.resolve_used_update_types(),
         )
     finally:

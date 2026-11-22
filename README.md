@@ -20,7 +20,8 @@ Norin ishlab chiqaruvchi sexlar va ulgurji go‘sht/oziq-ovqat yetkazib beruvchi
 - **Barqarorlik va Sarf Nazorati:** Yo‘q (`404`) modellar avtomatik 1 soatga keshlanadi (`gemini-flash-lite-latest` → `gemini-2.5-flash-lite` → `gemini-2.5-flash`), har bir rasm/ovoz so‘rovi `ai_usage_logs` jadvalida tokenlari bilan saqlanadi.
 
 ### 2. 🥩 Mahsulotlar, 🏪 Mijozlar & 🔗 Guruh Sinxronizatsiyasi
-- **Mahsulot katalogi:** Har bir mahsulot uchun **tannarx**, **standart sotuv narxi**, **nom o‘zgartirish** va **sinonimlar (alias)** sozlanadi.
+- **Mahsulot katalogi:** Har bir mahsulot uchun **tannarx**, **standart sotuv narxi**, **nom o‘zgartirish**, **o‘lchov birligi** (`kg` / `dona` / `porsiya` / `litr`) va **sinonimlar (alias)** sozlanadi.
+- **Vozvrat (Qaytarilgan mahsulot):** Mijozdan qaytgan mahsulotni alohida `↩️ Vozvrat` sifatida kiritish — mijoz qarzini, kunlik/davriy sof foydani va Akt Sverkani avtomatik to‘g‘rilaydi (tannarx va foyda mijoz guruhiga chiqmaydi).
 - **Mijozlar bazasi:** Telefon raqam, boshlang‘ich qarz, sinonimlar va mijozga xos **individual narx/kg** (masalan, A do‘kon — `112 000`, B do‘kon — `118 000`).
 - **1-bosishda Guruh Ulash:** Admin Deep-Link orqali botni mijoz guruhiga qo‘shib bog‘lash; guruhga yuboriladigan caption va Akt Sverkada **tannarx, sof foyda va marja hech qachon chiqarilmaydi**.
 - **Jonli Sinxronizatsiya:** Sotuvda kg, narx, mahsulot turi (`🥩 Tur`), mijoz almashtirilsa yoki sotuv/to‘lov o‘chirilsa — mijoz guruhidagi xabar va yangilangan qarz qoldig‘i avtomatik tahrirlanadi.
@@ -40,8 +41,9 @@ Norin ishlab chiqaruvchi sexlar va ulgurji go‘sht/oziq-ovqat yetkazib beruvchi
 ### 5. 🏢 Multi-Tenant SaaS, `/superadmin` & Super Admin `/menu`
 - **Har bir mijozga alohida izolyatsiyalangan baza (`tenant_id`):** Har bir filial o‘z mahsulotlari, mijozlari, guruhlari, kassasi, obunasi va sozlamalariga ega. Super Admin `#1 Test Filial` da qoladi.
 - **Telegramdan Odam Tanlash (`KeyboardButtonRequestUsers`):** Alohida ID aniqlovchi botsiz, **«👤 Telegramdan odam tanlash»** tugmasi orqali kontakt ro‘yxatidan odam tanlanadi — bot ID va profilini avto oladi (shuningdek forward va qo‘lda `ID Ism` kiritish ham ishlaydi).
-- **Foydalanuvchi & Filial Boshqaruvi:** Rolni almashtirish (`owner` ↔ `staff`), xodimni boshqa filialga ko‘chirish, har bir filial uchun alohida tarif/grace/avto-tasdiq/yaxlitlash sozlamalari (`sa:settings`), 30 kunlik AI sarfini ko‘rish, barcha foydalanuvchilarga e’lon (`sa:broadcast`), tanlangan filialni tozalash (`/clear`) yoki o‘chirish.
+- **Foydalanuvchi & Filial Boshqaruvi:** Rolni almashtirish (`owner` ↔ `staff`), xodimni boshqa filialga ko‘chirish, har bir filial uchun alohida tarif/grace/avto-tasdiq/yaxlitlash & **kunlik AI limit** (`ai_daily_limit`) sozlamalari (`sa:settings`), **Umumiy SaaS MRR & Analitika** (`sa:analytics`), 30 kunlik AI sarfini ko‘rish, barcha foydalanuvchilarga e’lon (`sa:broadcast`), tanlangan filialni tozalash (`/clear`) yoki o‘chirish.
 - **Maxsus Komandalar Chegarasi:** `BotCommandScopeChat` orqali `/menu`, `/superadmin`, `/clear` faqat Super Admin menyusida chiqadi va boshqalar uchun yopiq bo‘ladi.
+- **Barqaror DB FSM Xotira (`fsm_states`):** Barcha kiritish bosqichlari (FSM holatlari) PostgreSQL/SQLite da saqlanadi va konteyner qayta yonganda ham o‘chib ketmaydi.
 - **Kunlik Avtomatik Zaxira (`norin-backup`):** Har 24 soatda PostgreSQL bazasidan gzip siqilgan `pg_dump` olib, 14 kunlik nusxalarni saqlaydi.
 
 ---
@@ -91,9 +93,10 @@ Norin_AI_hisobot/
 ├── REJA.md                       # Dastlabki biznes va arxitektura rejasi
 ├── README.md                     # Loyiha hujjati
 ├── database/
-│   ├── models.py                 # SQLAlchemy 2.0 ORM modellari (Tenant, Sale, AIUsageLog va b.)
+│   ├── models.py                 # SQLAlchemy 2.0 ORM modellari (Tenant, Sale, ProductReturn, FSMStateRecord, AIUsageLog)
 │   ├── session.py                # Async engine, idempotent PostgreSQL migratsiya & seed
-│   └── crud.py                   # Tenant-izolyatsiyali CRUD, qarz/sverka, AI loglar & hisob-kitob
+│   ├── fsm_storage.py            # PostgreSQL/SQLite ga asoslangan doimiy FSM holatlar xotirasi
+│   └── crud.py                   # Tenant-izolyatsiyali CRUD, qarz/vozvrat/sverka, SaaS MRR, AI limit & hisob-kitob
 ├── services/
 │   ├── gemini_ai.py              # Rasm/Ovoz Gemini AI + 0-token Uzbek matn/caption parseri
 │   └── excel_export.py           # Formulali 4 varaqli kunlik/davriy Excel & to'liq Akt Sverka
@@ -171,7 +174,7 @@ docker compose logs -f norin-bot
 
 ## 🧪 Avtomatik Testlar
 
-Loyihada barcha asosiy modullar (parserlar, 0-token matn rejimi, multi-tenant izolyatsiya, rasm tagidagi postavshik nomi, Excel formulalari, to‘liq Akt Sverka, SQL agregatlar & UI tugmalar xavfsizligi hamda Super Admin funksiyalari) bo‘yicha 20 ta avtomatik test mavjud:
+Loyihada barcha asosiy modullar (parserlar, 0-token matn rejimi, multi-tenant izolyatsiya, rasm tagidagi postavshik nomi, Excel formulalari, to‘liq Akt Sverka, Vozvrat hisob-kitobi, doimiy DB FSM xotira, kunlik AI limit, SaaS MRR analitika, SQL agregatlar & UI tugmalar xavfsizligi hamda Super Admin funksiyalari) bo‘yicha 23 ta avtomatik test mavjud:
 
 ```bash
 python -m pytest tests/test_all.py -v

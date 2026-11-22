@@ -20,6 +20,7 @@ from database.models import (
     ClientPayment,
     DailyCashSession,
     Product,
+    ProductReturn,
     Sale,
     SubscriptionState,
 )
@@ -511,11 +512,85 @@ def payment_after_record_kb(payment_id: int, has_group: bool) -> InlineKeyboardM
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def pick_client_for_return_kb(
+    clients: Sequence[Client], page: int = 0
+) -> InlineKeyboardMarkup:
+    """Paginated 2-column client selector for recording product returns (Vozvrat)."""
+    start = max(0, page) * PAGE_SIZE
+    slice_cli = clients[start : start + PAGE_SIZE]
+    btns = [
+        InlineKeyboardButton(text=f"🏪 {c.name[:18]}", callback_data=f"ret:cli:{c.id}")
+        for c in slice_cli
+    ]
+    rows = _chunk_2col(btns)
+    nav = _pagination_row("ret:list:p", max(0, page), len(clients))
+    if nav:
+        rows.append(nav)
+    rows.append(
+        [
+            InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
+            InlineKeyboardButton(text="🔙 Yopish", callback_data="menu:dismiss"),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def pick_product_for_return_kb(
+    client_id: int, products: Sequence[Product], custom_map: Dict[int, float]
+) -> InlineKeyboardMarkup:
+    """Choose product returned by client, showing the client's applied unit sell price."""
+    rows = []
+    for p in products:
+        price = custom_map.get(p.id, float(p.default_sell_price))
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"↩️ {p.name} ({format_uzs(price)}/{p.unit})",
+                    callback_data=f"ret:prod:{client_id}:{p.id}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(text="🏪 Boshqa mijoz", callback_data="ret:pick_cli"),
+            InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"debt:view:{client_id}"),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def return_after_record_kb(return_id: int, has_group: bool) -> InlineKeyboardMarkup:
+    """Quick option to send Vozvrat notice to client group."""
+    rows = []
+    if has_group:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="📤 Mijoz guruhiga xabar yuborish",
+                    callback_data=f"ret:post_grp:{return_id}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="✅ Tayyor", callback_data="menu:dismiss")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def return_edit_kb(return_id: int) -> InlineKeyboardMarkup:
+    """Delete option for a ProductReturn inside the edit list."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"ret:delete:{return_id}")],
+            [InlineKeyboardButton(text="⬅️ Ro'yxatga qaytish", callback_data="edit_menu:open")],
+        ]
+    )
+
+
 def edit_items_list_kb(
     sales: Sequence[Sale],
     payments: Sequence[ClientPayment],
     cash_txs: Sequence[CashTransaction],
     page: int = 0,
+    returns: Sequence[ProductReturn] = (),
 ) -> InlineKeyboardMarkup:
     """Paginated inline list of confirmed sales, client payments, and cash/expense transactions."""
     all_rows: List[List[InlineKeyboardButton]] = []
@@ -558,6 +633,17 @@ def edit_items_list_kb(
                 InlineKeyboardButton(
                     text=f"{lbl}{cat_tag}: {format_uzs(tx.amount)}",
                     callback_data=f"cash_view:{tx.id}",
+                )
+            ]
+        )
+
+    for ret in returns:
+        cname = ret.client.name[:14] if ret.client else f"Mijoz #{ret.client_id}"
+        all_rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"↩️ Vozvrat {cname}: -{format_kg(ret.weight_kg)}kg (-{format_uzs(ret.total_amount)})",
+                    callback_data=f"ret_view:{ret.id}",
                 )
             ]
         )
@@ -810,11 +896,29 @@ def product_detail_kb(product_id: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="💰 Sotuv narxi", callback_data=f"prd:edit_sell:{product_id}"),
             ],
             [
+                InlineKeyboardButton(text="📏 Birlik (kg/dona)", callback_data=f"prd:unit:{product_id}"),
                 InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"prd:del:{product_id}"),
+            ],
+            [
                 InlineKeyboardButton(text="⬅️ Mahsulotlarga", callback_data="set:products"),
             ],
         ]
     )
+
+
+def product_unit_kb(product_id: int, current_unit: str = "kg") -> InlineKeyboardMarkup:
+    """Select measurement unit (kg / dona / porsiya / litr) for a product."""
+    units = ("kg", "dona", "porsiya", "litr")
+    btns = [
+        InlineKeyboardButton(
+            text=f"✅ {u}" if u == current_unit else u,
+            callback_data=f"prd:set_unit:{product_id}:{u}",
+        )
+        for u in units
+    ]
+    rows = _chunk_2col(btns)
+    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"prd:view:{product_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def clients_list_kb(clients: Sequence[Client], page: int = 0) -> InlineKeyboardMarkup:
@@ -1018,18 +1122,18 @@ def client_debt_detail_kb(client_id: int, has_group: bool) -> InlineKeyboardMark
     rows = [
         [
             InlineKeyboardButton(text="💵 Pul qabul qilish", callback_data=f"pay:cli:{client_id}"),
-            InlineKeyboardButton(text="📥 Mijoz Excel", callback_data=f"export:client:{client_id}"),
-        ]
+            InlineKeyboardButton(text="↩️ Vozvrat", callback_data=f"ret:cli:{client_id}"),
+        ],
     ]
+    export_row = [InlineKeyboardButton(text="📥 Mijoz Excel", callback_data=f"export:client:{client_id}")]
     if has_group:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="📤 Guruhga Akt Sverka yuborish",
-                    callback_data=f"cli:send_sverka:{client_id}",
-                )
-            ]
+        export_row.append(
+            InlineKeyboardButton(
+                text="📤 Guruhga Sverka",
+                callback_data=f"cli:send_sverka:{client_id}",
+            )
         )
+    rows.append(export_row)
     rows.append(
         [
             InlineKeyboardButton(text="⚙️ Mijoz sozlamasi", callback_data=f"cli:view:{client_id}"),
@@ -1170,9 +1274,12 @@ def superadmin_quick_menu_kb(tenant_id: int, tenant_count: int) -> InlineKeyboar
             ],
             [
                 InlineKeyboardButton(text="📊 Kunlik hisobot", callback_data="rep:today"),
-                InlineKeyboardButton(text="🧹 Baza tozalash", callback_data="sa:clear_menu"),
+                InlineKeyboardButton(text="📈 SaaS Statistika", callback_data="sa:analytics"),
             ],
-            [InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home")],
+            [
+                InlineKeyboardButton(text="🧹 Baza tozalash", callback_data="sa:clear_menu"),
+                InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
+            ],
         ]
     )
 
@@ -1211,13 +1318,16 @@ def superadmin_menu_kb(
             InlineKeyboardButton(text="🔔 Eslatma", callback_data="sa:send_reminder"),
         ],
         [
+            InlineKeyboardButton(text="📈 SaaS Statistika", callback_data="sa:analytics"),
             InlineKeyboardButton(text="📢 E'lon yuborish", callback_data="sa:broadcast"),
+        ],
+        [
             InlineKeyboardButton(
                 text=f"🧹 Baza tozalash (#{tenant_id})",
                 callback_data="sa:clear_menu",
             ),
+            InlineKeyboardButton(text="⬅️ Sozlamalar", callback_data="set:back"),
         ],
-        [InlineKeyboardButton(text="⬅️ Sozlamalar", callback_data="set:back")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -1227,6 +1337,7 @@ def superadmin_tenant_settings_kb(
     auto_confirm: bool,
     group_auto_calc: bool,
     round_mode: str,
+    ai_daily_limit: int = 0,
 ) -> InlineKeyboardMarkup:
     """Per-tenant subscription & automation settings for Super Admin."""
     auto_lbl = f"⚡ DM Avto: {'✅ ON' if auto_confirm else '❌ OFF'}"
@@ -1236,6 +1347,9 @@ def superadmin_tenant_settings_kb(
         "floor_1000": "🔢 Yaxlitlash: Pastga 1 000",
         "none": "🔢 Yaxlitlash: Aniq (Yo'q)",
     }.get(round_mode, f"🔢 Yaxlitlash: {round_mode}")
+    ai_lbl = (
+        f"🤖 AI limit: {ai_daily_limit}/kun" if ai_daily_limit > 0 else "🤖 AI limit: Cheksiz"
+    )
     rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(text="🏢 Filial nomi", callback_data="sa:edit_tenant"),
@@ -1250,7 +1364,10 @@ def superadmin_tenant_settings_kb(
             InlineKeyboardButton(text=auto_lbl, callback_data="sa:ten_toggle:auto_confirm"),
             InlineKeyboardButton(text=grp_lbl, callback_data="sa:ten_toggle:group_auto_calc"),
         ],
-        [InlineKeyboardButton(text=round_lbl, callback_data="sa:ten_toggle:round_mode")],
+        [
+            InlineKeyboardButton(text=round_lbl, callback_data="sa:ten_toggle:round_mode"),
+            InlineKeyboardButton(text=ai_lbl, callback_data="sa:ten_toggle:ai_daily_limit"),
+        ],
     ]
     if tenant_id != 1:
         rows.append(

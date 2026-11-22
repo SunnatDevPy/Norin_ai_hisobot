@@ -220,6 +220,18 @@ def _get_http_client() -> httpx.AsyncClient:
     return _HTTP_CLIENT
 
 
+async def _check_ai_quota_safe() -> tuple[bool, int, int]:
+    """Best-effort check whether active tenant has remaining daily Gemini quota."""
+    try:
+        from database.crud import check_tenant_ai_quota
+        from database.session import async_session_maker
+
+        async with async_session_maker() as db:
+            return await check_tenant_ai_quota(db)
+    except Exception:
+        return True, 0, 0
+
+
 async def _record_ai_usage_safe(
     kind: str, model_name: str, usage: Dict[str, Any]
 ) -> None:
@@ -248,6 +260,16 @@ async def _call_gemini(
     settings = get_settings()
     if not settings.GEMINI_API_KEY:
         return {"error": "GEMINI_API_KEY sozlanmagan"}
+
+    allowed, used, limit = await _check_ai_quota_safe()
+    if not allowed:
+        logger.warning("Daily AI quota exceeded (%s/%s)", used, limit)
+        return {
+            "error": (
+                f"Kunlik AI limiti ({used}/{limit}) tugadi. "
+                "Matn orqali yozib kiriting yoki administrator bilan bog'laning."
+            )
+        }
 
     payload = {
         "contents": [{"parts": parts}],

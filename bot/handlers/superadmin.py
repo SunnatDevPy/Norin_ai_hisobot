@@ -34,6 +34,7 @@ from bot.ui_helpers import fast_edit, mark_reply_kb_sent, send_inline_panel
 from config import get_settings
 from database.crud import (
     add_authorized_user,
+    check_tenant_ai_quota,
     create_tenant,
     delete_tenant,
     evaluate_subscription_status,
@@ -42,6 +43,7 @@ from database.crud import (
     get_ai_usage_summary,
     get_app_setting,
     get_authorized_user,
+    get_global_saas_analytics,
     get_raw_app_setting,
     get_tenant_overview_stats,
     is_user_authorized,
@@ -349,6 +351,63 @@ async def cb_superadmin_menu(cb: CallbackQuery, state: FSMContext) -> None:
     await fast_edit(cb, text, reply_markup=kb)
 
 
+@router.callback_query(F.data == "sa:analytics")
+async def cb_superadmin_analytics(cb: CallbackQuery, state: FSMContext) -> None:
+    uid = cb.from_user.id if cb.from_user else None
+    if not is_super_admin(uid):
+        await cb.answer("⛔ Ruxsat yo'q", show_alert=True)
+        return
+    await state.clear()
+    async with async_session_maker() as db:
+        a = await get_global_saas_analytics(db, days=30)
+
+    sc = a["status_counts"]
+    ai = a["ai_global"]
+    lines = [
+        "📈 <b>UMUMIY SAAS STATISTIKA (Barcha Filiallar)</b>",
+        "===============================",
+        f"🏢 Jami filiallar: <b>{a['total_tenants']} ta</b> (Pullik aktiv: <b>{a['paying_tenants']} ta</b>)",
+        (
+            f"📌 Holatlar: 🟢 <b>{sc.get('active', 0)}</b> | "
+            f"🟡 <b>{sc.get('expiring', 0)}</b> | "
+            f"🟠 <b>{sc.get('grace', 0)}</b> | "
+            f"🔴 <b>{sc.get('expired', 0)}</b> | "
+            f"⏸ <b>{sc.get('suspended', 0)}</b>"
+        ),
+        "-------------------------------",
+        f"💳 <b>Aktiv pullik MRR (#2+): {format_uzs(a['paying_mrr'])} so'm/oy</b>",
+        f"💎 Jami tarif qiymati (barchasi): <b>{format_uzs(a['total_mrr'])} so'm/oy</b>",
+        f"💰 30 kun yig'ilgan obuna: <b>{format_uzs(a['collected_30d'])} so'm</b>",
+        f"🏦 Jami tushgan to'lovlar: <b>{format_uzs(a['collected_all'])} so'm</b>",
+        "-------------------------------",
+        f"👥 Xodimlar: <b>{a['total_users']}</b> | 🏪 Mijozlar: <b>{a['total_clients']}</b> (guruh: <b>{a['total_groups']}</b>) | 📦 Sotuv: <b>{a['total_sales']}</b>",
+        f"🤖 AI (30 kun, global): rasm <b>{ai['image_calls']}</b> | ovoz <b>{ai['audio_calls']}</b> | token: <b>{format_uzs(ai['total_tokens'])}</b>",
+        "-------------------------------",
+        "🏢 <b>Filiallar holati:</b>",
+    ]
+    st_ico = {
+        "active": "🟢",
+        "expiring": "🟡",
+        "grace": "🟠",
+        "expired": "🔴",
+        "suspended": "⏸",
+    }
+    for t in a["tenants_breakdown"][:12]:
+        ico = st_ico.get(t["status"], "•")
+        lines.append(
+            f"{ico} <b>#{t['id']} {html.escape(t['name'])}</b> — {format_uzs(t['price'])}/oy | 👥 {t['users']}"
+        )
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Yangilash", callback_data="sa:analytics"),
+                InlineKeyboardButton(text="⬅️ Super Admin", callback_data="sa:menu"),
+            ]
+        ]
+    )
+    await fast_edit(cb, "\n".join(lines), reply_markup=kb)
+
+
 @router.callback_query(F.data == "sa:tenants")
 async def cb_superadmin_tenants(cb: CallbackQuery, state: FSMContext) -> None:
     uid = cb.from_user.id if cb.from_user else None
@@ -648,12 +707,16 @@ async def _render_tenant_settings_view(tenant_id: int) -> tuple[str, InlineKeybo
             auto_confirm = (await get_app_setting(db, "auto_confirm", "on")) == "on"
             group_auto = (await get_app_setting(db, "group_auto_calc", "on")) == "on"
             round_mode = await get_app_setting(db, "round_mode", "none")
+            _, ai_used, ai_limit = await check_tenant_ai_quota(db, tenant_id=sub.id)
 
     round_desc = {
         "nearest_1000": "Eng yaqin 1 000 so'm",
         "floor_1000": "1 000 so'm pastga",
         "none": "Yaxlitlamaslik (aniq)",
     }.get(round_mode, round_mode)
+    ai_limit_desc = (
+        f"{ai_limit}/kun (bugun: {ai_used})" if ai_limit > 0 else f"Cheksiz (bugun: {ai_used})"
+    )
     text = (
         f"⚙️ <b>FILIAL SOZLAMALARI — #{sub.id} {html.escape(sub.tenant_name)}</b>\n"
         "===============================\n"
@@ -666,10 +729,13 @@ async def _render_tenant_settings_view(tenant_id: int) -> tuple[str, InlineKeybo
         f"⚡ DM Avto-tasdiq: <b>{'✅ Yoqilgan' if auto_confirm else '❌ O‘chiq'}</b>\n"
         f"👥 Guruhda Avto-hisob: <b>{'✅ Yoqilgan' if group_auto else '❌ O‘chiq'}</b>\n"
         f"🔢 Summa yaxlitlash: <b>{round_desc}</b>\n"
+        f"🤖 Kunlik AI limit: <b>{ai_limit_desc}</b>\n"
         "-------------------------------\n"
         f"📊 Xodim: <b>{stats['users']}</b> | Mijoz: <b>{stats['clients']}</b> (guruh: <b>{stats['groups']}</b>) | Sotuv: <b>{stats['sales']}</b>"
     )
-    kb = superadmin_tenant_settings_kb(sub.id, auto_confirm, group_auto, round_mode)
+    kb = superadmin_tenant_settings_kb(
+        sub.id, auto_confirm, group_auto, round_mode, ai_daily_limit=ai_limit
+    )
     return text, kb
 
 
@@ -789,6 +855,10 @@ async def cb_superadmin_tenant_toggle(cb: CallbackQuery) -> None:
                 cur = await get_app_setting(db, "round_mode", "none")
                 cycle = {"none": "nearest_1000", "nearest_1000": "floor_1000", "floor_1000": "none"}
                 await set_app_setting(db, "round_mode", cycle.get(cur, "none"))
+            elif key == "ai_daily_limit":
+                cur = (await get_app_setting(db, "ai_daily_limit", "0")).strip() or "0"
+                cycle = {"0": "50", "50": "100", "100": "200", "200": "500", "500": "0"}
+                await set_app_setting(db, "ai_daily_limit", cycle.get(cur, "0"))
             else:
                 await cb.answer("Noma'lum sozlama")
                 return

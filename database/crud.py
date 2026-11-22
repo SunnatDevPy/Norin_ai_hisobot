@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence
 from zoneinfo import ZoneInfo
@@ -24,6 +24,7 @@ from database.models import (
     DailyCashSession,
     GroupConfig,
     Product,
+    ProductReturn,
     Sale,
     SaleItem,
     SubscriptionPayment,
@@ -142,6 +143,9 @@ class ClientDebtSummary:
     recent_sales: List[Sale]
     recent_payments: List[ClientPayment]
     last_payment_at: Optional[datetime] = None
+    total_returns: float = 0.0
+    total_return_kg: float = 0.0
+    recent_returns: List[ProductReturn] = field(default_factory=list)
 
 
 @dataclass
@@ -170,6 +174,10 @@ class DailyReportSummary:
     total_all_clients_debt: float
     client_payments: List[ClientPayment]
     cash_transactions: List[CashTransaction]
+    returns: List[ProductReturn] = field(default_factory=list)
+    total_return_kg: float = 0.0
+    total_return_amount: float = 0.0
+    total_return_cost: float = 0.0
 
 
 @dataclass
@@ -191,6 +199,9 @@ class PeriodReportSummary:
     total_transfer_collected: float
     total_expenses: float
     total_all_clients_debt: float
+    returns_count: int = 0
+    total_return_kg: float = 0.0
+    total_return_amount: float = 0.0
 
 
 @dataclass
@@ -293,6 +304,7 @@ async def update_product(
     cost_price: Optional[float] = None,
     default_sell_price: Optional[float] = None,
     aliases: Optional[str] = None,
+    unit: Optional[str] = None,
     tenant_id: Optional[int] = None,
 ) -> Optional[Product]:
     """Update product fields within the active tenant."""
@@ -307,6 +319,8 @@ async def update_product(
         prod.default_sell_price = float(default_sell_price)
     if aliases is not None:
         prod.aliases = aliases.strip().upper()
+    if unit is not None and unit.strip():
+        prod.unit = unit.strip()[:16]
     await db.commit()
     await db.refresh(prod)
     return prod
@@ -711,12 +725,28 @@ async def compute_client_debt(
                 )
             ).all()
         )
+        returns = list(
+            (
+                await db.scalars(
+                    select(ProductReturn)
+                    .where(
+                        ProductReturn.tenant_id == tid,
+                        ProductReturn.client_id == client_id,
+                        ProductReturn.is_deleted.is_(False),
+                    )
+                    .order_by(desc(ProductReturn.id))
+                )
+            ).all()
+        )
         total_sales = sum(float(s.total_amount) for s in sales)
         total_paid = sum(float(p.amount) for p in payments)
+        total_returns = sum(float(r.total_amount) for r in returns)
+        total_return_kg = round(sum(float(r.weight_kg) for r in returns), 3)
         total_kg = round(sum(float(s.total_weight_kg) for s in sales), 3)
         last_pay_at = payments[0].created_at if payments else None
         recent_sales = sales
         recent_payments = payments
+        recent_returns = returns
     else:
         lim = max(0, int(history_limit))
         s_amt, s_kg = (
@@ -743,9 +773,23 @@ async def compute_client_debt(
                 )
             )
         ).one()
+        r_amt, r_kg = (
+            await db.execute(
+                select(
+                    sa_func.coalesce(sa_func.sum(ProductReturn.total_amount), 0.0),
+                    sa_func.coalesce(sa_func.sum(ProductReturn.weight_kg), 0.0),
+                ).where(
+                    ProductReturn.tenant_id == tid,
+                    ProductReturn.client_id == client_id,
+                    ProductReturn.is_deleted.is_(False),
+                )
+            )
+        ).one()
         total_sales = float(s_amt or 0.0)
         total_kg = round(float(s_kg or 0.0), 3)
         total_paid = float(p_amt or 0.0)
+        total_returns = float(r_amt or 0.0)
+        total_return_kg = round(float(r_kg or 0.0), 3)
         recent_sales = (
             list(
                 (
@@ -783,8 +827,26 @@ async def compute_client_debt(
             if lim > 0
             else []
         )
+        recent_returns = (
+            list(
+                (
+                    await db.scalars(
+                        select(ProductReturn)
+                        .where(
+                            ProductReturn.tenant_id == tid,
+                            ProductReturn.client_id == client_id,
+                            ProductReturn.is_deleted.is_(False),
+                        )
+                        .order_by(desc(ProductReturn.id))
+                        .limit(lim)
+                    )
+                ).all()
+            )
+            if lim > 0
+            else []
+        )
 
-    current_debt = round(opening + total_sales - total_paid, 2)
+    current_debt = round(opening + total_sales - total_returns - total_paid, 2)
     return ClientDebtSummary(
         client=client,
         opening_debt=opening,
@@ -795,6 +857,9 @@ async def compute_client_debt(
         recent_sales=recent_sales,
         recent_payments=recent_payments,
         last_payment_at=last_pay_at,
+        total_returns=total_returns,
+        total_return_kg=total_return_kg,
+        recent_returns=recent_returns,
     )
 
 
@@ -838,14 +903,31 @@ async def list_all_client_debts(
             .group_by(ClientPayment.client_id)
         )
     ).all()
+    ret_rows = (
+        await db.execute(
+            select(
+                ProductReturn.client_id,
+                sa_func.coalesce(sa_func.sum(ProductReturn.total_amount), 0.0),
+                sa_func.coalesce(sa_func.sum(ProductReturn.weight_kg), 0.0),
+            )
+            .where(
+                ProductReturn.tenant_id == tid,
+                ProductReturn.is_deleted.is_(False),
+                ProductReturn.client_id.in_(active_ids),
+            )
+            .group_by(ProductReturn.client_id)
+        )
+    ).all()
 
     sales_agg = {int(cid): (float(amt or 0.0), float(kg or 0.0)) for cid, amt, kg in sales_rows}
     pay_agg = {int(cid): (float(amt or 0.0), last_dt) for cid, amt, last_dt in pay_rows}
+    ret_agg = {int(cid): (float(amt or 0.0), float(kg or 0.0)) for cid, amt, kg in ret_rows}
 
     summaries: List[ClientDebtSummary] = []
     for cli in clients:
         t_sales, raw_kg = sales_agg.get(cli.id, (0.0, 0.0))
         t_paid, last_dt = pay_agg.get(cli.id, (0.0, None))
+        t_ret, raw_ret_kg = ret_agg.get(cli.id, (0.0, 0.0))
         opening = float(cli.opening_debt or 0.0)
         t_kg = round(raw_kg, 3)
         summaries.append(
@@ -854,11 +936,13 @@ async def list_all_client_debts(
                 opening_debt=opening,
                 total_sales=t_sales,
                 total_paid=t_paid,
-                current_debt=round(opening + t_sales - t_paid, 2),
+                current_debt=round(opening + t_sales - t_ret - t_paid, 2),
                 total_kg=t_kg,
                 recent_sales=[],
                 recent_payments=[],
                 last_payment_at=last_dt,
+                total_returns=t_ret,
+                total_return_kg=round(raw_ret_kg, 3),
             )
         )
 
@@ -1443,7 +1527,124 @@ async def get_total_all_clients_debt(
         )
         or 0.0
     )
-    return round(opening + total_sales - total_paid, 2)
+    total_returns = float(
+        await db.scalar(
+            select(sa_func.coalesce(sa_func.sum(ProductReturn.total_amount), 0.0)).where(
+                ProductReturn.tenant_id == tid,
+                ProductReturn.is_deleted.is_(False),
+                ProductReturn.client_id.in_(active_ids_sub),
+            )
+        )
+        or 0.0
+    )
+    return round(opening + total_sales - total_returns - total_paid, 2)
+
+
+# ---------------------------------------------------------------------------
+# Product Returns (Vozvrat) CRUD
+# ---------------------------------------------------------------------------
+
+
+async def get_product_return(
+    db: AsyncSession, return_id: int, tenant_id: Optional[int] = None
+) -> Optional[ProductReturn]:
+    """Fetch a ProductReturn eager-loading its client within the active tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    stmt = (
+        select(ProductReturn)
+        .options(selectinload(ProductReturn.client))
+        .where(ProductReturn.id == return_id, ProductReturn.tenant_id == tid)
+    )
+    return await db.scalar(stmt)
+
+
+async def add_product_return(
+    db: AsyncSession,
+    client_id: int,
+    product_id: int,
+    weight_kg: float,
+    reason: str = "",
+    unit_sell_price: Optional[float] = None,
+    session_id: Optional[int] = None,
+    tenant_id: Optional[int] = None,
+) -> ProductReturn:
+    """Record returned Norin (Vozvrat), reducing client debt & net session totals."""
+    tid = get_current_tenant_id(tenant_id)
+    cli = await get_client(db, client_id, tenant_id=tid)
+    if cli is None:
+        raise ValueError(f"Client {client_id} not found")
+    prod = await get_product(db, product_id, tenant_id=tid)
+    if prod is None:
+        raise ValueError(f"Product {product_id} not found")
+
+    if session_id is None:
+        sess = await get_or_create_open_session(db, tenant_id=tid)
+        session_id = sess.id
+    else:
+        sess = await db.get(DailyCashSession, session_id)
+        if sess is None or sess.tenant_id != tid:
+            raise ValueError(f"Session {session_id} not found")
+
+    w = round(abs(float(weight_kg)), 3)
+    unit_cost = float(prod.cost_price)
+    unit_sell = (
+        float(unit_sell_price)
+        if unit_sell_price is not None
+        else await resolve_sell_price(db, client_id, prod)
+    )
+    ret = ProductReturn(
+        tenant_id=tid,
+        session_id=session_id,
+        client_id=client_id,
+        product_id=prod.id,
+        product_name=prod.name,
+        weight_kg=w,
+        unit_cost=unit_cost,
+        unit_sell_price=unit_sell,
+        total_cost=round(w * unit_cost, 2),
+        total_amount=round(w * unit_sell, 2),
+        reason=(reason or "").strip()[:255],
+        is_deleted=False,
+        report_date=sess.report_date,
+    )
+    db.add(ret)
+    await db.commit()
+    await compute_session_summary(db, session_id, tenant_id=tid)
+    loaded = await get_product_return(db, ret.id, tenant_id=tid)
+    assert loaded is not None
+    return loaded
+
+
+async def set_product_return_group_message(
+    db: AsyncSession,
+    return_id: int,
+    group_chat_id: Optional[int],
+    group_message_id: Optional[int],
+    tenant_id: Optional[int] = None,
+) -> Optional[ProductReturn]:
+    """Store Telegram group chat_id and message_id for a posted ProductReturn."""
+    tid = get_current_tenant_id(tenant_id)
+    ret = await get_product_return(db, return_id, tenant_id=tid)
+    if ret is None:
+        return None
+    ret.group_chat_id = group_chat_id
+    ret.group_message_id = group_message_id
+    await db.commit()
+    return await get_product_return(db, return_id, tenant_id=tid)
+
+
+async def delete_product_return(
+    db: AsyncSession, return_id: int, tenant_id: Optional[int] = None
+) -> Optional[ProductReturn]:
+    """Soft-delete a ProductReturn and recalculate session summary."""
+    tid = get_current_tenant_id(tenant_id)
+    ret = await get_product_return(db, return_id, tenant_id=tid)
+    if ret is None or ret.is_deleted:
+        return None
+    ret.is_deleted = True
+    await db.commit()
+    await compute_session_summary(db, ret.session_id, tenant_id=tid)
+    return await get_product_return(db, return_id, tenant_id=tid)
 
 
 async def compute_session_summary(
@@ -1500,6 +1701,20 @@ async def compute_session_summary(
             )
         ).all()
     )
+    returns = list(
+        (
+            await db.scalars(
+                select(ProductReturn)
+                .options(selectinload(ProductReturn.client))
+                .where(
+                    ProductReturn.tenant_id == tid,
+                    ProductReturn.session_id == session_id,
+                    ProductReturn.is_deleted.is_(False),
+                )
+                .order_by(ProductReturn.id)
+            )
+        ).all()
+    )
 
     opening = float(sess.opening_balance or 0.0)
     main_cash_in = sum(float(t.amount) for t in txs if t.source_type == "main_in")
@@ -1531,9 +1746,13 @@ async def compute_session_summary(
                 3,
             )
 
-    total_kg = round(sum(float(s.total_weight_kg) for s in sales), 3)
-    total_revenue = round(sum(float(s.total_amount) for s in sales), 2)
-    total_cost = round(sum(float(s.total_cost) for s in sales), 2)
+    total_return_kg = round(sum(float(r.weight_kg) for r in returns), 3)
+    total_return_amount = round(sum(float(r.total_amount) for r in returns), 2)
+    total_return_cost = round(sum(float(r.total_cost) for r in returns), 2)
+
+    total_kg = round(sum(float(s.total_weight_kg) for s in sales) - total_return_kg, 3)
+    total_revenue = round(sum(float(s.total_amount) for s in sales) - total_return_amount, 2)
+    total_cost = round(sum(float(s.total_cost) for s in sales) - total_return_cost, 2)
     total_profit = round(total_revenue - total_cost, 2)
     margin_pct = (total_profit / total_revenue * 100.0) if total_revenue > 0 else 0.0
 
@@ -1563,6 +1782,10 @@ async def compute_session_summary(
         total_all_clients_debt=total_clients_debt,
         client_payments=payments,
         cash_transactions=txs,
+        returns=returns,
+        total_return_kg=total_return_kg,
+        total_return_amount=total_return_amount,
+        total_return_cost=total_return_cost,
     )
 
 
@@ -1644,6 +1867,7 @@ async def compute_period_summary(
     sales: List[Sale] = []
     payments: List[ClientPayment] = []
     txs: List[CashTransaction] = []
+    returns: List[ProductReturn] = []
 
     if sess_ids:
         sales = list(
@@ -1681,6 +1905,17 @@ async def compute_period_summary(
                 )
             ).all()
         )
+        returns = list(
+            (
+                await db.scalars(
+                    select(ProductReturn).where(
+                        ProductReturn.tenant_id == tid,
+                        ProductReturn.session_id.in_(sess_ids),
+                        ProductReturn.is_deleted.is_(False),
+                    )
+                )
+            ).all()
+        )
 
     weight_by_product: Dict[str, float] = {}
     for s in sales:
@@ -1690,9 +1925,13 @@ async def compute_period_summary(
                 3,
             )
 
-    total_kg = round(sum(float(s.total_weight_kg) for s in sales), 3)
-    total_revenue = round(sum(float(s.total_amount) for s in sales), 2)
-    total_cost = round(sum(float(s.total_cost) for s in sales), 2)
+    total_return_kg = round(sum(float(r.weight_kg) for r in returns), 3)
+    total_return_amount = round(sum(float(r.total_amount) for r in returns), 2)
+    total_return_cost = round(sum(float(r.total_cost) for r in returns), 2)
+
+    total_kg = round(sum(float(s.total_weight_kg) for s in sales) - total_return_kg, 3)
+    total_revenue = round(sum(float(s.total_amount) for s in sales) - total_return_amount, 2)
+    total_cost = round(sum(float(s.total_cost) for s in sales) - total_return_cost, 2)
     total_profit = round(total_revenue - total_cost, 2)
     margin_pct = (total_profit / total_revenue * 100.0) if total_revenue > 0 else 0.0
 
@@ -1720,6 +1959,9 @@ async def compute_period_summary(
         total_transfer_collected=total_transfer_collected,
         total_expenses=total_expenses,
         total_all_clients_debt=total_clients_debt,
+        returns_count=len(returns),
+        total_return_kg=total_return_kg,
+        total_return_amount=total_return_amount,
     )
 
 
@@ -1758,6 +2000,7 @@ async def get_period_excel_data(
     sales: List[Sale] = []
     payments: List[ClientPayment] = []
     txs: List[CashTransaction] = []
+    returns: List[ProductReturn] = []
     if sess_ids:
         sales = list(
             (
@@ -1796,6 +2039,20 @@ async def get_period_excel_data(
                         CashTransaction.is_deleted.is_(False),
                     )
                     .order_by(CashTransaction.id)
+                )
+            ).all()
+        )
+        returns = list(
+            (
+                await db.scalars(
+                    select(ProductReturn)
+                    .options(selectinload(ProductReturn.client))
+                    .where(
+                        ProductReturn.tenant_id == tid,
+                        ProductReturn.session_id.in_(sess_ids),
+                        ProductReturn.is_deleted.is_(False),
+                    )
+                    .order_by(ProductReturn.id)
                 )
             ).all()
         )
@@ -1852,6 +2109,16 @@ async def get_period_excel_data(
         if tx.source_type == "expense" and rdate in daily_map:
             daily_map[rdate]["expenses"] += float(tx.amount)
 
+    for ret in returns:
+        rdate = ret.report_date or sess_date_by_id.get(ret.session_id, "")
+        if rdate in daily_map:
+            daily_map[rdate]["total_kg"] = round(
+                daily_map[rdate]["total_kg"] - float(ret.weight_kg), 3
+            )
+            daily_map[rdate]["total_revenue"] -= float(ret.total_amount)
+            daily_map[rdate]["total_cost"] -= float(ret.total_cost)
+            daily_map[rdate]["total_profit"] -= float(ret.total_amount) - float(ret.total_cost)
+
     daily_rows = sorted(daily_map.values(), key=lambda r: r["report_date"])
     for row in daily_rows:
         rev = row["total_revenue"]
@@ -1880,6 +2147,15 @@ async def get_period_excel_data(
         entry["total_kg"] = round(entry["total_kg"] + float(sale.total_weight_kg), 3)
         entry["total_revenue"] += float(sale.total_amount)
         entry["total_profit"] += float(sale.total_profit)
+
+    for ret in returns:
+        cid = int(ret.client_id or 0)
+        if cid in cli_agg:
+            cli_agg[cid]["total_kg"] = round(
+                cli_agg[cid]["total_kg"] - float(ret.weight_kg), 3
+            )
+            cli_agg[cid]["total_revenue"] -= float(ret.total_amount)
+            cli_agg[cid]["total_profit"] -= float(ret.total_amount) - float(ret.total_cost)
 
     client_stats = sorted(
         cli_agg.values(), key=lambda c: (-c["total_revenue"], c["name"].lower())
@@ -2656,6 +2932,7 @@ async def reset_test_transactions(
     sale_ids_sub = select(Sale.id).where(Sale.tenant_id == tid)
     await db.execute(delete(SaleItem).where(SaleItem.sale_id.in_(sale_ids_sub)))
     await db.execute(delete(Sale).where(Sale.tenant_id == tid))
+    await db.execute(delete(ProductReturn).where(ProductReturn.tenant_id == tid))
     await db.execute(delete(ClientPayment).where(ClientPayment.tenant_id == tid))
     await db.execute(delete(CashTransaction).where(CashTransaction.tenant_id == tid))
     await db.execute(delete(DailyCashSession).where(DailyCashSession.tenant_id == tid))
@@ -2710,6 +2987,7 @@ async def reset_full_database(
     client_ids_sub = select(Client.id).where(Client.tenant_id == tid)
     await db.execute(delete(SaleItem).where(SaleItem.sale_id.in_(sale_ids_sub)))
     await db.execute(delete(Sale).where(Sale.tenant_id == tid))
+    await db.execute(delete(ProductReturn).where(ProductReturn.tenant_id == tid))
     await db.execute(delete(ClientPayment).where(ClientPayment.tenant_id == tid))
     await db.execute(delete(CashTransaction).where(CashTransaction.tenant_id == tid))
     await db.execute(delete(DailyCashSession).where(DailyCashSession.tenant_id == tid))
@@ -2750,6 +3028,7 @@ async def delete_tenant(db: AsyncSession, tenant_id: int) -> bool:
     client_ids_sub = select(Client.id).where(Client.tenant_id == tid)
     await db.execute(delete(SaleItem).where(SaleItem.sale_id.in_(sale_ids_sub)))
     await db.execute(delete(Sale).where(Sale.tenant_id == tid))
+    await db.execute(delete(ProductReturn).where(ProductReturn.tenant_id == tid))
     await db.execute(delete(ClientPayment).where(ClientPayment.tenant_id == tid))
     await db.execute(delete(CashTransaction).where(CashTransaction.tenant_id == tid))
     await db.execute(delete(DailyCashSession).where(DailyCashSession.tenant_id == tid))
@@ -2852,3 +3131,130 @@ async def set_raw_app_setting(db: AsyncSession, key: str, value: str) -> AppSett
     await db.refresh(obj)
     bump_auth_cache_epoch()
     return obj
+
+
+async def get_today_ai_usage_count(
+    db: AsyncSession, tenant_id: Optional[int] = None
+) -> int:
+    """Return total AI calls (image + audio) recorded today (local midnight) for this tenant."""
+    tid = get_current_tenant_id(tenant_id)
+    local_midnight = now_local().replace(hour=0, minute=0, second=0, microsecond=0)
+    since_utc = local_midnight.astimezone(timezone.utc)
+    return int(
+        await db.scalar(
+            select(sa_func.count(AIUsageLog.id)).where(
+                AIUsageLog.tenant_id == tid,
+                AIUsageLog.created_at >= since_utc,
+            )
+        )
+        or 0
+    )
+
+
+async def check_tenant_ai_quota(
+    db: AsyncSession, tenant_id: Optional[int] = None
+) -> tuple[bool, int, int]:
+    """Return (is_allowed, used_today, daily_limit) for the active tenant (0 limit => unlimited)."""
+    tid = get_current_tenant_id(tenant_id)
+    raw = await get_app_setting(db, "ai_daily_limit", "0", tenant_id=tid)
+    try:
+        limit = max(0, int(str(raw).strip() or "0"))
+    except ValueError:
+        limit = 0
+    used = await get_today_ai_usage_count(db, tenant_id=tid)
+    return (limit == 0 or used < limit), used, limit
+
+
+async def get_global_saas_analytics(db: AsyncSession, days: int = 30) -> dict:
+    """Compute cross-tenant SaaS MRR, status counts, collected revenue, and global AI stats."""
+    tenants = await list_tenants(db)
+    now = now_utc()
+    since = now - timedelta(days=max(1, int(days)))
+
+    status_counts = {"active": 0, "expiring": 0, "grace": 0, "expired": 0, "suspended": 0}
+    paying_mrr = 0.0
+    total_mrr = 0.0
+
+    user_rows = (
+        await db.execute(
+            select(AuthorizedUser.tenant_id, sa_func.count(AuthorizedUser.id))
+            .where(AuthorizedUser.is_active.is_(True))
+            .group_by(AuthorizedUser.tenant_id)
+        )
+    ).all()
+    users_by_tid = {int(tid): int(cnt or 0) for tid, cnt in user_rows}
+
+    tenants_breakdown: List[dict] = []
+    for t in tenants:
+        st = await evaluate_subscription_status(db, current_time=now, tenant_id=t.id)
+        status_counts[st.status] = status_counts.get(st.status, 0) + 1
+        price = float(t.monthly_price or 0.0)
+        if st.is_allowed:
+            total_mrr += price
+            if t.id >= 2:
+                paying_mrr += price
+        tenants_breakdown.append(
+            {
+                "id": t.id,
+                "name": t.tenant_name,
+                "plan": t.plan_name,
+                "price": price,
+                "status": st.status,
+                "days_left": st.days_left,
+                "grace_days_left": st.grace_days_left,
+                "users": users_by_tid.get(t.id, 0),
+                "is_allowed": st.is_allowed,
+            }
+        )
+
+    collected_30d = float(
+        await db.scalar(
+            select(sa_func.coalesce(sa_func.sum(SubscriptionPayment.amount), 0.0)).where(
+                SubscriptionPayment.paid_at >= since
+            )
+        )
+        or 0.0
+    )
+    collected_all = float(
+        await db.scalar(
+            select(sa_func.coalesce(sa_func.sum(SubscriptionPayment.amount), 0.0))
+        )
+        or 0.0
+    )
+
+    counts_row = (
+        await db.execute(
+            select(
+                select(sa_func.count(AuthorizedUser.id))
+                .where(AuthorizedUser.is_active.is_(True))
+                .scalar_subquery(),
+                select(sa_func.count(Client.id))
+                .where(Client.is_active.is_(True))
+                .scalar_subquery(),
+                select(sa_func.count(Client.id))
+                .where(Client.is_active.is_(True), Client.group_chat_id.is_not(None))
+                .scalar_subquery(),
+                select(sa_func.count(Sale.id))
+                .where(Sale.status == "confirmed")
+                .scalar_subquery(),
+            )
+        )
+    ).one()
+
+    ai_global = await get_ai_usage_summary(db, days=days, tenant_id=0)
+
+    return {
+        "total_tenants": len(tenants),
+        "paying_tenants": sum(1 for x in tenants_breakdown if x["id"] >= 2 and x["is_allowed"]),
+        "status_counts": status_counts,
+        "paying_mrr": round(paying_mrr, 2),
+        "total_mrr": round(total_mrr, 2),
+        "collected_30d": round(collected_30d, 2),
+        "collected_all": round(collected_all, 2),
+        "total_users": int(counts_row[0] or 0),
+        "total_clients": int(counts_row[1] or 0),
+        "total_groups": int(counts_row[2] or 0),
+        "total_sales": int(counts_row[3] or 0),
+        "ai_global": ai_global,
+        "tenants_breakdown": tenants_breakdown,
+    }

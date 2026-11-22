@@ -116,6 +116,10 @@ def render_daily_report_text(summary: DailyReportSummary) -> str:
         for pname, kg in summary.weight_by_product.items():
             lines.append(f"  • {html.escape(pname)}: <b>{format_kg(kg)} kg</b>")
         lines.append(f"⚖️ Jami vazn: <b>{format_kg(summary.total_kg)} kg</b>")
+    if summary.total_return_amount > 0:
+        lines.append(
+            f"↩️ Vozvrat (qaytgan): <b>-{format_kg(summary.total_return_kg)} kg (-{format_uzs(summary.total_return_amount)} so'm)</b>"
+        )
 
     lines.extend(
         [
@@ -164,6 +168,10 @@ def render_period_report_text(p: PeriodReportSummary, title: Optional[str] = Non
     ]
     for pname, kg in p.weight_by_product.items():
         lines.append(f"  • {html.escape(pname)}: <b>{format_kg(kg)} kg</b>")
+    if p.total_return_amount > 0:
+        lines.append(
+            f"↩️ Vozvrat ({p.returns_count} ta): <b>-{format_kg(p.total_return_kg)} kg (-{format_uzs(p.total_return_amount)} so'm)</b>"
+        )
     lines.extend(
         [
             "-------------------------------",
