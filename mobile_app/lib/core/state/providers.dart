@@ -54,16 +54,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final me = await _api.get('/auth/me') as Map<String, dynamic>;
       final role = me['role'] as String;
       final baseTid = (me['tenant_id'] as num).toInt();
-      final effectiveTid =
-          role == 'super_admin' ? (_api.selectedTenantId ?? baseTid) : baseTid;
-      if (role != 'super_admin') {
-        await _api.setSelectedTenant(baseTid);
-      }
+      await _api.setSelectedTenant(baseTid);
       state = AuthState(
         stage: AuthStage.authenticated,
         telegramId: (me['telegram_id'] as num).toInt(),
         role: role,
-        selectedTenantId: effectiveTid,
+        selectedTenantId: baseTid,
       );
     } catch (_) {
       await _api.clearSession();
@@ -74,18 +70,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> _applyTokenResponse(Map<String, dynamic> res) async {
     final tid = (res['tenant_id'] as num).toInt();
     final role = res['role'] as String;
-    final effectiveTid =
-        role == 'super_admin' ? (_api.selectedTenantId ?? tid) : tid;
+    await _api.setSelectedTenant(tid);
     await _api.saveSession(
       accessToken: res['access_token'] as String,
       refreshToken: res['refresh_token'] as String,
       role: role,
       telegramId: 0,
-      tenantId: effectiveTid,
+      tenantId: tid,
     );
-    if (role != 'super_admin') {
-      await _api.setSelectedTenant(tid);
-    }
     try {
       final me = await _api.get('/auth/me') as Map<String, dynamic>;
       final tgId = (me['telegram_id'] as num).toInt();
@@ -94,19 +86,19 @@ class AuthNotifier extends StateNotifier<AuthState> {
         refreshToken: res['refresh_token'] as String,
         role: role,
         telegramId: tgId,
-        tenantId: effectiveTid,
+        tenantId: tid,
       );
       state = AuthState(
         stage: AuthStage.authenticated,
         telegramId: tgId,
         role: role,
-        selectedTenantId: effectiveTid,
+        selectedTenantId: tid,
       );
     } catch (_) {
       state = AuthState(
         stage: AuthStage.authenticated,
         role: role,
-        selectedTenantId: effectiveTid,
+        selectedTenantId: tid,
       );
     }
   }
@@ -130,23 +122,19 @@ class AuthNotifier extends StateNotifier<AuthState> {
     ) as Map<String, dynamic>;
     final tid = (res['tenant_id'] as num).toInt();
     final role = res['role'] as String;
-    final effectiveTid =
-        role == 'super_admin' ? (_api.selectedTenantId ?? tid) : tid;
+    await _api.setSelectedTenant(tid);
     await _api.saveSession(
       accessToken: res['access_token'] as String,
       refreshToken: res['refresh_token'] as String,
       role: role,
       telegramId: telegramId,
-      tenantId: effectiveTid,
+      tenantId: tid,
     );
-    if (role != 'super_admin') {
-      await _api.setSelectedTenant(tid);
-    }
     state = AuthState(
       stage: AuthStage.authenticated,
       telegramId: telegramId,
       role: role,
-      selectedTenantId: effectiveTid,
+      selectedTenantId: tid,
     );
   }
 

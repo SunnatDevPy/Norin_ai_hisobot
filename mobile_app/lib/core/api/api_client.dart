@@ -82,8 +82,9 @@ class ApiClient {
     _role = await _storage.read(key: 'role');
     final tidRaw = await _storage.read(key: 'telegram_id');
     _telegramId = tidRaw != null ? int.tryParse(tidRaw) : null;
-    final selRaw = await _storage.read(key: 'selected_tenant_id');
-    _selectedTenantId = selRaw != null ? int.tryParse(selRaw) : 1;
+    // Always default to own filial (#1 for Super Admin; server-enforced for tenants) on startup
+    _selectedTenantId = 1;
+    await _storage.delete(key: 'selected_tenant_id');
     _dio.options.baseUrl = _baseUrl;
   }
 
@@ -95,7 +96,6 @@ class ApiClient {
 
   Future<void> setSelectedTenant(int tenantId) async {
     _selectedTenantId = tenantId;
-    await _storage.write(key: 'selected_tenant_id', value: '$tenantId');
   }
 
   Future<void> saveSession({

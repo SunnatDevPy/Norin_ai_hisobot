@@ -115,14 +115,6 @@ class DashboardScreen extends ConsumerWidget {
           ],
         ),
         actions: [
-          if (auth.isSuperAdmin)
-            _GlassCircleAction(
-              tooltip: "Filialni almashtirish",
-              icon: Icons.store_mall_directory_outlined,
-              onPressed: () =>
-                  _showTenantSwitcher(context, ref, tenantsList, auth.selectedTenantId),
-            ),
-          const SizedBox(width: 6),
           _GlassCircleAction(
             tooltip: "Mavzu (Kun/Tun)",
             icon: isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
@@ -151,6 +143,40 @@ class DashboardScreen extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 120),
           children: [
+            if (auth.isSuperAdmin && auth.selectedTenantId != 1) ...[
+              SpotlightHeroCard(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                borderRadius: 16,
+                glowColor: NorinPalette.amber,
+                accentColor: NorinPalette.magenta,
+                child: Row(
+                  children: [
+                    const Icon(Icons.visibility_rounded, color: NorinPalette.amber, size: 19),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        "Boshqa filial ko'rilmoqda: #${auth.selectedTenantId} $activeTenantName",
+                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        await ref.read(authProvider.notifier).selectTenant(1);
+                        invalidateOperationalData(ref);
+                        if (context.mounted) {
+                          showSnack(context, "O'z filialingizga (#1) qaytdingiz");
+                        }
+                      },
+                      child: const Text(
+                        "O'zimga (#1)",
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             // Date / Period pills + quick Excel button (reference top toolbar style)
             Row(
               children: [
@@ -531,83 +557,6 @@ class DashboardScreen extends ConsumerWidget {
     } else {
       ref.read(shellTabIndexProvider.notifier).state = 1;
     }
-  }
-
-  Future<void> _showTenantSwitcher(
-    BuildContext context,
-    WidgetRef ref,
-    List<Map<String, dynamic>> tenants,
-    int currentId,
-  ) async {
-    if (tenants.isEmpty) {
-      ref.invalidate(adminTenantsProvider);
-    }
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => Consumer(
-        builder: (ctx, sheetRef, _) {
-          final asyncTenants = sheetRef.watch(adminTenantsProvider);
-          return SafeArea(
-            child: asyncTenants.when(
-              loading: () => const SizedBox(
-                height: 180,
-                child: Center(child: CircularProgressIndicator()),
-              ),
-              error: (e, _) => AsyncErrorCard(
-                error: e,
-                onRetry: () => sheetRef.invalidate(adminTenantsProvider),
-              ),
-              data: (list) => ListView.separated(
-                shrinkWrap: true,
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-                itemCount: list.length + 1,
-                separatorBuilder: (_, _) => const SizedBox(height: 6),
-                itemBuilder: (ctx, i) {
-                  if (i == 0) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Text(
-                        "Filialni tanlang (Super Admin)",
-                        style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                    );
-                  }
-                  final t = list[i - 1];
-                  final tid = asInt(t['id']);
-                  final name = asStr(t['tenant_name'] ?? t['name'], 'Filial #$tid');
-                  final selected = tid == currentId;
-                  return ListTile(
-                    selected: selected,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    leading: CircleAvatar(
-                      backgroundColor: selected ? NorinPalette.emerald : null,
-                      foregroundColor: selected ? Colors.white : null,
-                      child: Text('#$tid'),
-                    ),
-                    title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                    subtitle: Text(
-                      "${asStr(t['plan_name'], 'Standard')} • ${asStr(t['status'])}",
-                    ),
-                    trailing: selected
-                        ? const Icon(Icons.check_circle_rounded, color: NorinPalette.emeraldLight)
-                        : null,
-                    onTap: () async {
-                      Navigator.pop(ctx);
-                      await ref.read(authProvider.notifier).selectTenant(tid);
-                      invalidateOperationalData(ref);
-                      if (context.mounted) {
-                        showSnack(context, "Faol filial: $name");
-                      }
-                    },
-                  );
-                },
-              ),
-            ),
-          );
-        },
-      ),
-    );
   }
 }
 
