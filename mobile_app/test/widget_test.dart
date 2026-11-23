@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:norin_ai_app/core/api/api_client.dart';
+import 'package:norin_ai_app/core/security/biometric_lock.dart';
 import 'package:norin_ai_app/core/theme/app_theme.dart';
 import 'package:norin_ai_app/core/update/app_updater.dart';
 import 'package:norin_ai_app/core/utils/formatters.dart';
@@ -225,5 +226,55 @@ void main() {
     expect(ApiClient.isPublicAuthPath('/auth/telegram-poll'), isTrue);
     expect(ApiClient.isPublicAuthPath('/auth/telegram-ticket'), isTrue);
     expect(ApiClient.isPublicAuthPath('/auth/login-code?x=1'), isTrue);
+  });
+
+  testWidgets('AnimatedCountText counts up from 0 to target formatted value', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedCountText(
+            value: 1000,
+            formatter: (v) => '${v.round()}',
+          ),
+        ),
+      ),
+    );
+    expect(find.text('0'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 340));
+    expect(find.text('0'), findsNothing);
+    expect(find.text('1000'), findsNothing);
+    await tester.pumpAndSettle();
+    expect(find.text('1000'), findsOneWidget);
+  });
+
+  testWidgets('PinSetupScreen requires 2-step confirmation and rejects mismatch', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: AppTheme.dark(),
+          home: const PinSetupScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('4 xonali PIN-kod yarating'), findsOneWidget);
+    for (int i = 0; i < 4; i++) {
+      await tester.tap(find.text('1'));
+      await tester.pump();
+    }
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pumpAndSettle();
+
+    expect(find.text('PIN-kodni tasdiqlang'), findsOneWidget);
+
+    for (int i = 0; i < 4; i++) {
+      await tester.tap(find.text('2'));
+      await tester.pump();
+    }
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.textContaining('PIN-kodlar mos kelmadi'), findsOneWidget);
+    expect(find.text('4 xonali PIN-kod yarating'), findsOneWidget);
   });
 }

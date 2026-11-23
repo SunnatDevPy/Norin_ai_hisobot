@@ -278,7 +278,10 @@ final adminTenantsProvider = FutureProvider.autoDispose<List<Map<String, dynamic
   return (data as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
 });
 
+final refreshEpochProvider = StateProvider<int>((ref) => 0);
+
 void invalidateOperationalData(WidgetRef ref) {
+  ref.read(refreshEpochProvider.notifier).state++;
   ref.invalidate(dashboardSummaryProvider);
   ref.invalidate(dashboardChartsProvider);
   ref.invalidate(clientsProvider);

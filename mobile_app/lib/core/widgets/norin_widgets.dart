@@ -303,3 +303,104 @@ class _PressableScaleState extends State<PressableScale> {
     return content;
   }
 }
+
+class AnimatedCountText extends StatefulWidget {
+  const AnimatedCountText({
+    super.key,
+    required this.value,
+    required this.formatter,
+    this.style,
+    this.duration = const Duration(milliseconds: 680),
+    this.maxLines = 1,
+  });
+
+  final double value;
+  final String Function(double) formatter;
+  final TextStyle? style;
+  final Duration duration;
+  final int maxLines;
+
+  @override
+  State<AnimatedCountText> createState() => _AnimatedCountTextState();
+}
+
+class _AnimatedCountTextState extends State<AnimatedCountText> {
+  double _begin = 0;
+
+  @override
+  void didUpdateWidget(covariant AnimatedCountText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) {
+      _begin = oldWidget.value;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: _begin, end: widget.value),
+      duration: widget.duration,
+      curve: Curves.easeOutCubic,
+      builder: (_, v, _) => Text(
+        widget.formatter(v),
+        maxLines: widget.maxLines,
+        overflow: TextOverflow.ellipsis,
+        style: widget.style,
+      ),
+    );
+  }
+}
+
+class CosmicShimmerBox extends StatefulWidget {
+  const CosmicShimmerBox({
+    super.key,
+    this.width = double.infinity,
+    required this.height,
+    this.borderRadius = 18,
+  });
+
+  final double width;
+  final double height;
+  final double borderRadius;
+
+  @override
+  State<CosmicShimmerBox> createState() => _CosmicShimmerBoxState();
+}
+
+class _CosmicShimmerBoxState extends State<CosmicShimmerBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final low = isDark ? const Color(0xFF1D1930) : const Color(0xFFE8E3F8);
+    final high = isDark ? const Color(0xFF2A2442) : const Color(0xFFF4F1FC);
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, _) => Container(
+        width: widget.width,
+        height: widget.height,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(widget.borderRadius),
+          color: Color.lerp(low, high, Curves.easeInOut.transform(_ctrl.value)),
+        ),
+      ),
+    );
+  }
+}

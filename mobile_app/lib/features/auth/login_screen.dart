@@ -19,10 +19,12 @@ class LoginScreen extends ConsumerStatefulWidget {
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingObserver {
+class _LoginScreenState extends ConsumerState<LoginScreen>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final _quickCodeCtrl = TextEditingController();
   final _tgCtrl = TextEditingController();
   final _otpCtrl = TextEditingController();
+  late final AnimationController _floatCtrl;
 
   String? _activeTicket;
   String? _activeBotUrl;
@@ -39,11 +41,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _floatCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat(reverse: true);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _floatCtrl.dispose();
     _pollTimer?.cancel();
     _resendTimer?.cancel();
     _quickCodeCtrl.dispose();
@@ -231,14 +238,37 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Center(child: GlowingSquircleEmblem(size: 102)),
+                        Center(
+                          child: AnimatedBuilder(
+                            animation: _floatCtrl,
+                            builder: (_, child) => Transform.translate(
+                              offset: Offset(
+                                0,
+                                -7 * Curves.easeInOut.transform(_floatCtrl.value),
+                              ),
+                              child: child,
+                            ),
+                            child: const GlowingSquircleEmblem(size: 102),
+                          ),
+                        ),
                         const SizedBox(height: 4),
-                        Text(
-                          "Sotuv AI",
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5,
+                        ShaderMask(
+                          blendMode: BlendMode.srcIn,
+                          shaderCallback: (bounds) {
+                            final isDark = theme.brightness == Brightness.dark;
+                            return LinearGradient(
+                              colors: isDark
+                                  ? const [Color(0xFFFFFFFF), Color(0xFFE9D5FF), Color(0xFFC084FC)]
+                                  : const [Color(0xFF3B0764), Color(0xFF7C3AED)],
+                            ).createShader(bounds);
+                          },
+                          child: Text(
+                            "Sotuv AI",
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.5,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 5),
@@ -250,7 +280,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
                           ),
                         ),
                         const SizedBox(height: 20),
-                        SpotlightHeroCard(
+                        TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0, end: 1),
+                          duration: const Duration(milliseconds: 420),
+                          curve: Curves.easeOutCubic,
+                          builder: (_, v, child) => Opacity(
+                            opacity: v,
+                            child: Transform.translate(
+                              offset: Offset(0, 18 * (1 - v)),
+                              child: child,
+                            ),
+                          ),
+                          child: SpotlightHeroCard(
                           padding: const EdgeInsets.all(20),
                           glowColor: NorinPalette.emeraldLight,
                           accentColor: NorinPalette.indigo,
@@ -397,6 +438,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
                               ),
                             ],
                           ),
+                        ),
                         ),
                         const SizedBox(height: 14),
                         Card(

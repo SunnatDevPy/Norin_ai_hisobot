@@ -47,6 +47,7 @@ class DashboardScreen extends ConsumerWidget {
     final auth = ref.watch(authProvider);
     final period = ref.watch(selectedPeriodProvider);
     final chartPeriod = ref.watch(chartPeriodProvider);
+    final refreshEpoch = ref.watch(refreshEpochProvider);
     final summaryAsync = ref.watch(dashboardSummaryProvider);
     final chartsAsync = ref.watch(dashboardChartsProvider);
     final todayAsync = ref.watch(todayProvider);
@@ -313,6 +314,7 @@ class DashboardScreen extends ConsumerWidget {
                 final dailySeries = asMapList(chartsAsync.valueOrNull?['daily_series']);
 
                 return Column(
+                  key: ValueKey('dash_${period}_$refreshEpoch'),
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     if (stale != null && stale.isNotEmpty) ...[
@@ -377,6 +379,8 @@ class DashboardScreen extends ConsumerWidget {
                         KpiCardTile(
                           title: cash.isNotEmpty ? "Kassa qoldig'i" : "Yig'ilgan pul",
                           value: formatCompactUzs(cash.isNotEmpty ? cashBalance : collectedTotal),
+                          numericValue: cash.isNotEmpty ? cashBalance : collectedTotal,
+                          valueFormatter: formatCompactUzs,
                           subtitle: formatUzs(cash.isNotEmpty ? cashBalance : collectedTotal),
                           icon: Icons.savings_outlined,
                           color: NorinPalette.emeraldLight,
@@ -386,6 +390,8 @@ class DashboardScreen extends ConsumerWidget {
                         KpiCardTile(
                           title: "Mijozlar qarzi",
                           value: formatCompactUzs(totalDebt),
+                          numericValue: totalDebt,
+                          valueFormatter: formatCompactUzs,
                           subtitle: formatUzs(totalDebt),
                           icon: Icons.account_balance_outlined,
                           color: totalDebt > 0 ? NorinPalette.danger : NorinPalette.profit,
@@ -394,6 +400,8 @@ class DashboardScreen extends ConsumerWidget {
                         KpiCardTile(
                           title: "Yig'im (Naqd/Karta)",
                           value: formatCompactUzs(collectedTotal),
+                          numericValue: collectedTotal,
+                          valueFormatter: formatCompactUzs,
                           subtitle:
                               "Naqd ${formatCompactUzs(asDouble(collected['cash']))} • Karta ${formatCompactUzs(asDouble(collected['card']))}",
                           icon: Icons.payments_outlined,
@@ -402,6 +410,8 @@ class DashboardScreen extends ConsumerWidget {
                         KpiCardTile(
                           title: "Xarajatlar",
                           value: formatCompactUzs(expenses),
+                          numericValue: expenses,
+                          valueFormatter: formatCompactUzs,
                           subtitle: kassaDebt > 0
                               ? "Kassa qarz: ${formatCompactUzs(kassaDebt)}"
                               : formatUzs(expenses),
@@ -439,6 +449,7 @@ class DashboardScreen extends ConsumerWidget {
                 final expList = asMapList(charts['expense_breakdown']);
                 final topClients = asMapList(charts['top_clients']);
                 return Column(
+                  key: ValueKey('charts_${chartPeriod}_$refreshEpoch'),
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _CashFlowBarTrendsCard(
@@ -730,21 +741,21 @@ class _EarningsDistributionCard extends StatelessWidget {
             children: [
               Expanded(
                 child: _CapsuleMetricColumn(
-                  amount: formatCompactUzs(revenue),
+                  numericValue: revenue,
                   label: "Savdo tushum",
                   color: NorinPalette.sky,
                 ),
               ),
               Expanded(
                 child: _CapsuleMetricColumn(
-                  amount: formatCompactUzs(profit),
+                  numericValue: profit,
                   label: "Sof foyda",
                   color: NorinPalette.magenta,
                 ),
               ),
               Expanded(
                 child: _CapsuleMetricColumn(
-                  amount: formatCompactUzs(cost + returnsAmount),
+                  numericValue: cost + returnsAmount,
                   label: returnsAmount > 0 ? "Tannarx/Vozv" : "Tannarx",
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -782,12 +793,12 @@ class _GlowingCapsuleBar extends StatelessWidget {
 
 class _CapsuleMetricColumn extends StatelessWidget {
   const _CapsuleMetricColumn({
-    required this.amount,
+    required this.numericValue,
     required this.label,
     required this.color,
   });
 
-  final String amount;
+  final double numericValue;
   final String label;
   final Color color;
 
@@ -799,8 +810,9 @@ class _CapsuleMetricColumn extends StatelessWidget {
         FittedBox(
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerLeft,
-          child: Text(
-            amount,
+          child: AnimatedCountText(
+            value: numericValue,
+            formatter: formatCompactUzs,
             style: tNumStyle.copyWith(fontSize: 16, fontWeight: FontWeight.w800),
           ),
         ),
@@ -892,8 +904,9 @@ class _ProfitMarginSparkCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.baseline,
                     textBaseline: TextBaseline.alphabetic,
                     children: [
-                      Text(
-                        margin.toStringAsFixed(1),
+                      AnimatedCountText(
+                        value: margin,
+                        formatter: (v) => v.toStringAsFixed(1),
                         style: tNumStyle.copyWith(
                           fontSize: 32,
                           fontWeight: FontWeight.w900,
@@ -1430,9 +1443,49 @@ class _DashboardSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SpotlightHeroCard(
-      padding: const EdgeInsets.all(42),
-      child: const Center(child: CircularProgressIndicator()),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SpotlightHeroCard(
+          padding: const EdgeInsets.all(18),
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CosmicShimmerBox(width: 140, height: 18, borderRadius: 8),
+              SizedBox(height: 14),
+              CosmicShimmerBox(height: 24, borderRadius: 10),
+              SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(child: CosmicShimmerBox(height: 36, borderRadius: 10)),
+                  SizedBox(width: 10),
+                  Expanded(child: CosmicShimmerBox(height: 36, borderRadius: 10)),
+                  SizedBox(width: 10),
+                  Expanded(child: CosmicShimmerBox(height: 36, borderRadius: 10)),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        const CosmicShimmerBox(height: 118, borderRadius: 20),
+        const SizedBox(height: 12),
+        const Row(
+          children: [
+            Expanded(child: CosmicShimmerBox(height: 112, borderRadius: 20)),
+            SizedBox(width: 10),
+            Expanded(child: CosmicShimmerBox(height: 112, borderRadius: 20)),
+          ],
+        ),
+        const SizedBox(height: 10),
+        const Row(
+          children: [
+            Expanded(child: CosmicShimmerBox(height: 112, borderRadius: 20)),
+            SizedBox(width: 10),
+            Expanded(child: CosmicShimmerBox(height: 112, borderRadius: 20)),
+          ],
+        ),
+      ],
     );
   }
 }

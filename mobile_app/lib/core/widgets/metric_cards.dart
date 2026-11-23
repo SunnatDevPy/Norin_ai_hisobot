@@ -531,6 +531,8 @@ class KpiCardTile extends StatelessWidget {
     this.subtitle,
     this.onTap,
     this.highlight = false,
+    this.numericValue,
+    this.valueFormatter,
   });
 
   final String title;
@@ -540,6 +542,8 @@ class KpiCardTile extends StatelessWidget {
   final Color color;
   final VoidCallback? onTap;
   final bool highlight;
+  final double? numericValue;
+  final String Function(double)? valueFormatter;
 
   @override
   Widget build(BuildContext context) {
@@ -641,13 +645,22 @@ class KpiCardTile extends StatelessWidget {
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
-                      child: Text(
-                        value,
-                        style: tt.titleLarge?.merge(tNumStyle).copyWith(
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.3,
+                      child: (numericValue != null && valueFormatter != null)
+                          ? AnimatedCountText(
+                              value: numericValue!,
+                              formatter: valueFormatter!,
+                              style: tt.titleLarge?.merge(tNumStyle).copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.3,
+                                  ),
+                            )
+                          : Text(
+                              value,
+                              style: tt.titleLarge?.merge(tNumStyle).copyWith(
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.3,
+                                  ),
                             ),
-                      ),
                     ),
                     if (subtitle != null && subtitle!.isNotEmpty) ...[
                       const SizedBox(height: 4),

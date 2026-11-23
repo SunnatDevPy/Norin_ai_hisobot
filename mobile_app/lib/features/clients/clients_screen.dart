@@ -175,8 +175,10 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                            Text(
-                              formatUzs(totalDebt),
+                            AnimatedCountText(
+                              key: ValueKey('debt_${ref.watch(refreshEpochProvider)}'),
+                              value: totalDebt,
+                              formatter: formatUzs,
                               style: tNumStyle.copyWith(
                                 fontSize: 21,
                                 fontWeight: FontWeight.w900,

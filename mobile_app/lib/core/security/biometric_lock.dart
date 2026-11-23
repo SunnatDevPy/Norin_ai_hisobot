@@ -58,6 +58,7 @@ class BiometricLockState {
     this.enabled = false,
     this.pinCode,
     this.locked = false,
+    this.setupCompleted = false,
   });
 
   final bool initialized;
@@ -65,6 +66,7 @@ class BiometricLockState {
   final bool enabled;
   final String? pinCode;
   final bool locked;
+  final bool setupCompleted;
 
   bool get hasPin => pinCode != null && pinCode!.length == 4;
   bool get hasAnyLock => enabled || hasPin;
@@ -76,6 +78,7 @@ class BiometricLockState {
     String? pinCode,
     bool clearPin = false,
     bool? locked,
+    bool? setupCompleted,
   }) {
     return BiometricLockState(
       initialized: initialized ?? this.initialized,
@@ -83,6 +86,7 @@ class BiometricLockState {
       enabled: enabled ?? this.enabled,
       pinCode: clearPin ? null : (pinCode ?? this.pinCode),
       locked: locked ?? this.locked,
+      setupCompleted: setupCompleted ?? this.setupCompleted,
     );
   }
 }
@@ -95,6 +99,7 @@ class BiometricLockNotifier extends StateNotifier<BiometricLockState> {
   );
   static const _kBioKey = 'norin_biometric_enabled';
   static const _kPinKey = 'norin_pin_code';
+  static const _kSetupDoneKey = 'norin_lock_setup_done';
 
   DateTime? _pausedAt;
 
@@ -102,15 +107,23 @@ class BiometricLockNotifier extends StateNotifier<BiometricLockState> {
     final available = await NativeBridge.canAuthenticateBiometric();
     final bioRaw = await _storage.read(key: _kBioKey);
     final pinRaw = await _storage.read(key: _kPinKey);
+    final setupDoneRaw = await _storage.read(key: _kSetupDoneKey);
     final enabled = bioRaw == '1' && available;
     final hasPin = pinRaw != null && pinRaw.length == 4;
+    final setupCompleted = enabled || hasPin || setupDoneRaw == '1';
     state = BiometricLockState(
       initialized: true,
       biometricAvailable: available,
       enabled: enabled,
       pinCode: hasPin ? pinRaw : null,
       locked: enabled || hasPin,
+      setupCompleted: setupCompleted,
     );
+  }
+
+  Future<void> markSetupCompleted() async {
+    await _storage.write(key: _kSetupDoneKey, value: '1');
+    state = state.copyWith(setupCompleted: true);
   }
 
   void onAppPaused() {
@@ -157,7 +170,13 @@ class BiometricLockNotifier extends StateNotifier<BiometricLockState> {
       );
       if (!ok) return false;
       await _storage.write(key: _kBioKey, value: '1');
-      state = state.copyWith(biometricAvailable: true, enabled: true, locked: false);
+      await _storage.write(key: _kSetupDoneKey, value: '1');
+      state = state.copyWith(
+        biometricAvailable: true,
+        enabled: true,
+        locked: false,
+        setupCompleted: true,
+      );
       return true;
     }
     await _storage.write(key: _kBioKey, value: '0');
@@ -166,14 +185,15 @@ class BiometricLockNotifier extends StateNotifier<BiometricLockState> {
   }
 
   Future<void> setPinCode(String? pin) async {
+    await _storage.write(key: _kSetupDoneKey, value: '1');
     if (pin == null || pin.trim().isEmpty) {
       await _storage.delete(key: _kPinKey);
-      state = state.copyWith(clearPin: true, locked: false);
+      state = state.copyWith(clearPin: true, locked: false, setupCompleted: true);
       return;
     }
     final clean = pin.trim();
     await _storage.write(key: _kPinKey, value: clean);
-    state = state.copyWith(pinCode: clean, locked: false);
+    state = state.copyWith(pinCode: clean, locked: false, setupCompleted: true);
   }
 
   void resetSessionLock() {
@@ -376,24 +396,27 @@ class _PinPad extends StatelessWidget {
     Widget keyBtn(String label, {VoidCallback? onTap, Widget? child}) {
       return Padding(
         padding: const EdgeInsets.all(6),
-        child: Material(
-          color: isDark ? NorinPalette.darkCard : NorinPalette.lightCard,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: BorderSide(color: isDark ? NorinPalette.darkBorder : NorinPalette.lightBorder),
-          ),
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(18),
-            child: SizedBox(
-              width: 78,
-              height: 58,
-              child: Center(
-                child: child ??
-                    Text(
-                      label,
-                      style: tNumStyle.copyWith(fontSize: 22, fontWeight: FontWeight.w700),
-                    ),
+        child: PressableScale(
+          scaleFactor: 0.90,
+          child: Material(
+            color: isDark ? NorinPalette.darkCard : NorinPalette.lightCard,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(color: isDark ? NorinPalette.darkBorder : NorinPalette.lightBorder),
+            ),
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(18),
+              child: SizedBox(
+                width: 78,
+                height: 58,
+                child: Center(
+                  child: child ??
+                      Text(
+                        label,
+                        style: tNumStyle.copyWith(fontSize: 22, fontWeight: FontWeight.w700),
+                      ),
+                ),
               ),
             ),
           ),
@@ -436,6 +459,244 @@ class _PinPad extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class PinSetupScreen extends ConsumerStatefulWidget {
+  const PinSetupScreen({super.key, this.isEditMode = false});
+
+  final bool isEditMode;
+
+  @override
+  ConsumerState<PinSetupScreen> createState() => _PinSetupScreenState();
+}
+
+class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
+  int _step = 0; // 0 = create, 1 = confirm, 2 = biometric prompt
+  String _firstPin = '';
+  String _currentPin = '';
+  int _shakeNonce = 0;
+  bool _saving = false;
+
+  Future<void> _onDigit(String d) async {
+    if (_saving || _step > 1 || _currentPin.length >= 4) return;
+    setState(() => _currentPin += d);
+    if (_currentPin.length < 4) return;
+
+    if (_step == 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 110));
+      if (!mounted) return;
+      setState(() {
+        _firstPin = _currentPin;
+        _currentPin = '';
+        _step = 1;
+      });
+      return;
+    }
+
+    // Step 1: confirm entered PIN
+    if (_currentPin != _firstPin) {
+      HapticFeedback.heavyImpact();
+      showSnack(context, "PIN-kodlar mos kelmadi, qaytadan tering", error: true);
+      setState(() {
+        _firstPin = '';
+        _currentPin = '';
+        _step = 0;
+        _shakeNonce++;
+      });
+      return;
+    }
+
+    setState(() => _saving = true);
+    final lock = ref.read(biometricLockProvider);
+    await ref.read(biometricLockProvider.notifier).setPinCode(_firstPin);
+    if (!mounted) return;
+
+    if (!widget.isEditMode && lock.biometricAvailable && !lock.enabled) {
+      setState(() {
+        _saving = false;
+        _step = 2;
+      });
+      return;
+    }
+
+    showSnack(context, "PIN-kod saqlandi");
+    if (widget.isEditMode && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lock = ref.watch(biometricLockProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final title = switch (_step) {
+      0 => widget.isEditMode ? "Yangi 4 xonali PIN-kod" : "4 xonali PIN-kod yarating",
+      1 => "PIN-kodni tasdiqlang",
+      _ => "Barmoq izini yoqasizmi?",
+    };
+    final subtitle = switch (_step) {
+      0 => "Ilovaga tezkor va xavfsiz kirish uchun",
+      1 => "Yana bir marta xuddi shu 4 ta raqamni tering",
+      _ => "Keyingi safar barmoq izi bilan darhol kirasiz",
+    };
+
+    return Scaffold(
+      appBar: widget.isEditMode
+          ? AppBar(
+              title: const Text("PIN-kod sozlash", style: TextStyle(fontWeight: FontWeight.w800)),
+            )
+          : null,
+      body: CosmicBackground(
+        showBottomHorizonGlow: true,
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 380),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const GlowingSquircleEmblem(size: 76),
+                    const SizedBox(height: 8),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      child: Column(
+                        key: ValueKey('pin_head_$_step'),
+                        children: [
+                          Text(
+                            title,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            subtitle,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    if (_step < 2) ...[
+                      TweenAnimationBuilder<double>(
+                        key: ValueKey('setup_shake_$_shakeNonce'),
+                        tween: Tween(begin: 0, end: _shakeNonce == 0 ? 0 : 1),
+                        duration: const Duration(milliseconds: 360),
+                        builder: (context, v, child) => Transform.translate(
+                          offset: Offset(math.sin(v * math.pi * 4) * (1 - v) * 12, 0),
+                          child: child,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(4, (i) {
+                            final filled = i < _currentPin.length;
+                            return AnimatedScale(
+                              scale: filled ? 1.15 : 1.0,
+                              duration: const Duration(milliseconds: 140),
+                              curve: Curves.easeOutBack,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 150),
+                                width: 16,
+                                height: 16,
+                                margin: const EdgeInsets.symmetric(horizontal: 10),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: filled
+                                      ? (isDark
+                                          ? NorinPalette.emeraldLight
+                                          : NorinPalette.emeraldDark)
+                                      : Colors.transparent,
+                                  border: Border.all(
+                                    color: filled
+                                        ? NorinPalette.magenta
+                                        : (isDark
+                                            ? NorinPalette.darkBorderGlow
+                                            : NorinPalette.emeraldDark.withValues(alpha: 0.45)),
+                                    width: 1.8,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }),
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                      _PinPad(
+                        onDigit: _onDigit,
+                        onBackspace: () {
+                          if (_currentPin.isNotEmpty) {
+                            setState(() => _currentPin = _currentPin.substring(0, _currentPin.length - 1));
+                          } else if (_step == 1) {
+                            setState(() {
+                              _step = 0;
+                              _firstPin = '';
+                            });
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      if (widget.isEditMode && lock.hasPin)
+                        TextButton(
+                          onPressed: () async {
+                            await ref.read(biometricLockProvider.notifier).setPinCode(null);
+                            if (!context.mounted) return;
+                            showSnack(context, "PIN-kod o'chirildi");
+                            if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+                          },
+                          child: const Text(
+                            "PIN-kodni o'chirish",
+                            style: TextStyle(color: NorinPalette.danger, fontWeight: FontWeight.w700),
+                          ),
+                        )
+                      else if (!widget.isEditMode)
+                        TextButton(
+                          onPressed: () => ref.read(biometricLockProvider.notifier).markSetupCompleted(),
+                          child: const Text("Keyinroq"),
+                        ),
+                    ] else ...[
+                      const SizedBox(height: 8),
+                      NeonPillButton(
+                        onPressed: _saving
+                            ? null
+                            : () async {
+                                setState(() => _saving = true);
+                                final ok = await ref
+                                    .read(biometricLockProvider.notifier)
+                                    .setBiometricEnabled(true);
+                                if (!context.mounted) return;
+                                showSnack(
+                                  context,
+                                  ok ? "Otpechatka ham yoqildi" : "Tasdiqlanmadi, PIN faol qoldi",
+                                  error: !ok,
+                                );
+                                await ref.read(biometricLockProvider.notifier).markSetupCompleted();
+                              },
+                        busy: _saving,
+                        icon: Icons.fingerprint_rounded,
+                        label: "Otpechatkani yoqish",
+                      ),
+                      const SizedBox(height: 10),
+                      TextButton(
+                        onPressed: () => ref.read(biometricLockProvider.notifier).markSetupCompleted(),
+                        child: const Text("Keyinroq"),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

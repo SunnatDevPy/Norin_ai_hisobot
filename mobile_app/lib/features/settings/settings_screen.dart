@@ -138,51 +138,6 @@ class SettingsScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _pinDialog(BuildContext context, WidgetRef ref, BiometricLockState bioLock) async {
-    final pinCtrl = TextEditingController();
-    final action = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("4 xonali PIN-kod"),
-        content: TextField(
-          controller: pinCtrl,
-          keyboardType: TextInputType.number,
-          maxLength: 4,
-          obscureText: true,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: const InputDecoration(
-            labelText: "Yangi 4 xonali PIN",
-            hintText: "••••",
-            counterText: "",
-          ),
-        ),
-        actions: [
-          if (bioLock.hasPin)
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, 'clear'),
-              child: const Text("O'chirish", style: TextStyle(color: NorinPalette.danger)),
-            ),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Bekor")),
-          FilledButton(onPressed: () => Navigator.pop(ctx, 'save'), child: const Text("Saqlash")),
-        ],
-      ),
-    );
-    if (action == 'clear') {
-      await ref.read(biometricLockProvider.notifier).setPinCode(null);
-      if (context.mounted) showSnack(context, "PIN-kod o'chirildi");
-      return;
-    }
-    if (action == 'save') {
-      final p = pinCtrl.text.trim();
-      if (p.length != 4) {
-        if (context.mounted) showSnack(context, "4 ta raqam kiriting", error: true);
-        return;
-      }
-      await ref.read(biometricLockProvider.notifier).setPinCode(p);
-      if (context.mounted) showSnack(context, "PIN-kod saqlandi");
-    }
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider);
@@ -460,7 +415,11 @@ class SettingsScreen extends ConsumerWidget {
                   title: const Text("PIN-kod"),
                   subtitle: Text(bioLock.hasPin ? "O'rnatilgan" : "O'rnatilmagan"),
                   trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => _pinDialog(context, ref, bioLock),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const PinSetupScreen(isEditMode: true)),
+                    );
+                  },
                 ),
                 const Divider(),
                 ListTile(

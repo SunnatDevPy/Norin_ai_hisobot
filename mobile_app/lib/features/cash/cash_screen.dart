@@ -324,8 +324,10 @@ class _CashScreenState extends ConsumerState<CashScreen> {
                         ],
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        formatUzs(expected),
+                      AnimatedCountText(
+                        key: ValueKey('cash_${ref.watch(refreshEpochProvider)}'),
+                        value: expected,
+                        formatter: formatUzs,
                         style: tNumStyle.copyWith(
                           fontSize: 28,
                           fontWeight: FontWeight.w900,
