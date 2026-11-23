@@ -1,35 +1,59 @@
 import 'package:flutter/material.dart';
 
 class NorinPalette {
-  static const emerald = Color(0xFF0D9488);
-  static const emeraldDark = Color(0xFF0F766E);
-  static const emeraldLight = Color(0xFF14B8A6);
+  // Primary Neon Violet / Magenta / Cyan Cosmic Palette
+  static const emerald = Color(0xFFA855F7); // Primary electric violet
+  static const emeraldDark = Color(0xFF7C3AED);
+  static const emeraldLight = Color(0xFFC084FC); // Glowing lavender
+  static const magenta = Color(0xFFE879F9);
+  static const indigo = Color(0xFFD946EF); // Neon magenta accent
+  static const sky = Color(0xFF38BDF8); // Neon cyan
+  static const profit = Color(0xFF22C55E); // Neon mint green
   static const amber = Color(0xFFF59E0B);
-  static const profit = Color(0xFF059669);
-  static const danger = Color(0xFFDC2626);
-  static const indigo = Color(0xFF4F46E5);
-  static const sky = Color(0xFF0284C7);
+  static const danger = Color(0xFFF43F5E);
 
-  static const lightBg = Color(0xFFF3F6FA);
+  // Light Mode Surfaces (clean lavender-alabaster fallback)
+  static const lightBg = Color(0xFFF4F3FA);
   static const lightCard = Color(0xFFFFFFFF);
-  static const lightBorder = Color(0xFFE2E8F0);
-  static const lightMuted = Color(0xFF64748B);
+  static const lightBorder = Color(0xFFE4E0F0);
+  static const lightMuted = Color(0xFF645E7B);
 
-  static const darkBg = Color(0xFF0B1220);
-  static const darkCard = Color(0xFF131D2E);
-  static const darkBorder = Color(0xFF1E293B);
-  static const darkMuted = Color(0xFF94A3B8);
+  // Cosmic Obsidian Dark Mode Surfaces (reference theme)
+  static const darkBg = Color(0xFF09080D);
+  static const darkCard = Color(0xFF13121B);
+  static const darkCardElevated = Color(0xFF1A1826);
+  static const darkBorder = Color(0xFF272338);
+  static const darkBorderGlow = Color(0xFF47376B);
+  static const darkMuted = Color(0xFF8C87A6);
+
+  static const neonPurpleGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFFE9D5FF), Color(0xFFC084FC), Color(0xFF9333EA)],
+  );
+
+  static const neonCyanGradient = LinearGradient(
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+    colors: [Color(0xFF93C5FD), Color(0xFF38BDF8), Color(0xFF6366F1)],
+  );
+
+  static const neonMagentaGradient = LinearGradient(
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+    colors: [Color(0xFFF0ABFC), Color(0xFFC084FC), Color(0xFF9333EA)],
+  );
 
   static const heroGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF0F766E), Color(0xFF0D9488), Color(0xFF047857)],
+    colors: [Color(0xFF23183D), Color(0xFF161324), Color(0xFF121119)],
   );
 
   static const adminGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF312E81), Color(0xFF4F46E5), Color(0xFF0F766E)],
+    colors: [Color(0xFF3A1A6E), Color(0xFF20153B), Color(0xFF121119)],
   );
 }
 
@@ -41,8 +65,8 @@ class AppTheme {
       colorScheme: ColorScheme.fromSeed(
         seedColor: NorinPalette.emerald,
         brightness: Brightness.light,
-        primary: NorinPalette.emerald,
-        secondary: NorinPalette.amber,
+        primary: NorinPalette.emeraldDark,
+        secondary: NorinPalette.sky,
         surface: NorinPalette.lightCard,
         error: NorinPalette.danger,
       ),
@@ -50,8 +74,8 @@ class AppTheme {
     );
     return base.copyWith(
       appBarTheme: const AppBarTheme(
-        backgroundColor: NorinPalette.lightBg,
-        foregroundColor: Color(0xFF0F172A),
+        backgroundColor: Colors.transparent,
+        foregroundColor: Color(0xFF13111C),
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
@@ -61,38 +85,26 @@ class AppTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           side: const BorderSide(color: NorinPalette.lightBorder, width: 1),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFFF8FAFC),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        fillColor: const Color(0xFFF9F8FE),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: NorinPalette.lightBorder),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: NorinPalette.lightBorder),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: NorinPalette.emerald, width: 1.6),
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: NorinPalette.emeraldDark, width: 1.6),
         ),
-      ),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: NorinPalette.lightCard,
-        indicatorColor: NorinPalette.emerald.withValues(alpha: 0.14),
-        elevation: 8,
-        height: 68,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-      ),
-      floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: NorinPalette.emerald,
-        foregroundColor: Colors.white,
-        elevation: 3,
       ),
       dividerTheme: const DividerThemeData(
         color: NorinPalette.lightBorder,
@@ -107,60 +119,92 @@ class AppTheme {
       useMaterial3: true,
       brightness: Brightness.dark,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: NorinPalette.emeraldLight,
+        seedColor: NorinPalette.emerald,
         brightness: Brightness.dark,
         primary: NorinPalette.emeraldLight,
-        secondary: NorinPalette.amber,
+        onPrimary: const Color(0xFF130826),
+        secondary: NorinPalette.sky,
         surface: NorinPalette.darkCard,
-        error: const Color(0xFFF87171),
+        onSurface: const Color(0xFFF5F3FF),
+        onSurfaceVariant: NorinPalette.darkMuted,
+        error: NorinPalette.danger,
       ),
       scaffoldBackgroundColor: NorinPalette.darkBg,
     );
     return base.copyWith(
       appBarTheme: const AppBarTheme(
-        backgroundColor: NorinPalette.darkBg,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
+        foregroundColor: Color(0xFFF8F7FF),
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: const Color(0xFF151320),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: const BorderSide(color: NorinPalette.darkBorderGlow, width: 1),
+        ),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: Color(0xFF13121C),
+        modalBackgroundColor: Color(0xFF13121C),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+        ),
       ),
       cardTheme: CardThemeData(
         color: NorinPalette.darkCard,
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           side: const BorderSide(color: NorinPalette.darkBorder, width: 1),
         ),
       ),
+      chipTheme: base.chipTheme.copyWith(
+        backgroundColor: NorinPalette.darkCardElevated,
+        selectedColor: NorinPalette.emerald.withValues(alpha: 0.24),
+        side: const BorderSide(color: NorinPalette.darkBorder),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFF0F172A),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        fillColor: const Color(0xFF151320),
+        hintStyle: const TextStyle(color: NorinPalette.darkMuted),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: NorinPalette.darkBorder),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: NorinPalette.darkBorder),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: NorinPalette.emeraldLight, width: 1.6),
         ),
       ),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: NorinPalette.darkCard,
-        indicatorColor: NorinPalette.emeraldLight.withValues(alpha: 0.2),
-        elevation: 8,
-        height: 68,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: NorinPalette.emerald,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFFEDE9FE),
+          side: const BorderSide(color: NorinPalette.darkBorderGlow),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
       ),
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: NorinPalette.emeraldLight,
-        foregroundColor: Color(0xFF06201D),
-        elevation: 3,
+        backgroundColor: NorinPalette.emerald,
+        foregroundColor: Colors.white,
+        elevation: 6,
       ),
       dividerTheme: const DividerThemeData(
         color: NorinPalette.darkBorder,

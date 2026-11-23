@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/state/providers.dart';
 import 'core/theme/app_theme.dart';
+import 'core/widgets/metric_cards.dart';
 import 'features/auth/login_screen.dart';
 import 'features/shell/main_shell.dart';
 
@@ -51,30 +52,29 @@ class _SplashView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: NorinPalette.heroGradient,
-                borderRadius: BorderRadius.circular(24),
+      body: CosmicBackground(
+        showBottomHorizonGlow: true,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const GlowingSquircleEmblem(size: 98),
+              const SizedBox(height: 12),
+              const Text(
+                "Norin AI Hisobot",
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.3),
               ),
-              child: const Icon(Icons.analytics_rounded, size: 42, color: Colors.white),
-            ),
-            const SizedBox(height: 18),
-            const Text(
-              "Norin AI Hisobot",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 14),
-            const SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(strokeWidth: 2.8),
-            ),
-          ],
+              const SizedBox(height: 16),
+              SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.6,
+                  color: NorinPalette.emeraldLight,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

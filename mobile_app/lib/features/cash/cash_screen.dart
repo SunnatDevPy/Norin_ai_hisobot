@@ -238,6 +238,7 @@ class _CashScreenState extends ConsumerState<CashScreen> {
     final todayAsync = ref.watch(todayProvider);
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text("Kassa & Smena", style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
@@ -281,14 +282,13 @@ class _CashScreenState extends ConsumerState<CashScreen> {
             final isClosed = asStr(session['status']) == 'closed';
 
             return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
               children: [
-                Container(
+                SpotlightHeroCard(
                   padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    gradient: NorinPalette.heroGradient,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
+                  borderRadius: 20,
+                  glowColor: NorinPalette.sky,
+                  accentColor: NorinPalette.emeraldLight,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

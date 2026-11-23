@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
@@ -35,6 +37,436 @@ List<Map<String, dynamic>> asMapList(dynamic v) {
   return <Map<String, dynamic>>[];
 }
 
+class CosmicBackground extends StatelessWidget {
+  const CosmicBackground({
+    super.key,
+    required this.child,
+    this.showBottomHorizonGlow = false,
+  });
+
+  final Widget child;
+  final bool showBottomHorizonGlow;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (!isDark) {
+      return Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topRight,
+            end: Alignment.bottomLeft,
+            colors: [Color(0xFFECE7FE), Color(0xFFF5F4FB), Color(0xFFF8FAFC)],
+          ),
+        ),
+        child: child,
+      );
+    }
+
+    return Container(
+      color: NorinPalette.darkBg,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            top: -120,
+            right: -80,
+            child: IgnorePointer(
+              child: Container(
+                width: 340,
+                height: 340,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      NorinPalette.emerald.withValues(alpha: 0.24),
+                      NorinPalette.indigo.withValues(alpha: 0.08),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 90,
+            left: -130,
+            child: IgnorePointer(
+              child: Container(
+                width: 280,
+                height: 280,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      NorinPalette.sky.withValues(alpha: 0.10),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (showBottomHorizonGlow)
+            Positioned(
+              left: -40,
+              right: -40,
+              bottom: -140,
+              child: IgnorePointer(
+                child: Container(
+                  height: 210,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    gradient: RadialGradient(
+                      center: Alignment.topCenter,
+                      radius: 0.9,
+                      colors: [
+                        NorinPalette.indigo.withValues(alpha: 0.42),
+                        NorinPalette.emeraldDark.withValues(alpha: 0.16),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class SpotlightHeroCard extends StatelessWidget {
+  const SpotlightHeroCard({
+    super.key,
+    required this.child,
+    this.glowColor = NorinPalette.emeraldLight,
+    this.accentColor = NorinPalette.indigo,
+    this.padding = const EdgeInsets.all(20),
+    this.borderRadius = 22,
+  });
+
+  final Widget child;
+  final Color glowColor;
+  final Color accentColor;
+  final EdgeInsetsGeometry padding;
+  final double borderRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (!isDark) {
+      return Container(
+        padding: padding,
+        decoration: BoxDecoration(
+          gradient: NorinPalette.heroGradient,
+          borderRadius: BorderRadius.circular(borderRadius),
+          boxShadow: [
+            BoxShadow(
+              color: NorinPalette.emeraldDark.withValues(alpha: 0.28),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: DefaultTextStyle.merge(
+          style: const TextStyle(color: Colors.white),
+          child: child,
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(borderRadius),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF14121E),
+          borderRadius: BorderRadius.circular(borderRadius),
+          border: Border.all(color: glowColor.withValues(alpha: 0.34), width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: glowColor.withValues(alpha: 0.16),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: const Alignment(0, -1.15),
+                      radius: 1.25,
+                      colors: [
+                        glowColor.withValues(alpha: 0.28),
+                        accentColor.withValues(alpha: 0.10),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 0,
+              left: 34,
+              right: 34,
+              child: Container(
+                height: 2.5,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.transparent,
+                      glowColor,
+                      accentColor,
+                      Colors.transparent,
+                    ],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: glowColor.withValues(alpha: 0.8),
+                      blurRadius: 12,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(padding: padding, child: child),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class GlowingSquircleEmblem extends StatelessWidget {
+  const GlowingSquircleEmblem({super.key, this.size = 112});
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size * 1.9,
+      height: size * 1.65,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: size * 1.75,
+            height: size * 1.55,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  NorinPalette.indigo.withValues(alpha: 0.48),
+                  NorinPalette.emerald.withValues(alpha: 0.22),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+          // Vertical subtle cosmic light beam
+          Container(
+            width: 3,
+            height: size * 1.55,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  NorinPalette.magenta.withValues(alpha: 0.65),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+          // Orbital hairline ring
+          Transform.rotate(
+            angle: -0.25,
+            child: Container(
+              width: size * 1.38,
+              height: size * 0.72,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.16),
+                  width: 1,
+                ),
+              ),
+            ),
+          ),
+          // Tilted 3D glass squircle
+          Transform.rotate(
+            angle: -0.16,
+            child: Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(size * 0.28),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF4C1D95),
+                    Color(0xFF211138),
+                    Color(0xFF100C1C),
+                  ],
+                ),
+                border: Border.all(
+                  color: NorinPalette.magenta.withValues(alpha: 0.75),
+                  width: 2.0,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: NorinPalette.indigo.withValues(alpha: 0.55),
+                    blurRadius: 28,
+                    spreadRadius: 1,
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.65),
+                    blurRadius: 16,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Container(
+                margin: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(size * 0.22),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFF1A1230), Color(0xFF0A0812)],
+                  ),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    width: 1,
+                  ),
+                ),
+                child: CustomPaint(
+                  painter: _SunburstEmblemPainter(),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SunburstEmblemPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final outerR = size.width * 0.34;
+    final innerR = size.width * 0.15;
+    const rays = 11;
+
+    final glowPaint = Paint()
+      ..color = NorinPalette.magenta.withValues(alpha: 0.45)
+      ..strokeWidth = size.width * 0.11
+      ..strokeCap = StrokeCap.round
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+
+    final paint = Paint()
+      ..shader = const RadialGradient(
+        colors: [Color(0xFFFFFFFF), Color(0xFFF5D0FE), Color(0xFFE879F9)],
+      ).createShader(Rect.fromCircle(center: center, radius: outerR))
+      ..strokeWidth = size.width * 0.085
+      ..strokeCap = StrokeCap.round;
+
+    for (int i = 0; i < rays; i++) {
+      final a = (i / rays) * math.pi * 2 - math.pi / 2;
+      final p1 = Offset(center.dx + math.cos(a) * innerR, center.dy + math.sin(a) * innerR);
+      final p2 = Offset(center.dx + math.cos(a) * outerR, center.dy + math.sin(a) * outerR);
+      canvas.drawLine(p1, p2, glowPaint);
+      canvas.drawLine(p1, p2, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class NeonPillButton extends StatelessWidget {
+  const NeonPillButton({
+    super.key,
+    required this.onPressed,
+    required this.label,
+    this.icon,
+    this.busy = false,
+  });
+
+  final VoidCallback? onPressed;
+  final String label;
+  final IconData? icon;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null && !busy;
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.65,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          gradient: NorinPalette.neonPurpleGradient,
+          boxShadow: [
+            BoxShadow(
+              color: NorinPalette.emerald.withValues(alpha: 0.55),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: enabled ? onPressed : null,
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 15),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (busy)
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        color: Colors.white,
+                      ),
+                    )
+                  else if (icon != null)
+                    Icon(icon, size: 19, color: const Color(0xFF1A0B2E)),
+                  if (busy || icon != null) const SizedBox(width: 8),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: Color(0xFF1A0B2E),
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class KpiCardTile extends StatelessWidget {
   const KpiCardTile({
     super.key,
@@ -44,6 +476,7 @@ class KpiCardTile extends StatelessWidget {
     required this.color,
     this.subtitle,
     this.onTap,
+    this.highlight = false,
   });
 
   final String title;
@@ -52,66 +485,128 @@ class KpiCardTile extends StatelessWidget {
   final IconData icon;
   final Color color;
   final VoidCallback? onTap;
+  final bool highlight;
 
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final useSpotlight = highlight || color == NorinPalette.emerald;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Material(
+        color: isDark
+            ? (useSpotlight ? const Color(0xFF171324) : NorinPalette.darkCard)
+            : NorinPalette.lightCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(
+            color: useSpotlight
+                ? color.withValues(alpha: isDark ? 0.5 : 0.35)
+                : (isDark ? NorinPalette.darkBorder : NorinPalette.lightBorder),
+            width: 1,
+          ),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          child: Stack(
             children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
+              if (useSpotlight && isDark)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: RadialGradient(
+                          center: const Alignment(0, -1.1),
+                          radius: 1.2,
+                          colors: [
+                            color.withValues(alpha: 0.25),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              if (useSpotlight)
+                Positioned(
+                  top: 0,
+                  left: 24,
+                  right: 24,
+                  child: Container(
+                    height: 2.2,
                     decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    child: Icon(icon, size: 18, color: color),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: tt.labelMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
+                      borderRadius: BorderRadius.circular(999),
+                      gradient: LinearGradient(
+                        colors: [Colors.transparent, color, Colors.transparent],
                       ),
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  value,
-                  style: tt.titleMedium?.merge(tNumStyle).copyWith(
-                        fontWeight: FontWeight.w800,
+                ),
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(color: color.withValues(alpha: 0.7), blurRadius: 6),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: Text(
+                            title.toUpperCase(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: tt.labelSmall?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.4,
+                              fontSize: 10.5,
+                            ),
+                          ),
+                        ),
+                        Icon(icon, size: 16, color: color.withValues(alpha: 0.85)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        value,
+                        style: tt.titleLarge?.merge(tNumStyle).copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.3,
+                            ),
                       ),
+                    ),
+                    if (subtitle != null && subtitle!.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-              if (subtitle != null && subtitle!.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  subtitle!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: tt.labelSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
             ],
           ),
         ),
@@ -146,7 +641,7 @@ class EmptyStateCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: cs.primary.withValues(alpha: 0.1),
+                color: cs.primary.withValues(alpha: 0.14),
                 shape: BoxShape.circle,
               ),
               child: Icon(icon, size: 32, color: cs.primary),
@@ -219,9 +714,9 @@ Future<void> showExcelActionPicker(
             Text(filename, style: Theme.of(ctx).textTheme.bodySmall),
             const SizedBox(height: 16),
             ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: Color(0x1A0D9488),
-                child: Icon(Icons.open_in_new_rounded, color: NorinPalette.emerald),
+              leading: CircleAvatar(
+                backgroundColor: NorinPalette.emerald.withValues(alpha: 0.16),
+                child: const Icon(Icons.open_in_new_rounded, color: NorinPalette.emeraldLight),
               ),
               title: const Text("Telefonda ochish"),
               subtitle: const Text("Excel dasturida ko'rish"),
@@ -233,9 +728,9 @@ Future<void> showExcelActionPicker(
             ),
             const SizedBox(height: 8),
             ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: Color(0x1A0284C7),
-                child: Icon(Icons.share_rounded, color: NorinPalette.sky),
+              leading: CircleAvatar(
+                backgroundColor: NorinPalette.sky.withValues(alpha: 0.16),
+                child: const Icon(Icons.share_rounded, color: NorinPalette.sky),
               ),
               title: const Text("Ulashish (Telegram / WhatsApp)"),
               subtitle: const Text("Faylni yuborish yoki saqlash"),

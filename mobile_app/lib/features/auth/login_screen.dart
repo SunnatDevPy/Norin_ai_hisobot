@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/api_client.dart';
 import '../../core/state/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/version.dart';
+import '../../core/widgets/metric_cards.dart';
 import '../../core/widgets/norin_widgets.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -112,121 +114,75 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 460),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      gradient: NorinPalette.heroGradient,
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(
-                          color: NorinPalette.emerald.withValues(alpha: 0.25),
-                          blurRadius: 24,
-                          offset: const Offset(0, 10),
-                        ),
-                      ],
+      body: CosmicBackground(
+        showBottomHorizonGlow: true,
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Center(child: GlowingSquircleEmblem(size: 108)),
+                    const SizedBox(height: 6),
+                    Text(
+                      "Norin AI Hisobot",
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5,
+                      ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.16),
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: const Icon(
-                                Icons.analytics_rounded,
-                                color: Colors.white,
-                                size: 30,
-                              ),
-                            ),
-                            const Spacer(),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.16),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.verified_user_rounded, size: 14, color: Colors.white),
-                                  SizedBox(width: 5),
-                                  Text(
-                                    "SaaS V1",
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-                        const Text(
-                          "Norin AI Hisobot",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 26,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.4,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          "Savdo, kassa, mijozlar qarzdorligi, AI chek tahlili va filiallar boshqaruvi.",
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.9),
-                            fontSize: 13.5,
-                            height: 1.4,
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 6),
+                    Text(
+                      _codeSent
+                          ? "Telegram botga kelgan 6 xonali kodni kiriting"
+                          : "Savdo, kassa, AI chek va SaaS boshqaruvi • v$kAppVersion",
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  Card(
-                    child: Padding(
+                    const SizedBox(height: 24),
+                    SpotlightHeroCard(
                       padding: const EdgeInsets.all(20),
+                      glowColor: NorinPalette.emeraldLight,
+                      accentColor: NorinPalette.indigo,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Text(
-                            _codeSent ? "Tasdiqlash kodini kiriting" : "Tizimga kirish",
-                            style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                          Row(
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: NorinPalette.magenta,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                _codeSent ? "Tasdiqlash kodini kiriting" : "Tizimga kirish",
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: isDark ? Colors.white : Colors.white,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _codeSent
-                                ? "Telegram botga yuborilgan 6 xonali kodni kiriting (5 daqiqa amal qiladi)."
-                                : "Telegram ID raqamingizni kiriting. Super Admin uchun tasdiqlash kodi bot orqali keladi.",
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                              height: 1.4,
-                            ),
-                          ),
-                          const SizedBox(height: 18),
+                          const SizedBox(height: 16),
                           TextField(
                             controller: _tgCtrl,
                             enabled: !_busy && !_codeSent,
                             keyboardType: TextInputType.number,
                             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                            style: isDark ? null : const TextStyle(color: Color(0xFF13111C)),
                             decoration: const InputDecoration(
                               labelText: "Telegram ID",
                               hintText: "Masalan: 5649321700",
@@ -243,7 +199,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               style: const TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.w800,
-                                letterSpacing: 6,
+                                letterSpacing: 7,
                               ),
                               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               decoration: const InputDecoration(
@@ -256,25 +212,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                           ],
                           const SizedBox(height: 18),
-                          FilledButton.icon(
+                          NeonPillButton(
                             onPressed: _busy ? null : (_codeSent ? _verifyCode : _requestCode),
-                            icon: _busy
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2.2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : Icon(_codeSent ? Icons.login_rounded : Icons.send_rounded),
-                            label: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              child: Text(
-                                _codeSent ? "Kirish" : "Kod olish",
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                              ),
-                            ),
+                            busy: _busy,
+                            icon: _codeSent ? Icons.login_rounded : Icons.auto_awesome_rounded,
+                            label: _codeSent ? "Kirish" : "Kod olish",
                           ),
                           if (_codeSent) ...[
                             const SizedBox(height: 10),
@@ -288,14 +230,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                             _codeSent = false;
                                             _otpCtrl.clear();
                                           }),
-                                  icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                                  icon: const Icon(Icons.arrow_back_rounded, size: 17),
                                   label: const Text("ID ni o'zgartirish"),
                                 ),
                                 TextButton(
                                   onPressed: (_busy || _resendSeconds > 0) ? null : _requestCode,
                                   child: Text(
                                     _resendSeconds > 0
-                                        ? "Qayta yuborish ($_resendSeconds s)"
+                                        ? "Qayta ($_resendSeconds s)"
                                         : "Qayta kod olish",
                                   ),
                                 ),
@@ -305,80 +247,89 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ],
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  Card(
-                    child: Column(
-                      children: [
-                        ListTile(
-                          leading: const Icon(Icons.dns_outlined),
-                          title: const Text(
-                            "Server manzili",
-                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                          ),
-                          subtitle: Text(
-                            _urlCtrl.text,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          trailing: Icon(
-                            _showServerSettings ? Icons.expand_less : Icons.expand_more,
-                          ),
-                          onTap: () => setState(() => _showServerSettings = !_showServerSettings),
-                        ),
-                        if (_showServerSettings)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                TextField(
-                                  controller: _urlCtrl,
-                                  keyboardType: TextInputType.url,
-                                  decoration: const InputDecoration(
-                                    labelText: "API Base URL",
-                                    hintText: "https://minishop.okaposai.uz/api/v1",
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton(
-                                        onPressed: () async {
-                                          _urlCtrl.text = ApiConfig.defaultBaseUrl;
-                                          await ref
-                                              .read(apiClientProvider)
-                                              .setBaseUrl(ApiConfig.defaultBaseUrl);
-                                          if (context.mounted) {
-                                            showSnack(context, "Standart server tiklandi");
-                                          }
-                                        },
-                                        child: const Text("Standart"),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: FilledButton.tonal(
-                                        onPressed: () async {
-                                          await _applyServerUrlIfEdited();
-                                          if (context.mounted) {
-                                            showSnack(context, "Server manzili saqlandi");
-                                          }
-                                        },
-                                        child: const Text("Saqlash"),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                    const SizedBox(height: 14),
+                    Card(
+                      child: Column(
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.dns_outlined, color: NorinPalette.emeraldLight),
+                            title: const Text(
+                              "Server manzili",
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
                             ),
+                            subtitle: Text(
+                              _urlCtrl.text,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11.5),
+                            ),
+                            trailing: Icon(
+                              _showServerSettings ? Icons.expand_less : Icons.expand_more,
+                            ),
+                            onTap: () => setState(() => _showServerSettings = !_showServerSettings),
                           ),
-                      ],
+                          if (_showServerSettings)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  TextField(
+                                    controller: _urlCtrl,
+                                    keyboardType: TextInputType.url,
+                                    decoration: const InputDecoration(
+                                      labelText: "API Base URL",
+                                      hintText: "https://minishop.okaposai.uz/api/v1",
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          onPressed: () async {
+                                            _urlCtrl.text = ApiConfig.defaultBaseUrl;
+                                            await ref
+                                                .read(apiClientProvider)
+                                                .setBaseUrl(ApiConfig.defaultBaseUrl);
+                                            if (context.mounted) {
+                                              showSnack(context, "Standart server tiklandi");
+                                            }
+                                          },
+                                          child: const Text("Standart"),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: FilledButton.tonal(
+                                          onPressed: () async {
+                                            await _applyServerUrlIfEdited();
+                                            if (context.mounted) {
+                                              showSnack(context, "Server manzili saqlandi");
+                                            }
+                                          },
+                                          child: const Text("Saqlash"),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 14),
+                    Text(
+                      "Telegram @norin_ai_hisobot botidagi /apk orqali ham kirish kodini olishingiz mumkin.",
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontSize: 11.5,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

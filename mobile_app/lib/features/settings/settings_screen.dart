@@ -139,6 +139,7 @@ class SettingsScreen extends ConsumerWidget {
     final api = ref.read(apiClientProvider);
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text("Sozlamalar & Katalog", style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
@@ -153,7 +154,7 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
         children: [
           settingsAsync.when(
             loading: () => const Card(
@@ -177,12 +178,11 @@ class SettingsScreen extends ConsumerWidget {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Container(
+                  SpotlightHeroCard(
                     padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      gradient: NorinPalette.heroGradient,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
+                    borderRadius: 20,
+                    glowColor: NorinPalette.emeraldLight,
+                    accentColor: NorinPalette.indigo,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [

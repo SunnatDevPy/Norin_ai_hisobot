@@ -25,19 +25,19 @@ class DashboardScreen extends ConsumerWidget {
   ];
 
   static const _chartPeriods = <(String, String)>[
-    ('7', '7 kun'),
-    ('30', '30 kun'),
-    ('60', '60 kun'),
-    ('90', '90 kun'),
+    ('7', '7k'),
+    ('30', '30k'),
+    ('60', '60k'),
+    ('90', '90k'),
   ];
 
   static const _pieColors = <Color>[
-    NorinPalette.emerald,
+    NorinPalette.emeraldLight,
     NorinPalette.sky,
+    NorinPalette.magenta,
     NorinPalette.amber,
+    NorinPalette.profit,
     NorinPalette.indigo,
-    Color(0xFFEC4899),
-    Color(0xFF8B5CF6),
     NorinPalette.danger,
   ];
 
@@ -51,6 +51,7 @@ class DashboardScreen extends ConsumerWidget {
     final todayAsync = ref.watch(todayProvider);
     final tenantsAsync = auth.isSuperAdmin ? ref.watch(adminTenantsProvider) : null;
     final themeMode = ref.watch(themeModeProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     String activeTenantName = "Filial #${auth.selectedTenantId}";
     final tenantsList = tenantsAsync?.valueOrNull ?? <Map<String, dynamic>>[];
@@ -62,25 +63,38 @@ class DashboardScreen extends ConsumerWidget {
     }
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
+        titleSpacing: 16,
         title: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(7),
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
+                shape: BoxShape.circle,
                 gradient: NorinPalette.heroGradient,
-                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: NorinPalette.magenta.withValues(alpha: 0.6),
+                  width: 1.4,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: NorinPalette.emerald.withValues(alpha: 0.35),
+                    blurRadius: 12,
+                  ),
+                ],
               ),
-              child: const Icon(Icons.analytics_rounded, size: 18, color: Colors.white),
+              child: const Icon(Icons.auto_awesome_rounded, size: 19, color: Colors.white),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 11),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    "Norin AI",
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                    "Salom, Norin AI!",
+                    style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
                   ),
                   Text(
                     activeTenantName,
@@ -88,7 +102,7 @@ class DashboardScreen extends ConsumerWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 11.5,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      color: isDark ? NorinPalette.emeraldLight : NorinPalette.emeraldDark,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -99,26 +113,28 @@ class DashboardScreen extends ConsumerWidget {
         ),
         actions: [
           if (auth.isSuperAdmin)
-            IconButton(
+            _GlassCircleAction(
               tooltip: "Filialni almashtirish",
-              icon: const Icon(Icons.store_mall_directory_outlined),
-              onPressed: () => _showTenantSwitcher(context, ref, tenantsList, auth.selectedTenantId),
+              icon: Icons.store_mall_directory_outlined,
+              onPressed: () =>
+                  _showTenantSwitcher(context, ref, tenantsList, auth.selectedTenantId),
             ),
-          IconButton(
+          const SizedBox(width: 6),
+          _GlassCircleAction(
             tooltip: "Mavzu (Kun/Tun)",
-            icon: Icon(
-              themeMode == ThemeMode.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-            ),
+            icon: themeMode == ThemeMode.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
             onPressed: () {
               final next = themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
               ref.read(themeModeProvider.notifier).state = next;
             },
           ),
-          IconButton(
+          const SizedBox(width: 6),
+          _GlassCircleAction(
             tooltip: "Yangilash",
-            icon: const Icon(Icons.refresh_rounded),
+            icon: Icons.refresh_rounded,
             onPressed: () => invalidateOperationalData(ref),
           ),
+          const SizedBox(width: 12),
         ],
       ),
       body: RefreshIndicator(
@@ -130,24 +146,92 @@ class DashboardScreen extends ConsumerWidget {
           ]);
         },
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 120),
           children: [
-            SizedBox(
-              height: 40,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _periods.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (ctx, i) {
-                  final (key, label) = _periods[i];
-                  final selected = key == period;
-                  return ChoiceChip(
-                    label: Text(label),
-                    selected: selected,
-                    onSelected: (_) => ref.read(selectedPeriodProvider.notifier).state = key,
-                  );
-                },
-              ),
+            // Date / Period pills + quick Excel button (reference top toolbar style)
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 36,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _periods.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 7),
+                      itemBuilder: (ctx, i) {
+                        final (key, label) = _periods[i];
+                        final selected = key == period;
+                        return InkWell(
+                          onTap: () => ref.read(selectedPeriodProvider.notifier).state = key,
+                          borderRadius: BorderRadius.circular(12),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 160),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              color: selected
+                                  ? NorinPalette.emerald.withValues(alpha: isDark ? 0.24 : 0.14)
+                                  : (isDark ? NorinPalette.darkCard : NorinPalette.lightCard),
+                              border: Border.all(
+                                color: selected
+                                    ? NorinPalette.emeraldLight
+                                    : (isDark
+                                        ? NorinPalette.darkBorder
+                                        : NorinPalette.lightBorder),
+                              ),
+                            ),
+                            child: Text(
+                              label,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                                color: selected
+                                    ? (isDark ? Colors.white : NorinPalette.emeraldDark)
+                                    : Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () {
+                    final p = period == 'today' ? '30' : period;
+                    showExcelActionPicker(
+                      context,
+                      ref.read(apiClientProvider),
+                      title: "Davriy hisobot Excel",
+                      path: '/export/period',
+                      query: {'period': p},
+                      filename: 'Norin_Davriy_$p.xlsx',
+                    );
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    height: 36,
+                    padding: const EdgeInsets.symmetric(horizontal: 11),
+                    decoration: BoxDecoration(
+                      color: isDark ? NorinPalette.darkCard : NorinPalette.lightCard,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isDark ? NorinPalette.darkBorder : NorinPalette.lightBorder,
+                      ),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.file_download_outlined, size: 16, color: NorinPalette.emeraldLight),
+                        SizedBox(width: 5),
+                        Text("Eksport", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 14),
             summaryAsync.when(
@@ -183,52 +267,62 @@ class DashboardScreen extends ConsumerWidget {
                     asDouble(collected['card']) +
                     asDouble(collected['transfer']);
 
+                final dailySeries = asMapList(chartsAsync.valueOrNull?['daily_series']);
+
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     if (stale != null && stale.isNotEmpty) ...[
-                      Card(
-                        color: NorinPalette.amber.withValues(alpha: 0.14),
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.warning_amber_rounded, color: NorinPalette.amber),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  "Ochiq eski smena bor: ${asStr(stale['report_date'])}",
-                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                                ),
+                      SpotlightHeroCard(
+                        padding: const EdgeInsets.all(14),
+                        glowColor: NorinPalette.amber,
+                        accentColor: NorinPalette.danger,
+                        child: Row(
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, color: NorinPalette.amber),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                "Ochiq eski smena bor: ${asStr(stale['report_date'])}",
+                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                               ),
-                              FilledButton.tonal(
-                                onPressed: () => openCloseDayDialog(
-                                  context,
-                                  ref,
-                                  sessionId: asInt(stale['id']),
-                                  reportDate: asStr(stale['report_date']),
-                                ),
-                                child: const Text("Yopish"),
+                            ),
+                            FilledButton.tonal(
+                              onPressed: () => openCloseDayDialog(
+                                context,
+                                ref,
+                                sessionId: asInt(stale['id']),
+                                reportDate: asStr(stale['report_date']),
                               ),
-                            ],
-                          ),
+                              child: const Text("Yopish"),
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 12),
                     ],
-                    _ProfitHeroCard(
-                      profit: profit,
-                      margin: margin,
+                    // 1. "Earnings Distribution" style glowing capsule card
+                    _EarningsDistributionCard(
                       revenue: revenue,
+                      profit: profit,
                       cost: cost,
+                      expenses: expenses,
                       returnsAmount: returnsAmount,
-                      totalKg: totalKg,
                       salesCount: salesCount,
+                      totalKg: totalKg,
                       dateRange: periodInfo['start'] != null
                           ? "${asStr(periodInfo['start'])} — ${asStr(periodInfo['end'])}"
                           : null,
                     ),
                     const SizedBox(height: 12),
+                    // 2. "Profit Margin" + purple spline sparkline card
+                    _ProfitMarginSparkCard(
+                      margin: margin,
+                      profit: profit,
+                      daily: dailySeries,
+                    ),
+                    const SizedBox(height: 12),
+                    // 3. 2x2 Spotlight KPI Grid
                     GridView.count(
                       crossAxisCount: 2,
                       shrinkWrap: true,
@@ -238,20 +332,21 @@ class DashboardScreen extends ConsumerWidget {
                       childAspectRatio: 1.52,
                       children: [
                         KpiCardTile(
+                          title: cash.isNotEmpty ? "Kassa qoldig'i" : "Yig'ilgan pul",
+                          value: formatCompactUzs(cash.isNotEmpty ? cashBalance : collectedTotal),
+                          subtitle: formatUzs(cash.isNotEmpty ? cashBalance : collectedTotal),
+                          icon: Icons.savings_outlined,
+                          color: NorinPalette.emeraldLight,
+                          highlight: true,
+                          onTap: () => ref.read(shellTabIndexProvider.notifier).state = 2,
+                        ),
+                        KpiCardTile(
                           title: "Mijozlar qarzi",
                           value: formatCompactUzs(totalDebt),
                           subtitle: formatUzs(totalDebt),
                           icon: Icons.account_balance_outlined,
                           color: totalDebt > 0 ? NorinPalette.danger : NorinPalette.profit,
                           onTap: () => ref.read(shellTabIndexProvider.notifier).state = 1,
-                        ),
-                        KpiCardTile(
-                          title: cash.isNotEmpty ? "Kassa qoldig'i" : "Yig'ilgan pul",
-                          value: formatCompactUzs(cash.isNotEmpty ? cashBalance : collectedTotal),
-                          subtitle: formatUzs(cash.isNotEmpty ? cashBalance : collectedTotal),
-                          icon: Icons.savings_outlined,
-                          color: NorinPalette.emerald,
-                          onTap: () => ref.read(shellTabIndexProvider.notifier).state = 2,
                         ),
                         KpiCardTile(
                           title: "Yig'im (Naqd/Karta)",
@@ -283,33 +378,8 @@ class DashboardScreen extends ConsumerWidget {
                 );
               },
             ),
-            const SizedBox(height: 18),
-            SectionHeader(
-              title: "Dinamika & Tahlil",
-              trailing: SizedBox(
-                height: 32,
-                child: SegmentedButton<String>(
-                  showSelectedIcon: false,
-                  style: ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    textStyle: WidgetStatePropertyAll(
-                      Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  segments: _chartPeriods
-                      .map((p) => ButtonSegment<String>(value: p.$1, label: Text(p.$2)))
-                      .toList(),
-                  selected: {chartPeriod},
-                  onSelectionChanged: (s) {
-                    if (s.isNotEmpty) {
-                      ref.read(chartPeriodProvider.notifier).state = s.first;
-                    }
-                  },
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 16),
+            // 4. "Cash Flow Trends" grouped glowing vertical bar chart + chartsAsync
             chartsAsync.when(
               loading: () => const Card(
                 child: Padding(
@@ -328,7 +398,12 @@ class DashboardScreen extends ConsumerWidget {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _RevenueProfitLineChart(daily: daily),
+                    _CashFlowBarTrendsCard(
+                      daily: daily,
+                      chartPeriod: chartPeriod,
+                      periods: _chartPeriods,
+                      onSelectPeriod: (p) => ref.read(chartPeriodProvider.notifier).state = p,
+                    ),
                     const SizedBox(height: 12),
                     _ExpensePieCard(expenses: expList, colors: _pieColors),
                     const SizedBox(height: 16),
@@ -358,7 +433,7 @@ class DashboardScreen extends ConsumerWidget {
                 );
               },
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 16),
             const SectionHeader(title: "Excel Hisobotlar"),
             const SizedBox(height: 8),
             Row(
@@ -507,7 +582,9 @@ class DashboardScreen extends ConsumerWidget {
                     subtitle: Text(
                       "${asStr(t['plan_name'], 'Standard')} • ${asStr(t['status'])}",
                     ),
-                    trailing: selected ? const Icon(Icons.check_circle_rounded, color: NorinPalette.emerald) : null,
+                    trailing: selected
+                        ? const Icon(Icons.check_circle_rounded, color: NorinPalette.emeraldLight)
+                        : null,
                     onTap: () async {
                       Navigator.pop(ctx);
                       await ref.read(authProvider.notifier).selectTenant(tid);
@@ -527,109 +604,167 @@ class DashboardScreen extends ConsumerWidget {
   }
 }
 
-class _ProfitHeroCard extends StatelessWidget {
-  const _ProfitHeroCard({
-    required this.profit,
-    required this.margin,
+class _GlassCircleAction extends StatelessWidget {
+  const _GlassCircleAction({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isDark ? NorinPalette.darkCardElevated : NorinPalette.lightCard,
+            border: Border.all(
+              color: isDark ? NorinPalette.darkBorder : NorinPalette.lightBorder,
+            ),
+          ),
+          child: Icon(icon, size: 19),
+        ),
+      ),
+    );
+  }
+}
+
+class _EarningsDistributionCard extends StatelessWidget {
+  const _EarningsDistributionCard({
     required this.revenue,
+    required this.profit,
     required this.cost,
+    required this.expenses,
     required this.returnsAmount,
-    required this.totalKg,
     required this.salesCount,
+    required this.totalKg,
     this.dateRange,
   });
 
-  final double profit;
-  final double margin;
   final double revenue;
+  final double profit;
   final double cost;
+  final double expenses;
   final double returnsAmount;
-  final double totalKg;
   final int salesCount;
+  final double totalKg;
   final String? dateRange;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: NorinPalette.heroGradient,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: [
-          BoxShadow(
-            color: NorinPalette.emerald.withValues(alpha: 0.24),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
+    final totalCostAndExp = math.max(0.0, cost + expenses);
+    final posProfit = math.max(0.0, profit);
+    final posRev = math.max(0.0, revenue);
+    final sum = math.max(1.0, posRev + posProfit + totalCostAndExp);
+
+    int flexOf(double v) => math.max(18, ((v / sum) * 100).round());
+
+    return SpotlightHeroCard(
+      padding: const EdgeInsets.all(18),
+      glowColor: NorinPalette.emeraldLight,
+      accentColor: NorinPalette.sky,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Text(
-                "SOF FOYDA",
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
+              const Expanded(
+                child: Text(
+                  "Daromad taqsimoti",
+                  style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800),
                 ),
               ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  "${margin.toStringAsFixed(1)}% marja",
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                  ),
+              Text(
+                "$salesCount sotuv • ${formatKg(totalKg)}",
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              formatUzs(profit),
-              style: tNumStyle.copyWith(
-                color: Colors.white,
-                fontSize: 30,
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.5,
+          if (dateRange != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              dateRange!,
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
-          ),
-          if (dateRange != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              "$dateRange • $salesCount ta sotuv • ${formatKg(totalKg)}",
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
           ],
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(14),
-            ),
+          const SizedBox(height: 14),
+          // 3 glowing capsule bars side by side (like "Earnings Distribution")
+          SizedBox(
+            height: 24,
             child: Row(
               children: [
-                _HeroMiniStat(label: "Savdo", value: formatCompactUzs(revenue)),
-                _HeroMiniStat(label: "Tannarx", value: formatCompactUzs(cost)),
-                _HeroMiniStat(label: "Vozvrat", value: formatCompactUzs(returnsAmount)),
+                Expanded(
+                  flex: flexOf(posRev),
+                  child: _GlowingCapsuleBar(
+                    gradient: NorinPalette.neonCyanGradient,
+                    glowColor: NorinPalette.sky,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  flex: flexOf(posProfit),
+                  child: _GlowingCapsuleBar(
+                    gradient: NorinPalette.neonMagentaGradient,
+                    glowColor: NorinPalette.magenta,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  flex: flexOf(totalCostAndExp),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      color: const Color(0xFF252336),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                    ),
+                  ),
+                ),
               ],
             ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _CapsuleMetricColumn(
+                  amount: formatCompactUzs(revenue),
+                  label: "Savdo tushum",
+                  color: NorinPalette.sky,
+                ),
+              ),
+              Expanded(
+                child: _CapsuleMetricColumn(
+                  amount: formatCompactUzs(profit),
+                  label: "Sof foyda",
+                  color: NorinPalette.magenta,
+                ),
+              ),
+              Expanded(
+                child: _CapsuleMetricColumn(
+                  amount: formatCompactUzs(cost + returnsAmount),
+                  label: returnsAmount > 0 ? "Tannarx/Vozv" : "Tannarx",
+                  color: NorinPalette.darkMuted,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -637,30 +772,219 @@ class _ProfitHeroCard extends StatelessWidget {
   }
 }
 
-class _HeroMiniStat extends StatelessWidget {
-  const _HeroMiniStat({required this.label, required this.value});
-  final String label;
-  final String value;
+class _GlowingCapsuleBar extends StatelessWidget {
+  const _GlowingCapsuleBar({required this.gradient, required this.glowColor});
+  final Gradient gradient;
+  final Color glowColor;
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 11)),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: tNumStyle.copyWith(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-            ),
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        gradient: gradient,
+        boxShadow: [
+          BoxShadow(
+            color: glowColor.withValues(alpha: 0.45),
+            blurRadius: 12,
+            offset: const Offset(0, 2),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CapsuleMetricColumn extends StatelessWidget {
+  const _CapsuleMetricColumn({
+    required this.amount,
+    required this.label,
+    required this.color,
+  });
+
+  final String amount;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            amount,
+            style: tNumStyle.copyWith(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Container(
+              width: 3,
+              height: 11,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ProfitMarginSparkCard extends StatelessWidget {
+  const _ProfitMarginSparkCard({
+    required this.margin,
+    required this.profit,
+    required this.daily,
+  });
+
+  final double margin;
+  final double profit;
+  final List<Map<String, dynamic>> daily;
+
+  @override
+  Widget build(BuildContext context) {
+    final spots = <FlSpot>[];
+    if (daily.isNotEmpty) {
+      final slice = daily.length > 10 ? daily.sublist(daily.length - 10) : daily;
+      for (int i = 0; i < slice.length; i++) {
+        spots.add(FlSpot(i.toDouble(), asDouble(slice[i]['profit'])));
+      }
+    }
+    final isPos = profit >= 0;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 5,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Foyda Marjasi",
+                    style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: (isPos ? NorinPalette.profit : NorinPalette.danger)
+                          .withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      "${isPos ? '+' : ''}${formatCompactUzs(profit)} ${isPos ? '▲' : '▼'}",
+                      style: tNumStyle.copyWith(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: isPos ? NorinPalette.profit : NorinPalette.danger,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(
+                        margin.toStringAsFixed(1),
+                        style: tNumStyle.copyWith(
+                          fontSize: 32,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.8,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        "%",
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 6,
+              child: SizedBox(
+                height: 82,
+                child: spots.length < 2
+                    ? Center(
+                        child: Text(
+                          "Dinamika kutilmoqda",
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      )
+                    : LineChart(
+                        LineChartData(
+                          gridData: const FlGridData(show: false),
+                          titlesData: const FlTitlesData(show: false),
+                          borderData: FlBorderData(show: false),
+                          lineTouchData: const LineTouchData(enabled: false),
+                          lineBarsData: [
+                            LineChartBarData(
+                              spots: spots,
+                              isCurved: true,
+                              preventCurveOverShooting: true,
+                              color: NorinPalette.emeraldLight,
+                              barWidth: 2.5,
+                              dotData: FlDotData(
+                                show: true,
+                                getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                                  radius: 3.2,
+                                  color: NorinPalette.magenta,
+                                  strokeWidth: 1.5,
+                                  strokeColor: const Color(0xFF13121B),
+                                ),
+                              ),
+                              belowBarData: BarAreaData(
+                                show: true,
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    NorinPalette.emerald.withValues(alpha: 0.24),
+                                    Colors.transparent,
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -699,14 +1023,14 @@ class _ProductWeightBreakdown extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 5),
+                  const SizedBox(height: 6),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(999),
                     child: LinearProgressIndicator(
                       value: ratio,
                       minHeight: 7,
-                      backgroundColor: NorinPalette.emerald.withValues(alpha: 0.12),
-                      color: NorinPalette.emerald,
+                      backgroundColor: NorinPalette.emerald.withValues(alpha: 0.14),
+                      color: NorinPalette.emeraldLight,
                     ),
                   ),
                 ],
@@ -719,153 +1043,210 @@ class _ProductWeightBreakdown extends StatelessWidget {
   }
 }
 
-class _RevenueProfitLineChart extends StatelessWidget {
-  const _RevenueProfitLineChart({required this.daily});
+class _CashFlowBarTrendsCard extends StatelessWidget {
+  const _CashFlowBarTrendsCard({
+    required this.daily,
+    required this.chartPeriod,
+    required this.periods,
+    required this.onSelectPeriod,
+  });
+
   final List<Map<String, dynamic>> daily;
+  final String chartPeriod;
+  final List<(String, String)> periods;
+  final ValueChanged<String> onSelectPeriod;
 
   @override
   Widget build(BuildContext context) {
-    if (daily.isEmpty) {
-      return const EmptyStateCard(
-        icon: Icons.show_chart_rounded,
-        title: "Grafik uchun yetarli ma'lumot yo'q",
-        subtitle: "Sotuvlar qo'shilgach kunlik tushum va foyda grafigi paydo bo'ladi.",
-      );
-    }
-
-    final revSpots = <FlSpot>[];
-    final profSpots = <FlSpot>[];
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final view = daily.length > 8 ? daily.sublist(daily.length - 8) : daily;
     double maxY = 1;
-    double minY = 0;
-
-    for (int i = 0; i < daily.length; i++) {
-      final rev = asDouble(daily[i]['revenue']);
-      final prof = asDouble(daily[i]['profit']);
-      revSpots.add(FlSpot(i.toDouble(), rev));
-      profSpots.add(FlSpot(i.toDouble(), prof));
-      maxY = math.max(maxY, math.max(rev, prof));
-      minY = math.min(minY, math.min(rev, prof));
+    for (final d in view) {
+      maxY = math.max(maxY, math.max(asDouble(d['revenue']), math.max(0, asDouble(d['profit']))));
     }
-
-    final step = math.max(1, (daily.length / 4).ceil());
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 16, 18, 12),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Text(
-                  "Tushum va Sof foyda",
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Pul oqimi dinamikasi",
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        "Kunlik savdo tushumi va sof foyda",
+                        style: TextStyle(fontSize: 11.5, color: NorinPalette.darkMuted),
+                      ),
+                    ],
+                  ),
                 ),
-                const Spacer(),
-                _LegendDot(color: NorinPalette.sky, label: "Savdo"),
-                const SizedBox(width: 10),
-                _LegendDot(color: NorinPalette.profit, label: "Foyda"),
-              ],
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 210,
-              child: LineChart(
-                LineChartData(
-                  minY: minY < 0 ? minY * 1.15 : 0,
-                  maxY: maxY * 1.15,
-                  gridData: FlGridData(
-                    show: true,
-                    drawVerticalLine: false,
-                    getDrawingHorizontalLine: (_) => FlLine(
-                      color: Theme.of(context).dividerColor.withValues(alpha: 0.4),
-                      strokeWidth: 1,
+                Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: isDark ? NorinPalette.darkBg : NorinPalette.lightBg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isDark ? NorinPalette.darkBorder : NorinPalette.lightBorder,
                     ),
                   ),
-                  borderData: FlBorderData(show: false),
-                  lineTouchData: LineTouchData(
-                    touchTooltipData: LineTouchTooltipData(
-                      getTooltipColor: (_) => const Color(0xFF0F172A),
-                      getTooltipItems: (spots) => spots.map((s) {
-                        final idx = s.x.toInt();
-                        final dateStr = idx >= 0 && idx < daily.length
-                            ? formatShortDate(asStr(daily[idx]['date']))
-                            : '';
-                        final kind = s.barIndex == 0 ? 'Savdo' : 'Foyda';
-                        return LineTooltipItem(
-                          '$dateStr $kind\n${formatCompactUzs(s.y)}',
-                          const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: periods.map((p) {
+                      final active = p.$1 == chartPeriod;
+                      return InkWell(
+                        onTap: () => onSelectPeriod(p.$1),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            color: active
+                                ? NorinPalette.emerald.withValues(alpha: 0.25)
+                                : Colors.transparent,
                           ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                  titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 54,
-                        getTitlesWidget: (v, _) => Padding(
-                          padding: const EdgeInsets.only(right: 6),
                           child: Text(
-                            formatCompactUzs(v),
-                            style: const TextStyle(fontSize: 10),
+                            p.$2,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                              color: active ? NorinPalette.emeraldLight : NorinPalette.darkMuted,
+                            ),
                           ),
                         ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            if (view.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 28),
+                child: Center(child: Text("Grafik uchun hali sotuvlar yo'q")),
+              )
+            else
+              SizedBox(
+                height: 210,
+                child: BarChart(
+                  BarChartData(
+                    maxY: maxY * 1.18,
+                    minY: 0,
+                    alignment: BarChartAlignment.spaceAround,
+                    gridData: FlGridData(
+                      show: true,
+                      drawVerticalLine: false,
+                      getDrawingHorizontalLine: (_) => FlLine(
+                        color: Theme.of(context).dividerColor.withValues(alpha: 0.4),
+                        strokeWidth: 1,
+                        dashArray: [4, 4],
                       ),
                     ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 26,
-                        interval: step.toDouble(),
-                        getTitlesWidget: (v, _) {
-                          final idx = v.round();
-                          if (idx < 0 || idx >= daily.length) return const SizedBox.shrink();
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              formatShortDate(asStr(daily[idx]['date'])),
-                              style: const TextStyle(fontSize: 10),
+                    borderData: FlBorderData(show: false),
+                    barTouchData: BarTouchData(
+                      touchTooltipData: BarTouchTooltipData(
+                        getTooltipColor: (_) => const Color(0xFF1D1A2B),
+                        tooltipRoundedRadius: 10,
+                        getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                          final idx = group.x.toInt();
+                          final date = idx >= 0 && idx < view.length
+                              ? formatShortDate(asStr(view[idx]['date']))
+                              : '';
+                          final kind = rodIndex == 0 ? 'Savdo' : 'Foyda';
+                          return BarTooltipItem(
+                            '$date • $kind\n${formatCompactUzs(rod.toY)}',
+                            const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
                             ),
                           );
                         },
                       ),
                     ),
+                    titlesData: FlTitlesData(
+                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 48,
+                          getTitlesWidget: (v, _) => Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: Text(
+                              formatCompactUzs(v),
+                              style: const TextStyle(fontSize: 10, color: NorinPalette.darkMuted),
+                            ),
+                          ),
+                        ),
+                      ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 24,
+                          getTitlesWidget: (v, _) {
+                            final idx = v.toInt();
+                            if (idx < 0 || idx >= view.length) return const SizedBox.shrink();
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                formatShortDate(asStr(view[idx]['date'])),
+                                style: const TextStyle(fontSize: 10, color: NorinPalette.darkMuted),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    barGroups: [
+                      for (int i = 0; i < view.length; i++)
+                        BarChartGroupData(
+                          x: i,
+                          barsSpace: 4,
+                          barRods: [
+                            BarChartRodData(
+                              toY: math.max(0, asDouble(view[i]['revenue'])),
+                              width: view.length <= 5 ? 14 : 10,
+                              borderRadius: const BorderRadius.vertical(top: Radius.circular(5)),
+                              gradient: const LinearGradient(
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                                colors: [Color(0xFF6D28D9), NorinPalette.magenta],
+                              ),
+                            ),
+                            BarChartRodData(
+                              toY: math.max(0, asDouble(view[i]['profit'])),
+                              width: view.length <= 5 ? 14 : 10,
+                              borderRadius: const BorderRadius.vertical(top: Radius.circular(5)),
+                              gradient: const LinearGradient(
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                                colors: [Color(0xFF0284C7), Color(0xFF67E8F9)],
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
                   ),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: revSpots,
-                      isCurved: true,
-                      preventCurveOverShooting: true,
-                      color: NorinPalette.sky,
-                      barWidth: 2.8,
-                      dotData: FlDotData(show: daily.length <= 14),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        color: NorinPalette.sky.withValues(alpha: 0.12),
-                      ),
-                    ),
-                    LineChartBarData(
-                      spots: profSpots,
-                      isCurved: true,
-                      preventCurveOverShooting: true,
-                      color: NorinPalette.profit,
-                      barWidth: 2.8,
-                      dotData: FlDotData(show: daily.length <= 14),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        color: NorinPalette.profit.withValues(alpha: 0.14),
-                      ),
-                    ),
-                  ],
                 ),
               ),
+            const SizedBox(height: 10),
+            const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _LegendDot(color: NorinPalette.magenta, label: "Savdo tushum"),
+                SizedBox(width: 18),
+                _LegendDot(color: NorinPalette.sky, label: "Sof foyda"),
+              ],
             ),
           ],
         ),
@@ -902,8 +1283,8 @@ class _ExpensePieCard extends StatelessWidget {
               Row(
                 children: [
                   SizedBox(
-                    width: 136,
-                    height: 136,
+                    width: 132,
+                    height: 132,
                     child: PieChart(
                       PieChartData(
                         sectionsSpace: 2,
@@ -913,7 +1294,7 @@ class _ExpensePieCard extends StatelessWidget {
                             PieChartSectionData(
                               value: asDouble(expenses[i]['amount']),
                               color: colors[i % colors.length],
-                              radius: 28,
+                              radius: 26,
                               showTitle: false,
                             ),
                         ],
@@ -987,13 +1368,13 @@ class _TopClientRow extends StatelessWidget {
       onTap: onTap,
       leading: CircleAvatar(
         backgroundColor: rank == 1
-            ? NorinPalette.amber.withValues(alpha: 0.2)
-            : NorinPalette.emerald.withValues(alpha: 0.12),
+            ? NorinPalette.magenta.withValues(alpha: 0.22)
+            : NorinPalette.emerald.withValues(alpha: 0.14),
         child: Text(
           '$rank',
           style: TextStyle(
             fontWeight: FontWeight.w800,
-            color: rank == 1 ? NorinPalette.amber : NorinPalette.emerald,
+            color: rank == 1 ? NorinPalette.magenta : NorinPalette.emeraldLight,
           ),
         ),
       ),
@@ -1010,7 +1391,11 @@ class _TopClientRow extends StatelessWidget {
           if (debt > 0)
             Text(
               "Qarz: ${formatCompactUzs(debt)}",
-              style: const TextStyle(color: NorinPalette.danger, fontSize: 11, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                color: NorinPalette.danger,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
             ),
         ],
       ),
@@ -1028,8 +1413,16 @@ class _LegendDot extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(width: 9, height: 9, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 5),
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            boxShadow: [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 6)],
+          ),
+        ),
+        const SizedBox(width: 6),
         Text(label, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
       ],
     );
@@ -1041,17 +1434,9 @@ class _DashboardSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          height: 170,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
-            borderRadius: BorderRadius.circular(22),
-          ),
-          child: const Center(child: CircularProgressIndicator()),
-        ),
-      ],
+    return SpotlightHeroCard(
+      padding: const EdgeInsets.all(42),
+      child: const Center(child: CircularProgressIndicator()),
     );
   }
 }

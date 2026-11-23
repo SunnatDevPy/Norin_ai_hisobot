@@ -354,6 +354,7 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
     final asyncDetail = ref.watch(clientDetailProvider(widget.clientId));
 
     return Scaffold(
+      extendBodyBehindAppBar: false,
       appBar: AppBar(
         title: Text(widget.initialName, style: const TextStyle(fontWeight: FontWeight.w800)),
         actions: [
@@ -365,7 +366,8 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
           IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: _refresh),
         ],
       ),
-      body: asyncDetail.when(
+      body: CosmicBackground(
+        child: asyncDetail.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => AsyncErrorCard(error: e, onRetry: _refresh),
         data: (bundle) {
@@ -383,12 +385,11 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
               children: [
-                Container(
+                SpotlightHeroCard(
                   padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    gradient: NorinPalette.heroGradient,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
+                  borderRadius: 20,
+                  glowColor: debt > 0 ? NorinPalette.danger : NorinPalette.emeraldLight,
+                  accentColor: NorinPalette.indigo,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -637,6 +638,7 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
             ),
           );
         },
+      ),
       ),
     );
   }

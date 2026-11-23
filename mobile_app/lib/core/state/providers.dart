@@ -5,7 +5,7 @@ import '../api/api_client.dart';
 
 final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
 
-final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.system);
+final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.dark);
 
 enum AuthStage { loading, unauthenticated, authenticated }
 

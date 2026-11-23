@@ -155,6 +155,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
     final tenantsAsync = ref.watch(adminTenantsProvider);
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text("Super Admin Panel", style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
@@ -205,14 +206,13 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                 final aiTokens = asInt(an['ai_tokens_30d']);
 
                 return ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
                   children: [
-                    Container(
+                    SpotlightHeroCard(
                       padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        gradient: NorinPalette.adminGradient,
-                        borderRadius: BorderRadius.circular(22),
-                      ),
+                      borderRadius: 22,
+                      glowColor: NorinPalette.indigo,
+                      accentColor: NorinPalette.emeraldLight,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -300,7 +300,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                 onRetry: () => ref.invalidate(adminTenantsProvider),
               ),
               data: (tenants) => ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
                 children: [
                   FilledButton.icon(
                     onPressed: _createTenantDialog,
@@ -349,7 +349,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
 
           // 3. Broadcast & Audit Log
           ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
             children: [
               Card(
                 child: Padding(

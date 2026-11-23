@@ -98,6 +98,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
     final clientsAsync = ref.watch(clientsProvider);
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text("Mijozlar & Qarzlar", style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
@@ -146,14 +147,13 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
             final debtorsCount = clients.where((c) => asDouble(c['current_debt']) > 0).length;
 
             return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
               children: [
-                Container(
+                SpotlightHeroCard(
                   padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    gradient: NorinPalette.heroGradient,
-                    borderRadius: BorderRadius.circular(18),
-                  ),
+                  borderRadius: 20,
+                  glowColor: NorinPalette.emeraldLight,
+                  accentColor: NorinPalette.indigo,
                   child: Row(
                     children: [
                       const Icon(Icons.account_balance_wallet_outlined, color: Colors.white, size: 30),
@@ -180,7 +180,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.16),
+                          color: Colors.white.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
