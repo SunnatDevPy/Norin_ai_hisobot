@@ -129,17 +129,22 @@ async def _configure_bot_commands(bot: Bot) -> None:
     """Configure Telegram '/' command menu: basic commands for users, /menu & /superadmin ONLY for Super Admins."""
     settings = get_settings()
     default_cmds = [
-        BotCommand(command="start", description="Bosh menyuni ochish"),
+        BotCommand(command="start", description="Asosiy menyu"),
         BotCommand(command="apk", description="Mobil ilova (APK) va kirish kodi"),
+        BotCommand(command="dashboard", description="Kunlik va oylik dashboardlar"),
+        BotCommand(command="groups", description="Telegram guruhlarni sozlash"),
+        BotCommand(command="status", description="Obuna va filial statusi"),
         BotCommand(command="myid", description="Telegram ID ni ko'rish"),
-        BotCommand(command="cancel", description="Amalni bekor qilish"),
     ]
     super_cmds = [
-        BotCommand(command="menu", description="Super Admin tezkor menyusi"),
-        BotCommand(command="superadmin", description="Filiallar & Obuna boshqaruvi"),
-        BotCommand(command="apk", description="Android APK yuklab olish va kod"),
-        BotCommand(command="clear", description="Tanlangan filial bazasini tozalash"),
         BotCommand(command="start", description="Asosiy menyu"),
+        BotCommand(command="apk", description="Mobil ilova (APK) va kirish kodi"),
+        BotCommand(command="dashboard", description="Kunlik va oylik dashboardlar"),
+        BotCommand(command="groups", description="Telegram guruhlarni sozlash"),
+        BotCommand(command="status", description="Obuna va filial statusi"),
+        BotCommand(command="superadmin", description="Filiallar & Obuna boshqaruvi"),
+        BotCommand(command="menu", description="Super Admin tezkor menyusi"),
+        BotCommand(command="clear", description="Tanlangan filial bazasini tozalash"),
         BotCommand(command="myid", description="Telegram ID"),
     ]
     try:

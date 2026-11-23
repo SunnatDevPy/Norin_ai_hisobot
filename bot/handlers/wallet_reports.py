@@ -1,48 +1,45 @@
-"""Daily Norin profit report, 30-day period analytics, expenses, kassa debt, day close, history & Excel."""
+"""Read-only Daily & Period Dashboards, Debts Archive feeds, and Excel exports."""
 
 from __future__ import annotations
 
 import asyncio
 import html
-import io
 import logging
 from datetime import date, timedelta
 from typing import Optional
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from bot.handlers.clients_products import is_authorized_async
-from bot.ui_helpers import fast_edit, send_inline_panel
 from bot.keyboards import (
     BTN_CLOSE_DAY,
     BTN_DAILY_REPORT,
+    BTN_DASHBOARDS,
     BTN_EXPENSE_KASSA,
-    MAIN_MENU_BUTTONS,
-    cancel_reply_keyboard,
-    close_day_confirm_kb,
     daily_report_kb,
-    expense_category_kb,
     history_detail_kb,
     history_feed_kb,
     history_sessions_kb,
     main_menu_keyboard,
     period_report_kb,
-    wallet_expense_kb,
 )
-from bot.states import WalletStates
+from bot.ui_helpers import fast_edit, send_inline_panel
 from database.crud import (
     DailyReportSummary,
     PeriodReportSummary,
-    add_cash_transaction,
-    close_cash_session,
     compute_client_debt,
     compute_period_summary,
     compute_session_summary,
     format_local_dt,
-    get_group_config,
-    get_kassa_debt_stats,
     get_period_excel_data,
     get_subscription_state,
     list_all_client_debts,
@@ -50,7 +47,6 @@ from database.crud import (
     list_closed_sessions,
     list_recent_client_payments,
     list_recent_sales,
-    reopen_cash_session,
     today_iso,
 )
 from database.session import async_session_maker
@@ -60,23 +56,21 @@ from services.excel_export import (
     build_history_excel,
     build_period_excel,
 )
-from services.gemini_ai import (
-    extract_amount_from_audio,
-    format_kg,
-    format_uzs,
-    parse_uzbek_amount,
-)
+from services.gemini_ai import format_kg, format_uzs
 
 
 router = Router(name="wallet_reports")
 logger = logging.getLogger("norin_bot.wallet")
 
-_VOICE_MAX_SECONDS = 90
-_VOICE_OR_TEXT_FILTER = (~F.text) | (
-    ~F.text.startswith("/")
-    & ~F.text.in_(MAIN_MENU_BUTTONS)
-    & (F.text != "❌ Bekor qilish")
-)
+
+def _apk_redirect_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📱 Mobil ilova (APK)", callback_data="apk:home")],
+            [InlineKeyboardButton(text="📊 Dashboardlar", callback_data="rep:today")],
+            [InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home")],
+        ]
+    )
 
 
 def _calendar_month_bounds(which: str) -> tuple[str, str, str]:
@@ -190,32 +184,13 @@ def render_period_report_text(p: PeriodReportSummary, title: Optional[str] = Non
     return "\n".join(lines)
 
 
-async def _download_voice_bytes(message: Message) -> tuple[bytes, str]:
-    file_obj = message.voice or message.audio
-    mime = "audio/ogg" if message.voice else (file_obj.mime_type or "audio/mpeg")
-    buf = io.BytesIO()
-    await message.bot.download(file_obj, destination=buf)
-    return buf.getvalue(), mime
-
-
-async def _extract_amount_and_note(message: Message) -> tuple[Optional[float], str]:
-    if message.voice or message.audio:
-        file_obj = message.voice or message.audio
-        if (getattr(file_obj, "duration", 0) or 0) > _VOICE_MAX_SECONDS:
-            return None, "__TOO_LONG__"
-        audio_bytes, mime = await _download_voice_bytes(message)
-        return await extract_amount_from_audio(audio_bytes=audio_bytes, mime_type=mime)
-    if message.text:
-        return parse_uzbek_amount(message.text), message.text.strip()
-    return None, ""
-
-
 # ---------------------------------------------------------------------------
-# Daily & Period Reports
+# Daily & Period Dashboards (Read-only)
 # ---------------------------------------------------------------------------
 
 
-@router.message(F.text == BTN_DAILY_REPORT, F.chat.type == "private")
+@router.message(Command("dashboard"), F.chat.type == "private")
+@router.message(F.text.in_({BTN_DASHBOARDS, BTN_DAILY_REPORT}), F.chat.type == "private")
 async def handle_daily_report_btn(message: Message, state: FSMContext) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
@@ -270,340 +245,7 @@ async def cb_report_month(cb: CallbackQuery) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Expenses, Owner Cash-In, and Kassa Debt
-# ---------------------------------------------------------------------------
-
-
-@router.message(F.text == BTN_EXPENSE_KASSA, F.chat.type == "private")
-async def handle_expense_kassa_btn(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    await state.clear()
-    async with async_session_maker() as db:
-        summary = await compute_session_summary(db)
-        kstats = await get_kassa_debt_stats(db, limit=5)
-
-    lines = [
-        "💵 <b>Xarajatlar, Qo'shimcha Kirim & Kassa Qarzi</b>",
-        "===============================",
-        f"➖ Bugungi xarajatlar: <b>{format_uzs(summary.total_expenses)} so'm</b>",
-        f"➕ Qo'shimcha kirim: <b>{format_uzs(summary.main_cash_in)} so'm</b>",
-        f"🏦 Bugun kassadan olingan: <b>{format_uzs(summary.kassa_debt_today)} so'm</b>",
-        f"↩️ Bugun kassaga qaytarilgan: <b>{format_uzs(summary.kassa_repay_today)} so'm</b>",
-        f"⚠️ <b>Jami kassa qarzi qoldig'i: {format_uzs(kstats['outstanding'])} so'm</b>",
-        f"💰 Qo'ldagi naqd qolishi kerak: <b>{format_uzs(summary.expected_cash)} so'm</b>",
-    ]
-    await send_inline_panel(
-        message,
-        "\n".join(lines),
-        reply_markup=wallet_expense_kb(),
-        delete_prev=True,
-    )
-
-
-@router.callback_query(F.data == "wal:expense")
-async def cb_wal_expense(cb: CallbackQuery, state: FSMContext) -> None:
-    await state.clear()
-    await cb.message.answer(
-        "📂 <b>Xarajat kategoriyasini tanlang:</b>",
-        parse_mode="HTML",
-        reply_markup=expense_category_kb(),
-    )
-    await cb.answer()
-
-
-@router.callback_query(F.data.startswith("wal:exp_cat:"))
-async def cb_wal_expense_category(cb: CallbackQuery, state: FSMContext) -> None:
-    cat = cb.data.split(":", 2)[-1]
-    await state.set_state(WalletStates.waiting_expense_amount)
-    await state.update_data(expense_category=cat)
-    await cb.message.answer(
-        f"➖ <b>{html.escape(cat)}</b> xarajati summasini kiriting (ovozda yoki matnda, masalan: <i>«450 ming»</i> yoki <code>450 000</code>):",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(WalletStates.waiting_expense_amount, F.chat.type == "private", _VOICE_OR_TEXT_FILTER)
-async def process_expense_input(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    amount, note = await _extract_amount_and_note(message)
-    if note == "__TOO_LONG__":
-        await message.answer("⚠️ Ovozli xabar 90 soniyadan uzun. Qisqaroq ovoz yuboring yoki raqam yozing:")
-        return
-    if not amount or amount <= 0:
-        await message.answer("⚠️ Summa tushunilmadi. Masalan: <code>500 000 go'sht</code>:", parse_mode="HTML")
-        return
-    cat = (await state.get_data()).get("expense_category") or None
-    async with async_session_maker() as db:
-        tx = await add_cash_transaction(
-            db, amount=amount, source_type="expense", note=note, category=cat
-        )
-        summary = await compute_session_summary(db)
-    await state.clear()
-    await message.answer(
-        f"➖ Xarajat yozildi: <b>{format_uzs(amount)} so'm</b>\n"
-        f"📂 Kategoriya: <b>{html.escape(tx.category)}</b>\n"
-        f"📝 Izoh: <i>{html.escape(note or '-')}</i>\n"
-        f"💰 Qo'lda qolishi kerak: <b>{format_uzs(summary.expected_cash)} so'm</b>",
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
-    )
-
-
-@router.callback_query(F.data == "wal:cash_in")
-async def cb_wal_cash_in(cb: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(WalletStates.waiting_cash_in_amount)
-    await cb.message.answer(
-        "➕ <b>Qancha qo'shimcha pul kiritildi?</b> (masalan: <code>5 000 000</code>):",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(WalletStates.waiting_cash_in_amount, F.chat.type == "private", _VOICE_OR_TEXT_FILTER)
-async def process_wal_cash_in(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    amount, note = await _extract_amount_and_note(message)
-    if note == "__TOO_LONG__":
-        await message.answer("⚠️ Ovozli xabar 90 soniyadan uzun. Qisqaroq ovoz yuboring yoki raqam yozing:")
-        return
-    if not amount or amount <= 0:
-        await message.answer("⚠️ Summa topilmadi. Raqam kiriting:")
-        return
-    async with async_session_maker() as db:
-        await add_cash_transaction(db, amount=amount, source_type="main_in", note=note)
-        summary = await compute_session_summary(db)
-    await state.clear()
-    await message.answer(
-        f"✅ Asosiy balansga <b>+{format_uzs(amount)} so'm</b> qo'shildi!\n"
-        f"💰 Qo'lda qolishi kerak: <b>{format_uzs(summary.expected_cash)} so'm</b>",
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
-    )
-
-
-@router.callback_query(F.data == "wal:kassa_borrow")
-async def cb_wal_kassa_borrow(cb: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(WalletStates.waiting_kassa_debt_amount)
-    await cb.message.answer(
-        "🏦 <b>Kassadan qancha pul oldingiz?</b> (masalan: <code>2 000 000</code>):",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(WalletStates.waiting_kassa_debt_amount, F.chat.type == "private", _VOICE_OR_TEXT_FILTER)
-async def process_wal_kassa_borrow(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    amount, note = await _extract_amount_and_note(message)
-    if note == "__TOO_LONG__":
-        await message.answer("⚠️ Ovozli xabar 90 soniyadan uzun. Qisqaroq ovoz yuboring yoki raqam yozing:")
-        return
-    if not amount or amount <= 0:
-        await message.answer("⚠️ Summa topilmadi:")
-        return
-    async with async_session_maker() as db:
-        await add_cash_transaction(db, amount=amount, source_type="kassa_debt", note=note)
-        summary = await compute_session_summary(db)
-    await state.clear()
-    await message.answer(
-        f"🏦 Kassadan qarz olindi: <b>+{format_uzs(amount)} so'm</b>\n"
-        f"⚠️ Jami kassa qarzi: <b>{format_uzs(summary.total_kassa_debt_outstanding)} so'm</b>\n"
-        f"💰 Qo'lda qolishi kerak: <b>{format_uzs(summary.expected_cash)} so'm</b>",
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
-    )
-
-
-@router.callback_query(F.data == "wal:kassa_repay")
-async def cb_wal_kassa_repay(cb: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(WalletStates.waiting_kassa_repay_amount)
-    await cb.message.answer(
-        "↩️ <b>Kassaga qancha qarz qaytardingiz?</b>:",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(WalletStates.waiting_kassa_repay_amount, F.chat.type == "private", _VOICE_OR_TEXT_FILTER)
-async def process_wal_kassa_repay(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    amount, note = await _extract_amount_and_note(message)
-    if note == "__TOO_LONG__":
-        await message.answer("⚠️ Ovozli xabar 90 soniyadan uzun. Qisqaroq ovoz yuboring yoki raqam yozing:")
-        return
-    if not amount or amount <= 0:
-        await message.answer("⚠️ Summa topilmadi:")
-        return
-    async with async_session_maker() as db:
-        await add_cash_transaction(db, amount=amount, source_type="kassa_repay", note=note)
-        summary = await compute_session_summary(db)
-    await state.clear()
-    await message.answer(
-        f"↩️ Kassaga qaytarildi: <b>{format_uzs(amount)} so'm</b>\n"
-        f"⚠️ Qolgan kassa qarzi: <b>{format_uzs(summary.total_kassa_debt_outstanding)} so'm</b>\n"
-        f"💰 Qo'lda qolishi kerak: <b>{format_uzs(summary.expected_cash)} so'm</b>",
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Day Close (Sverka)
-# ---------------------------------------------------------------------------
-
-
-@router.message(F.text == BTN_CLOSE_DAY, F.chat.type == "private")
-async def handle_close_day_start(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    await state.clear()
-    async with async_session_maker() as db:
-        summary = await compute_session_summary(db)
-    await state.set_state(WalletStates.waiting_counted_cash)
-    await state.update_data(session_id=summary.session.id)
-    prev_warn = (
-        f"⚠️ <i>Eslatma: {summary.session.report_date} smenasi ochiq turibdi — avval shuni yoping.</i>\n"
-        if summary.session.status == "open" and summary.session.report_date != today_iso()
-        else ""
-    )
-    await message.answer(
-        f"🏁 <b>KUNNI YAKUNLASH ({summary.session.report_date})</b>\n"
-        f"{prev_warn}"
-        "===============================\n"
-        f"⚖️ Jami sotilgan: <b>{format_kg(summary.total_kg)} kg</b> ({format_uzs(summary.total_revenue)} so'm)\n"
-        f"📈 Bugungi sof foyda: <b>{format_uzs(summary.total_profit)} so'm</b>\n"
-        f"⏮ Kechadan qoldiq: <b>{format_uzs(summary.opening_balance)}</b>\n"
-        f"💵 Mijoz naqd to'lovlari: <b>+{format_uzs(summary.client_cash_in)}</b>\n"
-        f"➖ Xarajatlar: <b>-{format_uzs(summary.total_expenses)}</b>\n"
-        f"💰 <b>Qo'lda qolishi kerak (Naqd): {format_uzs(summary.expected_cash)} so'm</b>\n"
-        "===============================\n\n"
-        "🖐 <b>Qo'lingizdagi naqd pulni sanab kiriting</b> (matn yoki ovozda, masalan: <code>1 500 000</code> yoki <code>0</code>):",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-
-
-@router.callback_query(F.data == "close_day:recount")
-async def cb_close_day_recount(cb: CallbackQuery, state: FSMContext) -> None:
-    async with async_session_maker() as db:
-        summary = await compute_session_summary(db)
-    await state.set_state(WalletStates.waiting_counted_cash)
-    await state.update_data(session_id=summary.session.id)
-    await cb.message.answer(
-        "🖐 Qo'lingizdagi naqd pulni qayta sanab kiriting:",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(WalletStates.waiting_counted_cash, F.chat.type == "private", _VOICE_OR_TEXT_FILTER)
-async def process_counted_cash(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    counted: Optional[float] = None
-    note = ""
-    if message.voice or message.audio:
-        counted, note = await _extract_amount_and_note(message)
-        if note == "__TOO_LONG__":
-            await message.answer("⚠️ Ovozli xabar 90 soniyadan uzun. Qisqaroq ovoz yuboring yoki raqam yozing:")
-            return
-    elif message.text:
-        txt = message.text.strip()
-        counted = 0.0 if txt == "0" else parse_uzbek_amount(txt)
-
-    if counted is None or counted < 0:
-        await message.answer("⚠️ Summa tushunilmadi. Raqam kiriting (masalan: <code>1 500 000</code> yoki <code>0</code>):", parse_mode="HTML")
-        return
-
-    session_id = (await state.get_data()).get("session_id")
-    async with async_session_maker() as db:
-        summary = await compute_session_summary(db, session_id)
-
-    diff = counted - summary.expected_cash
-    if abs(diff) < 1:
-        diff_msg = "✅ <b>Zo'r! Farq yo'q (0 so'm)</b>"
-    elif diff < 0:
-        diff_msg = f"⚠️ <b>Kamomad: {format_uzs(diff)} so'm</b>"
-    else:
-        diff_msg = f"➕ <b>Ortiqcha: +{format_uzs(diff)} so'm</b>"
-
-    await state.clear()
-    await message.answer("✅ Sverka tayyor!", reply_markup=main_menu_keyboard())
-    await message.answer(
-        f"📊 <b>SVERKA NATIJASI ({summary.session.report_date})</b>\n"
-        "===============================\n"
-        f"💰 Qolishi kerak edi: <b>{format_uzs(summary.expected_cash)} so'm</b>\n"
-        f"🖐 Siz sanadingiz: <b>{format_uzs(counted)} so'm</b>\n"
-        f"⚖️ Farq: {diff_msg}\n"
-        "===============================\n\n"
-        "Hammasi to'g'ri bo'lsa kunni yoping:",
-        parse_mode="HTML",
-        reply_markup=close_day_confirm_kb(summary.session.id, counted),
-    )
-
-
-@router.callback_query(F.data.startswith("close_day:confirm:"))
-async def cb_close_day_confirm(cb: CallbackQuery) -> None:
-    parts = cb.data.split(":")
-    sess_id = int(parts[2])
-    counted = float(parts[3])
-
-    async with async_session_maker() as db:
-        existing = await compute_session_summary(db, sess_id)
-        if existing.session.status == "closed":
-            await cb.answer("Bu kun allaqachon yopilgan!", show_alert=True)
-            return
-        closed = await close_cash_session(db, sess_id, counted)
-        report_group = await get_group_config(db, "report")
-
-    diff = closed.session.difference or 0
-    diff_line = (
-        "✅ Farq yo'q (0)"
-        if abs(diff) < 1
-        else (f"⚠️ Kamomad: {format_uzs(diff)}" if diff < 0 else f"➕ Ortiqcha: +{format_uzs(diff)}")
-    )
-    summary_msg = (
-        f"🏁 <b>KUN YOPILDI — {closed.session.report_date}</b>\n"
-        "===============================\n"
-        f"⚖️ Jami sotilgan: <b>{format_kg(closed.total_kg)} kg</b>\n"
-        f"💰 Jami savdo: <b>{format_uzs(closed.total_revenue)} so'm</b>\n"
-        f"📉 Tannarx: {format_uzs(closed.total_cost)} so'm\n"
-        f"📈 <b>Sof foyda: {format_uzs(closed.total_profit)} so'm ({closed.margin_pct:.1f}%)</b>\n"
-        "-------------------------------\n"
-        f"💵 Mijoz to'lovlari (Naqd/Karta/Bank): {format_uzs(closed.client_cash_in + closed.client_card_in + closed.client_transfer_in)}\n"
-        f"➖ Xarajatlar: {format_uzs(closed.total_expenses)}\n"
-        f"💰 Qolishi kerak edi (naqd): {format_uzs(closed.expected_cash)}\n"
-        f"🖐 Sanalgan naqd: <b>{format_uzs(counted)} so'm</b>\n"
-        f"⚖️ {diff_line}\n"
-        f"💳 Barcha mijozlar qarzi: <b>{format_uzs(closed.total_all_clients_debt)} so'm</b>"
-    )
-
-    if report_group:
-        try:
-            await cb.bot.send_message(report_group.chat_id, summary_msg, parse_mode="HTML")
-        except Exception:
-            pass
-
-    await cb.message.edit_text(
-        f"{summary_msg}\n\n"
-        f"💾 <b>Arxivga saqlandi!</b> Ertangi kunga <b>{format_uzs(counted)} so'm</b> qoldiq o'tdi.",
-        parse_mode="HTML",
-    )
-    await cb.answer("✅ Kun yopildi!")
-
-
-# ---------------------------------------------------------------------------
-# History & Excel Export
+# Archive / History Feeds (Read-only) & Excel Exports
 # ---------------------------------------------------------------------------
 
 
@@ -614,12 +256,11 @@ async def cb_history_list(cb: CallbackQuery) -> None:
     if not sessions:
         await cb.answer("Hozircha kunlik tarix yo'q.", show_alert=True)
         return
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         "📜 <b>Kunlik Hisobotlar va Savdo Tarixi (Arxiv):</b>",
-        parse_mode="HTML",
         reply_markup=history_sessions_kb(sessions),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("hist:view:"))
@@ -635,28 +276,11 @@ async def cb_history_detail(cb: CallbackQuery) -> None:
             f"\n\n🖐 Sanalgan naqd: <b>{format_uzs(summary.session.actual_counted_cash or 0)}</b>"
             f"\n📊 Farq: <b>{format_uzs(diff)}</b>"
         )
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         text,
-        parse_mode="HTML",
         reply_markup=history_detail_kb(sess_id, is_closed=is_closed),
     )
-    await cb.answer()
-
-
-@router.callback_query(F.data.startswith("hist:reopen:"))
-async def cb_history_reopen(cb: CallbackQuery) -> None:
-    sess_id = int(cb.data.split(":")[-1])
-    async with async_session_maker() as db:
-        sess = await reopen_cash_session(db, sess_id)
-    if not sess:
-        await cb.answer("Topilmadi", show_alert=True)
-        return
-    await cb.message.edit_text(
-        f"🔓 <b>{sess.report_date}</b> kuni qayta ochildi!\n"
-        "Endi <b>✏️ Tahrirlash</b> orqali tuzatishingiz va qayta yopishingiz mumkin.",
-        parse_mode="HTML",
-    )
-    await cb.answer("Qayta ochildi")
 
 
 @router.callback_query(F.data.startswith("hist:all_sales:"))
@@ -677,12 +301,11 @@ async def cb_history_all_sales(cb: CallbackQuery) -> None:
         lines.append(
             f"{idx}) <code>{dt}</code> <b>{html.escape(cname)}</b> | {format_kg(s.total_weight_kg)} kg — {format_uzs(s.total_amount)} (foyda: {format_uzs(s.total_profit)})"
         )
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=history_feed_kb("all_sales", page, has_next),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("hist:all_pays:"))
@@ -704,12 +327,11 @@ async def cb_history_all_pays(cb: CallbackQuery) -> None:
         lines.append(
             f"{idx}) <code>{dt}</code> {m_icons.get(p.payment_method, '💵')} <b>{html.escape(cname)}</b> — +{format_uzs(p.amount)} so'm"
         )
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=history_feed_kb("all_pays", page, has_next),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("export:"))
@@ -723,7 +345,6 @@ async def cb_export_excel(cb: CallbackQuery) -> None:
         await cb.answer("Noma'lum oy")
         return
 
-    # Answer callback immediately so Telegram clears the spinner at once
     await cb.answer("⏳ Excel tayyorlanmoqda...")
 
     async with async_session_maker() as db:
@@ -776,4 +397,36 @@ async def cb_export_excel(cb: CallbackQuery) -> None:
         BufferedInputFile(data, filename=filename),
         caption=f"📥 Tayyor Excel hisobot: <code>{html.escape(filename)}</code>",
         parse_mode="HTML",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Legacy Expense / Close Day Buttons -> Redirect to Norin AI APK
+# ---------------------------------------------------------------------------
+
+
+@router.message(F.text.in_({BTN_EXPENSE_KASSA, BTN_CLOSE_DAY}), F.chat.type == "private")
+async def redirect_legacy_kassa_to_apk(message: Message, state: FSMContext) -> None:
+    if not await is_authorized_async(message.from_user.id if message.from_user else None):
+        return
+    await state.clear()
+    await message.answer(
+        "📱 <b>Kassa, xarajat va kunni yopish amallari Norin AI Android ilovasiga ko'chirildi.</b>\n\n"
+        "Ilovada tez, qulay va jonli hisob bilan bajarishingiz mumkin.",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
+    )
+    await message.answer(
+        "📲 Ilovani yuklab olish yoki 1-bosishda ulanish uchun:",
+        reply_markup=_apk_redirect_kb(),
+    )
+
+
+@router.callback_query(
+    F.data.startswith("wal:") | F.data.startswith("close_day:") | F.data.startswith("hist:reopen:")
+)
+async def redirect_legacy_kassa_callbacks(cb: CallbackQuery) -> None:
+    await cb.answer(
+        "📱 Xarajat, kassa va kun yopish endi Norin AI APK ilovasida bajariladi.",
+        show_alert=True,
     )

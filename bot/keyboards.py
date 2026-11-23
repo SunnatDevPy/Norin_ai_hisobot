@@ -27,6 +27,12 @@ from database.models import (
 from services.gemini_ai import format_kg, format_uzs
 
 
+BTN_APK = "📱 Mobil ilova (APK)"
+BTN_DASHBOARDS = "📊 Dashboardlar"
+BTN_GROUPS = "🔗 Guruh sozlash"
+BTN_STATUS = "💎 Obuna va Status"
+
+# Legacy button constants kept for backward-compatible imports and polite APK redirects
 BTN_ADD_SALE = "🥩 Sotuv qo'shish"
 BTN_CLIENT_PAY = "💵 Pul oldim (Mijoz)"
 BTN_DEBTS = "💳 Qarzlar"
@@ -40,6 +46,10 @@ SKIP_BTN = "⏭ O'tkazib yuborish"
 
 MAIN_MENU_BUTTONS = frozenset(
     {
+        BTN_APK,
+        BTN_DASHBOARDS,
+        BTN_GROUPS,
+        BTN_STATUS,
         BTN_ADD_SALE,
         BTN_CLIENT_PAY,
         BTN_DEBTS,
@@ -56,13 +66,11 @@ PAGE_SIZE = 12
 
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
-    """Collapsible bottom main menu so ReplyKeyboard closes cleanly when inline panels open."""
+    """Streamlined 2x2 bottom menu keeping only APK, Dashboards, Group Setup, and Status."""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=BTN_ADD_SALE), KeyboardButton(text=BTN_CLIENT_PAY)],
-            [KeyboardButton(text=BTN_DEBTS), KeyboardButton(text=BTN_DAILY_REPORT)],
-            [KeyboardButton(text=BTN_EXPENSE_KASSA), KeyboardButton(text=BTN_EDIT)],
-            [KeyboardButton(text=BTN_CLOSE_DAY), KeyboardButton(text=BTN_SETTINGS)],
+            [KeyboardButton(text=BTN_APK), KeyboardButton(text=BTN_DASHBOARDS)],
+            [KeyboardButton(text=BTN_GROUPS), KeyboardButton(text=BTN_STATUS)],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
@@ -694,18 +702,21 @@ def cash_tx_edit_kb(tx_id: int) -> InlineKeyboardMarkup:
 
 
 def daily_report_kb(session_id: int) -> InlineKeyboardMarkup:
-    """Actions under Daily Profit Report."""
+    """Read-only dashboard actions under Daily Profit Report."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="📆 Davriy hisobot", callback_data="rep:period:30"),
+                InlineKeyboardButton(text="📆 Davriy (7/30 kun)", callback_data="rep:period:30"),
                 InlineKeyboardButton(text="📥 Kunlik Excel", callback_data=f"export:daily:{session_id}"),
             ],
             [
-                InlineKeyboardButton(text="✏️ Tahrirlash", callback_data="edit_menu:open"),
+                InlineKeyboardButton(text="💳 Qarzlar (Sverka)", callback_data="debt:list"),
                 InlineKeyboardButton(text="📜 Arxiv / Tarix", callback_data="set:history"),
             ],
-            [InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home")],
+            [
+                InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
+                InlineKeyboardButton(text="🔙 Yopish", callback_data="menu:dismiss"),
+            ],
         ]
     )
 
@@ -713,7 +724,7 @@ def daily_report_kb(session_id: int) -> InlineKeyboardMarkup:
 def period_report_kb(
     days: int = 30, period_key: Optional[str] = None
 ) -> InlineKeyboardMarkup:
-    """Period selector and Excel export actions under period analytics."""
+    """Period selector and Excel export actions under period analytics dashboard."""
     active = period_key if period_key in ("cur", "prev") else str(days)
 
     def _lbl(key: str, text: str) -> str:
@@ -732,7 +743,14 @@ def period_report_kb(
                 InlineKeyboardButton(text="📊 Bugungi hisobot", callback_data="rep:today"),
                 InlineKeyboardButton(text="📥 Davriy Excel", callback_data=export_cb),
             ],
-            [InlineKeyboardButton(text="📜 Kassa tarixi Excel", callback_data="export:history")],
+            [
+                InlineKeyboardButton(text="💳 Qarzlar (Sverka)", callback_data="debt:list"),
+                InlineKeyboardButton(text="📜 Kassa tarixi Excel", callback_data="export:history"),
+            ],
+            [
+                InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
+                InlineKeyboardButton(text="🔙 Yopish", callback_data="menu:dismiss"),
+            ],
         ]
     )
 
@@ -807,22 +825,18 @@ def close_day_confirm_kb(session_id: int, counted: float) -> InlineKeyboardMarku
 
 
 def settings_menu_kb(is_super_admin: bool = False) -> InlineKeyboardMarkup:
-    """Settings & History inline menu."""
+    """Group setup & streamlined quick-navigation inline hub."""
     rows = [
         [
-            InlineKeyboardButton(text="🥩 Mahsulotlar", callback_data="set:products"),
-            InlineKeyboardButton(text="🏪 Mijozlar", callback_data="set:clients"),
+            InlineKeyboardButton(text="🏪 Mijoz guruhlarini ulash", callback_data="set:clients"),
+            InlineKeyboardButton(text="📊 Rahbariyat hisobot guruhi", callback_data="set:report_group"),
         ],
         [
-            InlineKeyboardButton(text="📊 Hisobot guruhi", callback_data="set:report_group"),
-            InlineKeyboardButton(text="⚡ Avto & Yaxlitlash", callback_data="set:ai_prefs"),
+            InlineKeyboardButton(text="📊 Dashboardlar", callback_data="rep:today"),
+            InlineKeyboardButton(text="💳 Qarzlar va Sverka", callback_data="debt:list"),
         ],
         [
-            InlineKeyboardButton(text="📜 Arxiv / Tarix", callback_data="set:history"),
-            InlineKeyboardButton(text="📥 Tarix Excel", callback_data="export:history"),
-        ],
-        [
-            InlineKeyboardButton(text="💎 Obuna holati", callback_data="sub:status"),
+            InlineKeyboardButton(text="💎 Obuna va Status", callback_data="sub:status"),
             InlineKeyboardButton(text="📱 Mobil ilova (APK)", callback_data="apk:home"),
         ],
     ]
@@ -923,7 +937,7 @@ def product_unit_kb(product_id: int, current_unit: str = "kg") -> InlineKeyboard
 
 
 def clients_list_kb(clients: Sequence[Client], page: int = 0) -> InlineKeyboardMarkup:
-    """Paginated clients directory list keyboard."""
+    """Paginated clients directory focused on Telegram group binding."""
     start = max(0, page) * PAGE_SIZE
     slice_cli = clients[start : start + PAGE_SIZE]
     rows = [
@@ -940,7 +954,7 @@ def clients_list_kb(clients: Sequence[Client], page: int = 0) -> InlineKeyboardM
         rows.append(nav)
     rows.append(
         [
-            InlineKeyboardButton(text="➕ Yangi mijoz", callback_data="cli:add"),
+            InlineKeyboardButton(text="📊 Hisobot guruhi", callback_data="set:report_group"),
             InlineKeyboardButton(text="⬅️ Orqaga", callback_data="set:back"),
         ]
     )
@@ -950,13 +964,8 @@ def clients_list_kb(clients: Sequence[Client], page: int = 0) -> InlineKeyboardM
 def client_detail_kb(
     client: Client, bot_username: str = "norin_ai_bot"
 ) -> InlineKeyboardMarkup:
-    """Detail actions for a client including custom pricing, profile edit, group bind & sverka."""
-    rows = [
-        [
-            InlineKeyboardButton(text="💰 Individual narxlar", callback_data=f"cli:prices:{client.id}"),
-            InlineKeyboardButton(text="💵 Pul qabul qilish", callback_data=f"pay:cli:{client.id}"),
-        ],
-    ]
+    """Group setup and Akt Sverka actions for a client."""
+    rows: list[list[InlineKeyboardButton]] = []
     if client.group_chat_id:
         grp_lbl = (client.group_title or "Guruh")[:22]
         rows.append(
@@ -970,35 +979,41 @@ def client_detail_kb(
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="🔄 Guruhni almashtirish",
+                    text="🔄 Guruhni almashtirish (1-bosishda)",
                     url=build_client_group_deeplink(bot_username, client.id),
-                ),
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(text="🆔 Guruh ID kiritish", callback_data=f"cli:set_gid:{client.id}"),
+                InlineKeyboardButton(text="🔓 Guruhdan uzish", callback_data=f"cli:unbind:{client.id}"),
+            ]
+        )
+        rows.append(
+            [
                 InlineKeyboardButton(
-                    text="🔓 Guruhdan uzish",
-                    callback_data=f"cli:unbind:{client.id}",
-                ),
+                    text="📤 Akt Sverkani guruhga yuborish",
+                    callback_data=f"cli:send_sverka:{client.id}",
+                )
             ]
         )
     else:
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="➕ Mijoz guruhini ulash (Admin)",
+                    text="➕ Mijoz guruhini ulash (1-bosishda)",
                     url=build_client_group_deeplink(bot_username, client.id),
                 )
             ]
         )
+        rows.append(
+            [InlineKeyboardButton(text="🆔 Guruh ID kiritish", callback_data=f"cli:set_gid:{client.id}")]
+        )
     rows.extend(
         [
-            [
-                InlineKeyboardButton(text="📤 Akt Sverka", callback_data=f"cli:send_sverka:{client.id}"),
-                InlineKeyboardButton(text="📥 Mijoz Excel", callback_data=f"export:client:{client.id}"),
-            ],
-            [
-                InlineKeyboardButton(text="✏️ Profil / Guruh ID", callback_data=f"cli:edit_menu:{client.id}"),
-                InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"cli:del:{client.id}"),
-            ],
-            [InlineKeyboardButton(text="⬅️ Mijozlarga", callback_data="set:clients")],
+            [InlineKeyboardButton(text="📥 Akt Sverka (Excel)", callback_data=f"export:client:{client.id}")],
+            [InlineKeyboardButton(text="⬅️ Mijozlar ro'yxati", callback_data="set:clients")],
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -1111,7 +1126,7 @@ def debts_list_kb(
         rows.append(nav)
     rows.append(
         [
-            InlineKeyboardButton(text="➕ Yangi mijoz", callback_data="cli:add"),
+            InlineKeyboardButton(text="📊 Dashboard", callback_data="rep:today"),
             InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
         ]
     )
@@ -1144,6 +1159,29 @@ def client_debt_detail_kb(client_id: int, has_group: bool) -> InlineKeyboardMark
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def client_debt_readonly_kb(client_id: int, has_group: bool) -> InlineKeyboardMarkup:
+    """Read-only Akt Sverka / Debt actions (Excel export & group Sverka notify only)."""
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="📥 To'liq Akt Sverka (Excel)", callback_data=f"export:client:{client_id}")]
+    ]
+    if has_group:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="📤 Guruhga Sverka yuborish",
+                    callback_data=f"cli:send_sverka:{client_id}",
+                )
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(text="🔗 Guruh sozlamasi", callback_data=f"cli:view:{client_id}"),
+            InlineKeyboardButton(text="⬅️ Qarzlar ro'yxati", callback_data="debt:list"),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 # ---------------------------------------------------------------------------
 # History Keyboards
 # ---------------------------------------------------------------------------
@@ -1165,21 +1203,22 @@ def history_sessions_kb(sessions: Sequence[DailyCashSession]) -> InlineKeyboardM
             icon = "✅" if abs(diff) < 1 else ("⚠️" if diff < 0 else "➕")
             label = f"{icon} {s.report_date} | Qoldiq: {format_uzs(s.actual_counted_cash or 0)}"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"hist:view:{s.id}")])
-    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="set:back")])
+    rows.append(
+        [
+            InlineKeyboardButton(text="📊 Dashboard", callback_data="rep:today"),
+            InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def history_detail_kb(session_id: int, is_closed: bool = True) -> InlineKeyboardMarkup:
-    """Actions for viewing a historical daily session."""
-    top = [InlineKeyboardButton(text="📥 Excel yuklash", callback_data=f"export:daily:{session_id}")]
-    if is_closed:
-        top.append(
-            InlineKeyboardButton(text="🔓 Qayta ochish", callback_data=f"hist:reopen:{session_id}")
-        )
+    """Read-only actions for viewing a historical daily session."""
+    _ = is_closed
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            top,
-            [InlineKeyboardButton(text="⬅️ History ga qaytish", callback_data="set:history")],
+            [InlineKeyboardButton(text="📥 Shu kunning Excel hisoboti", callback_data=f"export:daily:{session_id}")],
+            [InlineKeyboardButton(text="⬅️ Tarixga qaytish", callback_data="set:history")],
         ]
     )
 
@@ -1192,7 +1231,7 @@ def history_feed_kb(kind: str, page: int, has_next: bool) -> InlineKeyboardMarku
     if has_next:
         nav.append(InlineKeyboardButton(text="Keyingi ➡️", callback_data=f"hist:{kind}:{page + 1}"))
     rows = [nav] if nav else []
-    rows.append([InlineKeyboardButton(text="⬅️ History ga qaytish", callback_data="set:history")])
+    rows.append([InlineKeyboardButton(text="⬅️ Tarixga qaytish", callback_data="set:history")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1201,19 +1240,30 @@ def history_feed_kb(kind: str, page: int, has_next: bool) -> InlineKeyboardMarku
 # ---------------------------------------------------------------------------
 
 
-def subscription_status_kb() -> InlineKeyboardMarkup:
-    """Client-facing subscription status actions."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="💳 To'lov qildim (Tasdiqlash so'rash)",
-                    callback_data="sub:paid_notify",
-                )
-            ],
-            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="set:back")],
-        ]
-    )
+def subscription_status_kb(is_super_admin: bool = False) -> InlineKeyboardMarkup:
+    """Client-facing subscription & filial status actions."""
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                text="💳 To'lov qildim (Tasdiqlash)",
+                callback_data="sub:paid_notify",
+            )
+        ],
+        [
+            InlineKeyboardButton(text="📱 Mobil ilova (APK)", callback_data="apk:home"),
+            InlineKeyboardButton(text="📊 Dashboardlar", callback_data="rep:today"),
+        ],
+        [
+            InlineKeyboardButton(text="🔗 Guruh sozlash", callback_data="set:back"),
+            *(
+                [InlineKeyboardButton(text="👑 Super Admin", callback_data="sa:menu")]
+                if is_super_admin
+                else []
+            ),
+        ],
+        [InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def superadmin_pick_user_reply_kb(request_id: int = 101) -> ReplyKeyboardMarkup:

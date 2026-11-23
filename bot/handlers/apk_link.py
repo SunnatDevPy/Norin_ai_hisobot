@@ -15,6 +15,7 @@ from sqlalchemy import desc, select
 
 from api import apk_meta
 from api.security import hash_secret, make_otp
+from bot.keyboards import BTN_APK
 from bot.ui_helpers import fast_edit, send_inline_panel
 from config import get_settings
 from database import session as db_session
@@ -226,6 +227,7 @@ async def cmd_start_apk_ticket(message: Message, state: FSMContext) -> None:
 
 
 @router.message(StateFilter("*"), Command("apk"), F.chat.type == "private")
+@router.message(StateFilter("*"), F.text == BTN_APK, F.chat.type == "private")
 async def cmd_apk(message: Message, state: FSMContext) -> None:
     """Authorized /apk entry point showing APK download and OTP code."""
     uid = message.from_user.id if message.from_user else None

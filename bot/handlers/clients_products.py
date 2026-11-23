@@ -1,4 +1,4 @@
-"""Start, settings, Norin product catalog, clients, custom prices, group binding, and debt ledger."""
+"""Start, Group Setup hub, Telegram Group auto-binding, and Read-only Debts / Akt Sverka."""
 
 from __future__ import annotations
 
@@ -16,63 +16,41 @@ from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
 from bot.handlers.superadmin import is_super_admin
 from bot.keyboards import (
     BTN_DEBTS,
+    BTN_GROUPS,
     BTN_SETTINGS,
     MAIN_MENU_BUTTONS,
-    SKIP_BTN,
-    ai_prefs_kb,
     bind_group_clients_kb,
     cancel_reply_keyboard,
-    client_debt_detail_kb,
+    client_debt_readonly_kb,
     client_detail_kb,
-    client_edit_menu_kb,
-    client_prices_kb,
     clients_list_kb,
-    confirm_delete_kb,
     debts_list_kb,
     main_menu_keyboard,
-    product_detail_kb,
-    product_unit_kb,
-    products_list_kb,
     report_group_config_kb,
-    sale_confirm_kb,
     settings_menu_kb,
-    skip_or_cancel_keyboard,
 )
-from bot.states import ClientStates, ProductStates, WalletStates
+from bot.states import ClientStates, WalletStates
 from bot.ui_helpers import fast_edit, mark_reply_kb_sent, send_inline_panel
 from database.crud import (
     CURRENT_USER_AUTHORIZED,
     ClientDebtSummary,
-    append_product_alias,
     bind_client_group,
     compute_client_debt,
-    create_client,
-    create_product,
-    delete_client,
-    delete_product,
     evaluate_subscription_status,
     format_local_dt,
-    get_app_setting,
     get_client,
     get_client_by_group,
     get_client_prices_map,
     get_group_config,
-    get_product,
-    get_sale,
     is_user_authorized,
     list_all_client_debts,
     list_clients,
     list_products,
-    set_app_setting,
-    set_client_product_price,
     set_group_config,
     unbind_client_group,
-    update_client,
-    update_product,
-    update_sale_client,
 )
 from database.session import async_session_maker
-from services.gemini_ai import format_kg, format_uzs, parse_uzbek_amount
+from services.gemini_ai import format_kg, format_uzs
 
 
 router = Router(name="clients_products")
@@ -143,7 +121,7 @@ def render_debts_overview_text(debts: list[ClientDebtSummary]) -> str:
     if not debts:
         return (
             "💳 <b>Mijozlar Qarz Daftari</b>\n\n"
-            "<i>Hozircha mijozlar qo'shilmagan. «➕ Yangi mijoz qo'shish» tugmasidan boshlang!</i>"
+            "<i>Hozircha mijozlar qo'shilmagan. Mijozlarni Norin AI Android ilovasida qo'shing.</i>"
         )
     total_debt = sum(d.current_debt for d in debts)
     total_kg = sum(d.total_kg for d in debts)
@@ -160,7 +138,7 @@ def render_debts_overview_text(debts: list[ClientDebtSummary]) -> str:
         lines.append(
             f"{idx}) {icon} <b>{html.escape(d.client.name)}</b>{grp_tag} — <b>{format_uzs(d.current_debt)} so'm</b>"
         )
-    lines.append("\n<i>Batafsil Akt Sverka yoki pul qabul qilish uchun mijozni tanlang:</i>")
+    lines.append("\n<i>Batafsil Akt Sverka yoki Excel olish uchun mijozni tanlang:</i>")
     return "\n".join(lines)
 
 
@@ -221,7 +199,7 @@ def render_client_sverka_text(
 
 @router.message(CommandStart(deep_link=False), F.chat.type == "private")
 async def cmd_start(message: Message, state: FSMContext) -> None:
-    """Handle /start in private chat."""
+    """Handle /start in private chat with focused 4-section navigation."""
     uid = message.from_user.id if message.from_user else None
     if not await is_authorized_async(uid):
         await message.answer(
@@ -239,16 +217,17 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         exp_str = format_local_dt(sub_status.state.expires_at, "%d.%m.%Y")
         warn_line = f"\n\n⚠️ <b>Eslatma:</b> Obuna muddati <code>{exp_str}</code> da tugaydi."
     elif not sub_status.is_allowed and not is_super_admin(uid):
-        warn_line = "\n\n🔒 <b>Obuna muddati tugagan.</b> Davom ettirish uchun Sozlamalar → Obuna holatiga kiring."
+        warn_line = "\n\n🔒 <b>Obuna muddati tugagan.</b> Davom ettirish uchun 💎 Obuna va Status bo'limiga kiring."
 
     await message.answer(
         "👋 <b>Assalomu alaykum! Norin AI Hisobot botiga xush kelibsiz.</b>\n"
         f"🏢 Filial: <b>{html.escape(sub_status.state.tenant_name)}</b> (<code>#{sub_status.state.id}</code>)\n\n"
-        "Botda quyidagilarni 1 soniyada bajarasiz:\n"
-        "• 📸 <b>Tarozi/do'kon cheki rasmi</b> — AI faqat <b>kg va go'sht turini</b> o'qiydi (chekdagi do'kon narxini e'tiborsiz qoldiradi) va mijoz narxida hisoblab guruhiga tashlaydi\n"
-        "• 🎤 <b>Ovoz / matn</b> — <i>«Iftiqor 80 notin ot 25 kg»</i> desangiz avtomatik hisoblaydi\n"
-        "• 💰 <b>Individual narx & Tannarx</b> — har bir mijozga alohida narx, o'zingizga sof foyda & marja\n"
-        "• 💳 <b>Qarz daftari & Akt Sverka</b> — naqd/karta to'lovlar va kun yakunidagi kassa sverkasi\n"
+        "Botda faqat quyidagi asosiy boshqaruv bo'limlari qoldirilgan:\n"
+        "• 📱 <b>Mobil ilova (APK)</b> — ilovani yuklab olish, 1-bosishda ulanish va kirish kodi\n"
+        "• 📊 <b>Dashboardlar</b> — kunlik, 7/30 kunlik va oylik hisobotlar, qarzlar, Excel\n"
+        "• 🔗 <b>Guruh sozlash</b> — rahbariyat hisobot guruhi va mijoz guruhlarini ulash\n"
+        "• 💎 <b>Obuna va Status</b> — tarif muddati, AI kvota va faol qurilmalar\n\n"
+        "<i>🥩 Savdo, chek rasmi, to'lov, vozvrat va xarajatlar Norin AI Android APK ilovasida bajariladi.</i>"
         f"{warn_line}\n\n"
         f"🆔 Sizning ID: <code>{uid or 0}</code>",
         parse_mode="HTML",
@@ -257,6 +236,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     mark_reply_kb_sent(message.chat.id)
 
 
+@router.message(Command("cancel"), F.chat.type == "private")
 @router.message(F.text == "❌ Bekor qilish", F.chat.type == "private")
 async def cancel_any_state(message: Message, state: FSMContext) -> None:
     """Cancel current FSM operation and return to main menu."""
@@ -305,7 +285,7 @@ async def cmd_start_group_bind(message: Message, command: CommandObject) -> None
             return
         await message.answer(
             f"✅ Ushbu guruh <b>{html.escape(cli.name)}</b> mijoziga muvaffaqiyatli biriktirildi!\n"
-            f"Endi bu guruhga chek rasmi yoki <i>«norin ot 25 kg»</i> yuborsangiz bot avtomatik hisoblaydi.",
+            "Endi Norin AI ilovasida tasdiqlangan sotuv va to'lov cheklari avtomatik shu guruhga yuboriladi.",
             parse_mode="HTML",
         )
         await _refresh_open_client_card(message.bot, uid, cli.id)
@@ -450,19 +430,42 @@ async def cb_quick_bind_report(cb: CallbackQuery) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Settings Menu & AI Preferences
+# Group Setup Hub (🔗 Guruh sozlash / /groups)
 # ---------------------------------------------------------------------------
 
 
-@router.message(F.text == BTN_SETTINGS, F.chat.type == "private")
+async def _render_groups_hub_text() -> str:
+    async with async_session_maker() as db:
+        clients = await list_clients(db, active_only=True)
+        rep_cfg = await get_group_config(db, "report")
+    bound_cnt = sum(1 for c in clients if c.group_chat_id)
+    rep_line = (
+        f"✅ <b>{html.escape(rep_cfg.title)}</b> (<code>{rep_cfg.chat_id}</code>)"
+        if rep_cfg
+        else "⚠️ <i>Hali ulanmagan</i>"
+    )
+    return (
+        "🔗 <b>Telegram Guruhlarni Sozlash</b>\n"
+        "===============================\n"
+        f"📊 <b>Rahbariyat hisobot guruhi:</b> {rep_line}\n"
+        f"🏪 <b>Mijoz guruhlari:</b> <b>{bound_cnt} / {len(clients)} ta</b> ulangan\n\n"
+        "<i>Guruh ulashning 2 ta oson usuli:</i>\n"
+        "1️⃣ Quyidan mijoz yoki hisobot guruhini tanlab <b>1-bosishda ulash</b> tugmasini bosing;\n"
+        "2️⃣ Yoki botni kerakli guruhga qo'shib ichida <code>/bind_group</code> yozing."
+    )
+
+
+@router.message(Command("groups"), F.chat.type == "private")
+@router.message(F.text.in_({BTN_GROUPS, BTN_SETTINGS}), F.chat.type == "private")
 async def open_settings_menu(message: Message, state: FSMContext) -> None:
     uid = message.from_user.id if message.from_user else None
     if not await is_authorized_async(uid):
         return
     await state.clear()
+    text = await _render_groups_hub_text()
     await send_inline_panel(
         message,
-        "⚙️ <b>Sozlamalar, Mahsulotlar, Mijozlar va Arxiv</b>\nKerakli bo'limni tanlang:",
+        text,
         reply_markup=settings_menu_kb(is_super_admin=is_super_admin(uid)),
         delete_prev=True,
     )
@@ -472,78 +475,12 @@ async def open_settings_menu(message: Message, state: FSMContext) -> None:
 async def cb_settings_back(cb: CallbackQuery, state: FSMContext) -> None:
     uid = cb.from_user.id if cb.from_user else None
     await state.clear()
+    text = await _render_groups_hub_text()
     await fast_edit(
         cb,
-        "⚙️ <b>Sozlamalar, Mahsulotlar, Mijozlar va Arxiv</b>\nKerakli bo'limni tanlang:",
+        text,
         reply_markup=settings_menu_kb(is_super_admin=is_super_admin(uid)),
     )
-
-
-async def _render_ai_prefs() -> tuple[str, bool, bool, str]:
-    async with async_session_maker() as db:
-        auto_confirm = (await get_app_setting(db, "auto_confirm", "on")) == "on"
-        group_auto = (await get_app_setting(db, "group_auto_calc", "on")) == "on"
-        round_mode = await get_app_setting(db, "round_mode", "none")
-    round_desc = {
-        "nearest_1000": "Eng yaqin 1 000 ga",
-        "floor_1000": "1 000 ga pastga",
-        "none": "Yaxlitlamaslik (aniq)",
-    }.get(round_mode, round_mode)
-    text = (
-        "⚡ <b>Tez rejim, Guruhda Avto-Hisob va Yaxlitlash</b>\n\n"
-        f"• <b>DM Avto-tasdiqlash:</b> {'✅ YOQILGAN' if auto_confirm else '❌ O‘CHIQ'}\n"
-        f"• <b>Mijoz guruhida avto-hisob:</b> {'✅ YOQILGAN (guruhga rasm/matn tashlansa darhol hisoblaydi)' if group_auto else '❌ O‘CHIQ'}\n"
-        f"• <b>Summani yaxlitlash:</b> <b>{round_desc}</b>"
-    )
-    return text, auto_confirm, group_auto, round_mode
-
-
-@router.callback_query(F.data == "set:ai_prefs")
-async def cb_ai_prefs_menu(cb: CallbackQuery) -> None:
-    text, auto_on, grp_on, r_mode = await _render_ai_prefs()
-    await cb.message.edit_text(
-        text, parse_mode="HTML", reply_markup=ai_prefs_kb(auto_on, grp_on, r_mode)
-    )
-    await cb.answer()
-
-
-@router.callback_query(F.data == "pref:toggle_auto")
-async def cb_toggle_auto(cb: CallbackQuery) -> None:
-    async with async_session_maker() as db:
-        cur = await get_app_setting(db, "auto_confirm", "on")
-        await set_app_setting(db, "auto_confirm", "off" if cur == "on" else "on")
-    text, auto_on, grp_on, r_mode = await _render_ai_prefs()
-    await cb.message.edit_text(
-        text, parse_mode="HTML", reply_markup=ai_prefs_kb(auto_on, grp_on, r_mode)
-    )
-    await cb.answer("✅ Saqlandi")
-
-
-@router.callback_query(F.data == "pref:toggle_grp")
-async def cb_toggle_grp(cb: CallbackQuery) -> None:
-    async with async_session_maker() as db:
-        cur = await get_app_setting(db, "group_auto_calc", "on")
-        await set_app_setting(db, "group_auto_calc", "off" if cur == "on" else "on")
-    text, auto_on, grp_on, r_mode = await _render_ai_prefs()
-    await cb.message.edit_text(
-        text, parse_mode="HTML", reply_markup=ai_prefs_kb(auto_on, grp_on, r_mode)
-    )
-    await cb.answer("✅ Saqlandi")
-
-
-@router.callback_query(F.data.startswith("pref:round:"))
-async def cb_set_round_mode(cb: CallbackQuery) -> None:
-    mode = cb.data.split(":")[-1]
-    if mode not in ("nearest_1000", "floor_1000", "none"):
-        await cb.answer("Noto'g'ri rejim")
-        return
-    async with async_session_maker() as db:
-        await set_app_setting(db, "round_mode", mode)
-    text, auto_on, grp_on, r_mode = await _render_ai_prefs()
-    await cb.message.edit_text(
-        text, parse_mode="HTML", reply_markup=ai_prefs_kb(auto_on, grp_on, r_mode)
-    )
-    await cb.answer("✅ Yaxlitlash saqlandi")
 
 
 # ---------------------------------------------------------------------------
@@ -571,12 +508,11 @@ async def cb_report_group_menu(cb: CallbackQuery) -> None:
     username = await get_bot_username(cb.bot)
     async with async_session_maker() as db:
         cfg = await get_group_config(db, "report")
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         text,
-        parse_mode="HTML",
         reply_markup=report_group_config_kb(username, group_title=cfg.title if cfg else None),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data == "repgrp:set_id")
@@ -643,391 +579,7 @@ async def cb_report_group_ping(cb: CallbackQuery) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Products Catalog & Cost Management
-# ---------------------------------------------------------------------------
-
-
-async def _render_product_card_text(product_id: int) -> tuple[str, Optional[object]]:
-    """Build product detail text and return (html_text, Product)."""
-    async with async_session_maker() as db:
-        prod = await get_product(db, product_id)
-    if not prod or not prod.is_active:
-        return "", None
-    margin = prod.default_sell_price - prod.cost_price
-    text = (
-        f"🥩 <b>{html.escape(prod.name)}</b>\n"
-        "===============================\n"
-        f"📏 O'lchov birligi: <b>{html.escape(prod.unit)}</b>\n"
-        f"📉 Tannarx (1 {html.escape(prod.unit)}): <b>{format_uzs(prod.cost_price)} so'm</b>\n"
-        f"💰 Standart sotuv narxi: <b>{format_uzs(prod.default_sell_price)} so'm</b>\n"
-        f"📈 Standart foyda: <b>{format_uzs(margin)} so'm</b>\n"
-        f"🔗 Sinonimlar (AI uchun):\n<code>{html.escape(prod.aliases or '-')}</code>"
-    )
-    return text, prod
-
-
-@router.callback_query(F.data == "set:products")
-async def cb_products_menu(cb: CallbackQuery) -> None:
-    async with async_session_maker() as db:
-        products = await list_products(db, active_only=True)
-    await cb.message.edit_text(
-        "🥩 <b>Mahsulotlar Katalogi (Tannarx & Standart Sotuv Narxi)</b>\n"
-        "Tahrirlash uchun mahsulotni tanlang:",
-        parse_mode="HTML",
-        reply_markup=products_list_kb(products),
-    )
-    await cb.answer()
-
-
-@router.callback_query(F.data.startswith("prd:view:"))
-async def cb_product_detail(cb: CallbackQuery) -> None:
-    pid = int(cb.data.split(":")[-1])
-    text, prod = await _render_product_card_text(pid)
-    if not prod:
-        await cb.answer("Mahsulot topilmadi", show_alert=True)
-        return
-    await cb.message.edit_text(
-        text,
-        parse_mode="HTML",
-        reply_markup=product_detail_kb(pid),
-    )
-    await cb.answer()
-
-
-@router.callback_query(F.data.startswith("prd:unit:"))
-async def cb_product_unit_menu(cb: CallbackQuery) -> None:
-    pid = int(cb.data.split(":")[-1])
-    async with async_session_maker() as db:
-        prod = await get_product(db, pid)
-    if not prod or not prod.is_active:
-        await cb.answer("Mahsulot topilmadi", show_alert=True)
-        return
-    await fast_edit(
-        cb,
-        f"📏 <b>{html.escape(prod.name)}</b> — O'lchov birligini tanlang:\n"
-        f"Hozirgi birlik: <b>{html.escape(prod.unit)}</b>",
-        reply_markup=product_unit_kb(pid, prod.unit),
-    )
-
-
-@router.callback_query(F.data.startswith("prd:set_unit:"))
-async def cb_product_set_unit(cb: CallbackQuery) -> None:
-    parts = cb.data.split(":")
-    pid = int(parts[2])
-    new_unit = parts[3].strip().lower()
-    if new_unit not in ("kg", "dona", "porsiya", "litr"):
-        await cb.answer("Noto'g'ri birlik", show_alert=True)
-        return
-    async with async_session_maker() as db:
-        prod = await update_product(db, pid, unit=new_unit)
-    if not prod:
-        await cb.answer("Mahsulot topilmadi", show_alert=True)
-        return
-    text, loaded = await _render_product_card_text(pid)
-    if loaded:
-        await fast_edit(
-            cb,
-            text,
-            reply_markup=product_detail_kb(pid),
-            toast=f"✅ Birlik: {new_unit}",
-        )
-
-
-@router.callback_query(F.data == "prd:add")
-async def cb_product_add_start(cb: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(ProductStates.waiting_product_name)
-    await cb.message.answer(
-        "🥩 Yangi mahsulot nomini kiriting (masalan: <code>Qazi (Tayyor)</code>):",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(
-    ProductStates.waiting_product_name,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_product_name(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    name = (message.text or "").strip()
-    if not name:
-        await message.answer("⚠️ Nom kiriting:")
-        return
-    await state.update_data(prod_name=name)
-    await state.set_state(ProductStates.waiting_product_cost)
-    await message.answer(
-        f"📉 <b>{html.escape(name)}</b> ning 1 kg TANNARXINI kiriting (masalan: <code>90 000</code>):",
-        parse_mode="HTML",
-    )
-
-
-@router.message(
-    ProductStates.waiting_product_cost,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_product_cost(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    amt = parse_uzbek_amount(message.text or "")
-    if amt is None or amt < 0:
-        await message.answer("⚠️ To'g'ri tannarx kiriting (masalan: 90 000):")
-        return
-    await state.update_data(prod_cost=amt)
-    await state.set_state(ProductStates.waiting_product_sell)
-    await message.answer(
-        "💰 1 kg STANDART SOTUV NARXINI kiriting (masalan: <code>115 000</code>):",
-        parse_mode="HTML",
-    )
-
-
-@router.message(
-    ProductStates.waiting_product_sell,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_product_sell(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    amt = parse_uzbek_amount(message.text or "")
-    if amt is None or amt <= 0:
-        await message.answer("⚠️ To'g'ri sotuv narxi kiriting:")
-        return
-    data = await state.get_data()
-    async with async_session_maker() as db:
-        prod = await create_product(
-            db,
-            name=data["prod_name"],
-            cost_price=data["prod_cost"],
-            default_sell_price=amt,
-        )
-        products = await list_products(db, active_only=True)
-    await state.clear()
-    await message.answer(
-        f"✅ Mahsulot qo'shildi: <b>{html.escape(prod.name)}</b>\n"
-        f"📉 Tannarx: {format_uzs(prod.cost_price)} | 💰 Sotuv: {format_uzs(prod.default_sell_price)}",
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
-    )
-    await message.answer("🥩 Mahsulotlar:", reply_markup=products_list_kb(products))
-
-
-@router.callback_query(F.data.startswith("prd:edit_name:"))
-async def cb_product_edit_name_prompt(cb: CallbackQuery, state: FSMContext) -> None:
-    pid = int(cb.data.split(":")[-1])
-    await state.set_state(ProductStates.waiting_product_edit_name)
-    await state.update_data(product_id=pid)
-    await cb.message.answer(
-        "✏️ Mahsulotning yangi nomini kiriting:",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(
-    ProductStates.waiting_product_edit_name,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_product_edit_name(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    name = (message.text or "").strip()
-    if not name:
-        await message.answer("⚠️ Nom kiriting:")
-        return
-    pid = (await state.get_data())["product_id"]
-    async with async_session_maker() as db:
-        prod = await update_product(db, pid, name=name)
-    await state.clear()
-    if prod:
-        await message.answer(
-            f"✅ Mahsulot nomi yangilandi: <b>{html.escape(prod.name)}</b>",
-            parse_mode="HTML",
-            reply_markup=main_menu_keyboard(),
-        )
-        card_text, loaded = await _render_product_card_text(pid)
-        if loaded:
-            await message.answer(card_text, parse_mode="HTML", reply_markup=product_detail_kb(pid))
-
-
-@router.callback_query(F.data.startswith("prd:edit_cost:"))
-async def cb_product_edit_cost_prompt(cb: CallbackQuery, state: FSMContext) -> None:
-    pid = int(cb.data.split(":")[-1])
-    await state.set_state(ProductStates.waiting_edit_product_cost)
-    await state.update_data(product_id=pid)
-    await cb.message.answer(
-        "📉 Yangi 1 kg TANNARXNI kiriting (masalan: <code>92 000</code>):",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(
-    ProductStates.waiting_edit_product_cost,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_product_edit_cost(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    amt = parse_uzbek_amount(message.text or "")
-    if amt is None or amt < 0:
-        await message.answer("⚠️ Summa noto'g'ri. Qayta kiriting:")
-        return
-    pid = (await state.get_data())["product_id"]
-    async with async_session_maker() as db:
-        prod = await update_product(db, pid, cost_price=amt)
-    await state.clear()
-    if prod:
-        await message.answer(
-            f"✅ <b>{html.escape(prod.name)}</b> tannarxi yangilandi: <b>{format_uzs(prod.cost_price)} so'm/kg</b>",
-            parse_mode="HTML",
-            reply_markup=main_menu_keyboard(),
-        )
-        card_text, loaded = await _render_product_card_text(pid)
-        if loaded:
-            await message.answer(card_text, parse_mode="HTML", reply_markup=product_detail_kb(pid))
-
-
-@router.callback_query(F.data.startswith("prd:edit_sell:"))
-async def cb_product_edit_sell_prompt(cb: CallbackQuery, state: FSMContext) -> None:
-    pid = int(cb.data.split(":")[-1])
-    await state.set_state(ProductStates.waiting_edit_product_sell)
-    await state.update_data(product_id=pid)
-    await cb.message.answer(
-        "💰 Yangi 1 kg STANDART SOTUV NARXINI kiriting (masalan: <code>118 000</code>):",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(
-    ProductStates.waiting_edit_product_sell,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_product_edit_sell(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    amt = parse_uzbek_amount(message.text or "")
-    if amt is None or amt <= 0:
-        await message.answer("⚠️ Summa noto'g'ri. Qayta kiriting:")
-        return
-    pid = (await state.get_data())["product_id"]
-    async with async_session_maker() as db:
-        prod = await update_product(db, pid, default_sell_price=amt)
-    await state.clear()
-    if prod:
-        await message.answer(
-            f"✅ <b>{html.escape(prod.name)}</b> standart sotuv narxi: <b>{format_uzs(prod.default_sell_price)} so'm/kg</b>",
-            parse_mode="HTML",
-            reply_markup=main_menu_keyboard(),
-        )
-        card_text, loaded = await _render_product_card_text(pid)
-        if loaded:
-            await message.answer(card_text, parse_mode="HTML", reply_markup=product_detail_kb(pid))
-
-
-@router.callback_query(F.data.startswith("prd:alias:"))
-async def cb_product_alias_prompt(cb: CallbackQuery, state: FSMContext) -> None:
-    pid = int(cb.data.split(":")[-1])
-    await state.set_state(ProductStates.waiting_product_alias)
-    await state.update_data(product_id=pid)
-    await cb.message.answer(
-        "🔗 Mahsulot uchun yangi sinonim so'z yozing (masalan: <code>КОНИНА</code> yoki <code>OTLI NORIN</code>):",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(
-    ProductStates.waiting_product_alias,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_product_alias(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    alias = (message.text or "").strip()
-    if not alias:
-        await message.answer("⚠️ Sinonim kiriting:")
-        return
-    pid = (await state.get_data())["product_id"]
-    async with async_session_maker() as db:
-        prod = await append_product_alias(db, pid, alias)
-    await state.clear()
-    if prod:
-        await message.answer(
-            f"✅ Sinonim qo'shildi! <b>{html.escape(prod.name)}</b> → <code>{html.escape(prod.aliases)}</code>",
-            parse_mode="HTML",
-            reply_markup=main_menu_keyboard(),
-        )
-        card_text, loaded = await _render_product_card_text(pid)
-        if loaded:
-            await message.answer(card_text, parse_mode="HTML", reply_markup=product_detail_kb(pid))
-
-
-@router.callback_query(F.data.startswith("prd:del:"))
-async def cb_product_delete_confirm(cb: CallbackQuery) -> None:
-    pid = int(cb.data.split(":")[-1])
-    async with async_session_maker() as db:
-        prod = await get_product(db, pid)
-    if not prod:
-        await cb.answer("Mahsulot topilmadi", show_alert=True)
-        return
-    await cb.message.edit_text(
-        f"⚠️ <b>{html.escape(prod.name)}</b> mahsulotini rostdan ham o'chirasizmi?\n"
-        "<i>(Eski hisobotlardagi sotuv yozuvlari saqlanib qoladi.)</i>",
-        parse_mode="HTML",
-        reply_markup=confirm_delete_kb(f"prd:del_ok:{pid}", f"prd:view:{pid}"),
-    )
-    await cb.answer()
-
-
-@router.callback_query(F.data.startswith("prd:del_ok:"))
-async def cb_product_delete(cb: CallbackQuery) -> None:
-    pid = int(cb.data.split(":")[-1])
-    async with async_session_maker() as db:
-        await delete_product(db, pid)
-        products = await list_products(db, active_only=True)
-    await cb.message.edit_text(
-        "🗑 Mahsulot o'chirildi.\n\n🥩 <b>Mahsulotlar katalogi:</b>",
-        parse_mode="HTML",
-        reply_markup=products_list_kb(products),
-    )
-    await cb.answer("🗑 O'chirildi")
-
-
-# ---------------------------------------------------------------------------
-# Clients, Custom Per-Client Pricing & Debt Ledger
+# Client Group Binding Directory (Group Setup Only)
 # ---------------------------------------------------------------------------
 
 
@@ -1068,13 +620,18 @@ async def _render_client_card_text(client_id: int) -> tuple[str, Optional[object
 async def cb_clients_menu(cb: CallbackQuery) -> None:
     async with async_session_maker() as db:
         clients = await list_clients(db, active_only=True)
-    await cb.message.edit_text(
-        "🏪 <b>Mijozlar Ro'yxati (Individual Narx & Guruhlar)</b>\n"
-        "Sozlash uchun mijozni tanlang yoki yangi mijoz qo'shing:",
-        parse_mode="HTML",
+    if not clients:
+        await cb.answer(
+            "Hozircha mijozlar yo'q. Mijozni Norin AI APK ilovasida qo'shing.",
+            show_alert=True,
+        )
+        return
+    await fast_edit(
+        cb,
+        "🏪 <b>Mijoz Guruhlarini Sozlash</b>\n"
+        "Guruhini ulash yoki tekshirish uchun mijozni tanlang:",
         reply_markup=clients_list_kb(clients, page=0),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data.startswith("set:clients:p:"))
@@ -1082,8 +639,11 @@ async def cb_clients_page(cb: CallbackQuery) -> None:
     page = int(cb.data.split(":")[-1])
     async with async_session_maker() as db:
         clients = await list_clients(db, active_only=True)
-    await cb.message.edit_reply_markup(reply_markup=clients_list_kb(clients, page=page))
-    await cb.answer()
+    await asyncio.gather(
+        cb.message.edit_reply_markup(reply_markup=clients_list_kb(clients, page=page)),
+        cb.answer(),
+        return_exceptions=True,
+    )
 
 
 @router.callback_query(F.data.startswith("cli:view:"))
@@ -1094,9 +654,9 @@ async def cb_client_detail(cb: CallbackQuery) -> None:
         await cb.answer("Mijoz topilmadi", show_alert=True)
         return
     uname = await get_bot_username(cb.bot)
-    await cb.message.edit_text(
+    await fast_edit(
+        cb,
         text,
-        parse_mode="HTML",
         reply_markup=client_detail_kb(cli, uname),
     )
     if cb.from_user and cb.message.chat.type == "private":
@@ -1104,352 +664,6 @@ async def cb_client_detail(cb: CallbackQuery) -> None:
             cb.message.chat.id,
             cb.message.message_id,
             cli.id,
-        )
-    await cb.answer()
-
-
-@router.callback_query(F.data == "cli:add")
-async def cb_client_add_start(cb: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(ClientStates.waiting_client_name)
-    await state.update_data(pending_sale_id=None)
-    await cb.message.answer(
-        "🏪 Yangi mijoz (do'kon/xaridor) nomini kiriting (masalan: <code>Iftiqor 80</code>):",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.callback_query(F.data.startswith("cli:add_for_sale:"))
-async def cb_client_add_for_sale_start(cb: CallbackQuery, state: FSMContext) -> None:
-    sale_id = int(cb.data.split(":")[-1])
-    await state.set_state(ClientStates.waiting_client_name)
-    await state.update_data(pending_sale_id=sale_id)
-    await cb.message.answer(
-        "🏪 Yangi mijoz nomini kiriting — saqlangach avtomatik ushbu sotuvga biriktiriladi:",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(
-    ClientStates.waiting_client_name,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_client_name(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    name = (message.text or "").strip()
-    if not name:
-        await message.answer("⚠️ Mijoz nomini kiriting:")
-        return
-    await state.update_data(cli_name=name)
-    await state.set_state(ClientStates.waiting_client_phone)
-    await message.answer(
-        "📞 Telefon raqamini kiriting (ixtiyoriy — pastdagi <b>O'tkazib yuborish</b> tugmasini bosing):",
-        parse_mode="HTML",
-        reply_markup=skip_or_cancel_keyboard(),
-    )
-
-
-@router.message(
-    ClientStates.waiting_client_phone,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_client_phone(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    phone = (message.text or "").strip()
-    if phone in ("-", SKIP_BTN):
-        phone = ""
-    await state.update_data(cli_phone=phone)
-    await state.set_state(ClientStates.waiting_client_opening_debt)
-    await message.answer(
-        "💳 Mijozning hozirgi eski qarzi bormi? Summani kiriting (yo'q bo'lsa <b>O'tkazib yuborish</b> ni bosing):",
-        parse_mode="HTML",
-        reply_markup=skip_or_cancel_keyboard(),
-    )
-
-
-@router.message(
-    ClientStates.waiting_client_opening_debt,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_client_opening_debt(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    raw = (message.text or "").strip()
-    if raw in ("0", SKIP_BTN):
-        debt_amt = 0.0
-    else:
-        parsed = parse_uzbek_amount(raw)
-        if parsed is None or parsed < 0:
-            await message.answer("⚠️ Summa noto'g'ri. Raqam kiriting (masalan: <code>0</code> yoki <code>1 500 000</code>):", parse_mode="HTML")
-            return
-        debt_amt = parsed
-
-    data = await state.get_data()
-    pending_sale_id = data.get("pending_sale_id")
-    async with async_session_maker() as db:
-        cli = await create_client(
-            db,
-            name=data["cli_name"],
-            phone=data.get("cli_phone", ""),
-            opening_debt=debt_amt,
-        )
-        bound_sale = (
-            await update_sale_client(db, int(pending_sale_id), cli.id)
-            if pending_sale_id
-            else None
-        )
-    await state.clear()
-    await message.answer(
-        f"✅ Yangi mijoz qo'shildi: <b>{html.escape(cli.name)}</b>!",
-        parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
-    )
-    if bound_sale is not None:
-        from bot.handlers.sales_norin import render_sale_admin_summary
-
-        await message.answer(
-            f"{render_sale_admin_summary(bound_sale)}\n\nMijoz biriktirildi. Tasdiqlaysizmi?",
-            parse_mode="HTML",
-            reply_markup=sale_confirm_kb(bound_sale),
-        )
-        return
-
-    text, loaded_cli = await _render_client_card_text(cli.id)
-    uname = await get_bot_username(message.bot)
-    if loaded_cli:
-        sent = await message.answer(
-            text,
-            parse_mode="HTML",
-            reply_markup=client_detail_kb(loaded_cli, uname),
-        )
-        if message.from_user:
-            _last_client_card[message.from_user.id] = (
-                sent.chat.id,
-                sent.message_id,
-                loaded_cli.id,
-            )
-
-
-@router.callback_query(F.data.startswith("cli:edit_menu:"))
-async def cb_client_edit_menu(cb: CallbackQuery) -> None:
-    cid = int(cb.data.split(":")[-1])
-    async with async_session_maker() as db:
-        cli = await get_client(db, cid)
-    if not cli:
-        await cb.answer("Mijoz topilmadi", show_alert=True)
-        return
-    await cb.message.edit_text(
-        f"✏️ <b>{html.escape(cli.name)} — Profilni tahrirlash</b>\n"
-        f"📞 Telefon: <code>{html.escape(cli.phone or '-')}</code>\n"
-        f"📌 Boshlang'ich qarz: <b>{format_uzs(cli.opening_debt)} so'm</b>",
-        parse_mode="HTML",
-        reply_markup=client_edit_menu_kb(cid),
-    )
-    await cb.answer()
-
-
-@router.callback_query(F.data.startswith("cli:edit_name:"))
-async def cb_client_edit_name_prompt(cb: CallbackQuery, state: FSMContext) -> None:
-    cid = int(cb.data.split(":")[-1])
-    await state.set_state(ClientStates.waiting_client_edit_name)
-    await state.update_data(client_id=cid)
-    await cb.message.answer("✏️ Mijozning yangi nomini kiriting:", reply_markup=cancel_reply_keyboard())
-    await cb.answer()
-
-
-@router.message(
-    ClientStates.waiting_client_edit_name,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_client_edit_name(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    name = (message.text or "").strip()
-    if not name:
-        await message.answer("⚠️ Nom kiriting:")
-        return
-    cid = (await state.get_data())["client_id"]
-    async with async_session_maker() as db:
-        cli = await update_client(db, cid, name=name)
-    await state.clear()
-    await message.answer("✅ Mijoz nomi yangilandi!", reply_markup=main_menu_keyboard())
-    if cli:
-        card_text, loaded_cli = await _render_client_card_text(cid)
-        if loaded_cli:
-            uname = await get_bot_username(message.bot)
-            await message.answer(card_text, parse_mode="HTML", reply_markup=client_detail_kb(loaded_cli, uname))
-
-
-@router.callback_query(F.data.startswith("cli:edit_phone:"))
-async def cb_client_edit_phone_prompt(cb: CallbackQuery, state: FSMContext) -> None:
-    cid = int(cb.data.split(":")[-1])
-    await state.set_state(ClientStates.waiting_client_edit_phone)
-    await state.update_data(client_id=cid)
-    await cb.message.answer("📞 Yangi telefon raqamini kiriting (yoki <code>-</code>):", parse_mode="HTML", reply_markup=cancel_reply_keyboard())
-    await cb.answer()
-
-
-@router.message(
-    ClientStates.waiting_client_edit_phone,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_client_edit_phone(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    phone = (message.text or "").strip()
-    if phone == "-":
-        phone = ""
-    cid = (await state.get_data())["client_id"]
-    async with async_session_maker() as db:
-        cli = await update_client(db, cid, phone=phone)
-    await state.clear()
-    await message.answer("✅ Telefon raqami yangilandi!", reply_markup=main_menu_keyboard())
-    if cli:
-        card_text, loaded_cli = await _render_client_card_text(cid)
-        if loaded_cli:
-            uname = await get_bot_username(message.bot)
-            await message.answer(card_text, parse_mode="HTML", reply_markup=client_detail_kb(loaded_cli, uname))
-
-
-@router.callback_query(F.data.startswith("cli:edit_debt:"))
-async def cb_client_edit_debt_prompt(cb: CallbackQuery, state: FSMContext) -> None:
-    cid = int(cb.data.split(":")[-1])
-    await state.set_state(ClientStates.waiting_client_edit_opening_debt)
-    await state.update_data(client_id=cid)
-    await cb.message.answer("💳 Yangi boshlang'ich qarz summasini kiriting (<code>0</code> mumkin):", parse_mode="HTML", reply_markup=cancel_reply_keyboard())
-    await cb.answer()
-
-
-@router.message(
-    ClientStates.waiting_client_edit_opening_debt,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_client_edit_debt(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    raw = (message.text or "").strip()
-    amt = 0.0 if raw == "0" else parse_uzbek_amount(raw)
-    if amt is None or amt < 0:
-        await message.answer("⚠️ Summa noto'g'ri. Raqam kiriting:")
-        return
-    cid = (await state.get_data())["client_id"]
-    async with async_session_maker() as db:
-        cli = await update_client(db, cid, opening_debt=amt)
-    await state.clear()
-    await message.answer("✅ Boshlang'ich qarz yangilandi!", reply_markup=main_menu_keyboard())
-    if cli:
-        card_text, loaded_cli = await _render_client_card_text(cid)
-        if loaded_cli:
-            uname = await get_bot_username(message.bot)
-            await message.answer(card_text, parse_mode="HTML", reply_markup=client_detail_kb(loaded_cli, uname))
-
-
-@router.callback_query(F.data.startswith("cli:prices:"))
-async def cb_client_prices_menu(cb: CallbackQuery) -> None:
-    cid = int(cb.data.split(":")[-1])
-    async with async_session_maker() as db:
-        cli = await get_client(db, cid)
-        products = await list_products(db, active_only=True)
-        custom_map = await get_client_prices_map(db, cid)
-    if not cli:
-        await cb.answer("Mijoz topilmadi", show_alert=True)
-        return
-    await cb.message.edit_text(
-        f"💰 <b>{html.escape(cli.name)} — Individual KG Narxlari</b>\n"
-        "Narxni o'zgartirmoqchi bo'lgan mahsulotni tanlang:",
-        parse_mode="HTML",
-        reply_markup=client_prices_kb(cid, products, custom_map),
-    )
-    await cb.answer()
-
-
-@router.callback_query(F.data.startswith("cli:setprice:"))
-async def cb_client_set_price_prompt(cb: CallbackQuery, state: FSMContext) -> None:
-    parts = cb.data.split(":")
-    cid = int(parts[2])
-    pid = int(parts[3])
-    async with async_session_maker() as db:
-        cli = await get_client(db, cid)
-        prod = await get_product(db, pid)
-    if not cli or not prod:
-        await cb.answer("Topilmadi", show_alert=True)
-        return
-    await state.set_state(ClientStates.waiting_client_custom_price)
-    await state.update_data(client_id=cid, product_id=pid)
-    await cb.message.answer(
-        f"💰 <b>{html.escape(cli.name)}</b> uchun <b>{html.escape(prod.name)}</b> ning 1 kg narxini yozing\n"
-        f"(Standart narx: {format_uzs(prod.default_sell_price)} | Standartga qaytarish uchun <code>0</code> yozing):",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(
-    ClientStates.waiting_client_custom_price,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_client_custom_price(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    raw = (message.text or "").strip()
-    if raw == "0":
-        price: Optional[float] = 0.0
-    else:
-        price = parse_uzbek_amount(raw)
-        if price is None or price < 0:
-            await message.answer("⚠️ To'g'ri narx kiriting (masalan: <code>112 000</code>):", parse_mode="HTML")
-            return
-    data = await state.get_data()
-    cid = data["client_id"]
-    pid = data["product_id"]
-    async with async_session_maker() as db:
-        await set_client_product_price(db, cid, pid, price if price and price > 0 else None)
-        cli = await get_client(db, cid)
-        products = await list_products(db, active_only=True)
-        custom_map = await get_client_prices_map(db, cid)
-    await state.clear()
-    await message.answer(
-        "✅ Mijoz narxi saqlandi!",
-        reply_markup=main_menu_keyboard(),
-    )
-    if cli:
-        await message.answer(
-            f"💰 <b>{html.escape(cli.name)} — Individual KG Narxlari</b>",
-            parse_mode="HTML",
-            reply_markup=client_prices_kb(cid, products, custom_map),
         )
 
 
@@ -1533,50 +747,6 @@ async def cb_client_group_ping(cb: CallbackQuery) -> None:
         await cb.answer(f"⚠️ Guruh tekshiruv xatosi: {exc}", show_alert=True)
 
 
-@router.callback_query(F.data.startswith("cli:alias:"))
-async def cb_client_alias_prompt(cb: CallbackQuery, state: FSMContext) -> None:
-    cid = int(cb.data.split(":")[-1])
-    await state.set_state(ClientStates.waiting_client_alias)
-    await state.update_data(client_id=cid)
-    await cb.message.answer(
-        "🔗 Mijoz uchun qo'shimcha sinonim nom kiriting (masalan: <code>IFTIQOR</code>):",
-        parse_mode="HTML",
-        reply_markup=cancel_reply_keyboard(),
-    )
-    await cb.answer()
-
-
-@router.message(
-    ClientStates.waiting_client_alias,
-    F.chat.type == "private",
-    F.text,
-    ~F.text.startswith("/"),
-    ~F.text.in_(MAIN_MENU_BUTTONS),
-    F.text != "❌ Bekor qilish",
-)
-async def process_client_alias(message: Message, state: FSMContext) -> None:
-    if not await is_authorized_async(message.from_user.id if message.from_user else None):
-        return
-    alias = (message.text or "").strip().upper()
-    if not alias:
-        await message.answer("⚠️ Sinonim kiriting:")
-        return
-    cid = (await state.get_data())["client_id"]
-    async with async_session_maker() as db:
-        cli = await get_client(db, cid)
-        if cli:
-            parts = [p.strip() for p in cli.aliases.split(",") if p.strip()]
-            if alias not in [p.upper() for p in parts]:
-                parts.append(alias)
-            await update_client(db, cid, aliases=",".join(parts))
-    await state.clear()
-    await message.answer("✅ Sinonim qo'shildi!", reply_markup=main_menu_keyboard())
-    card_text, loaded_cli = await _render_client_card_text(cid)
-    if loaded_cli:
-        uname = await get_bot_username(message.bot)
-        await message.answer(card_text, parse_mode="HTML", reply_markup=client_detail_kb(loaded_cli, uname))
-
-
 @router.callback_query(F.data.startswith("cli:unbind:"))
 async def cb_client_unbind_group(cb: CallbackQuery) -> None:
     cid = int(cb.data.split(":")[-1])
@@ -1587,37 +757,6 @@ async def cb_client_unbind_group(cb: CallbackQuery) -> None:
         uname = await get_bot_username(cb.bot)
         await cb.message.edit_text(text, parse_mode="HTML", reply_markup=client_detail_kb(cli, uname))
     await cb.answer("🔓 Guruh uzildi")
-
-
-@router.callback_query(F.data.startswith("cli:del:"))
-async def cb_client_delete_confirm(cb: CallbackQuery) -> None:
-    cid = int(cb.data.split(":")[-1])
-    async with async_session_maker() as db:
-        cli = await get_client(db, cid)
-    if not cli:
-        await cb.answer("Mijoz topilmadi", show_alert=True)
-        return
-    await cb.message.edit_text(
-        f"⚠️ <b>{html.escape(cli.name)}</b> mijozini rostdan ham o'chirasizmi?\n"
-        "<i>(Ulangan guruh uziladi, lekin tarixiy sotuvlar saqlanadi.)</i>",
-        parse_mode="HTML",
-        reply_markup=confirm_delete_kb(f"cli:del_ok:{cid}", f"cli:view:{cid}"),
-    )
-    await cb.answer()
-
-
-@router.callback_query(F.data.startswith("cli:del_ok:"))
-async def cb_client_delete(cb: CallbackQuery) -> None:
-    cid = int(cb.data.split(":")[-1])
-    async with async_session_maker() as db:
-        await delete_client(db, cid)
-        clients = await list_clients(db, active_only=True)
-    await cb.message.edit_text(
-        "🗑 Mijoz o'chirildi.\n\n🏪 <b>Mijozlar Ro'yxati:</b>",
-        parse_mode="HTML",
-        reply_markup=clients_list_kb(clients, page=0),
-    )
-    await cb.answer("🗑 O'chirildi")
 
 
 @router.callback_query(F.data.startswith("cli:send_sverka:"))
@@ -1641,7 +780,7 @@ async def cb_client_send_sverka_to_group(cb: CallbackQuery) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Debts Menu (💳 Qarzlar)
+# Read-only Debts & Akt Sverka (Accessible from Dashboards)
 # ---------------------------------------------------------------------------
 
 
@@ -1691,5 +830,28 @@ async def cb_debt_client_detail(cb: CallbackQuery) -> None:
     await fast_edit(
         cb,
         render_client_sverka_text(debt, for_group=False),
-        reply_markup=client_debt_detail_kb(cid, has_group=bool(debt.client.group_chat_id)),
+        reply_markup=client_debt_readonly_kb(cid, has_group=bool(debt.client.group_chat_id)),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Legacy Catalog / Prefs Callbacks -> Polite APK Redirect
+# ---------------------------------------------------------------------------
+
+
+@router.callback_query(
+    F.data.in_({"set:products", "set:ai_prefs"})
+    | F.data.startswith("prd:")
+    | F.data.startswith("pref:")
+    | F.data.startswith("cli:add")
+    | F.data.startswith("cli:edit")
+    | F.data.startswith("cli:prices:")
+    | F.data.startswith("cli:setprice:")
+    | F.data.startswith("cli:alias:")
+    | F.data.startswith("cli:del")
+)
+async def redirect_legacy_catalog_callbacks(cb: CallbackQuery) -> None:
+    await cb.answer(
+        "📱 Mahsulot, mijoz va narx sozlamalari endi Norin AI APK ilovasida bajariladi.",
+        show_alert=True,
     )

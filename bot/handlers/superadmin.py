@@ -11,8 +11,11 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from sqlalchemy import func, select
 
+from api import apk_meta
 from bot.keyboards import (
+    BTN_STATUS,
     MAIN_MENU_BUTTONS,
     cancel_reply_keyboard,
     confirm_delete_kb,
@@ -44,13 +47,16 @@ from database.crud import (
     get_app_setting,
     get_authorized_user,
     get_global_saas_analytics,
+    get_group_config,
     get_raw_app_setting,
     get_tenant_overview_stats,
     is_user_authorized,
     list_all_broadcast_recipients,
     list_authorized_users,
+    list_clients,
     list_subscription_payments,
     list_tenants,
+    now_utc,
     reassign_authorized_user,
     remove_authorized_user,
     reset_full_database,
@@ -61,6 +67,7 @@ from database.crud import (
     tenant_scope,
     update_subscription_settings,
 )
+from database.models import ApiSession
 from database.session import async_session_maker
 from services.gemini_ai import format_uzs, parse_uzbek_amount
 
@@ -169,12 +176,40 @@ async def _render_superadmin_dashboard(tenant_id: int = 1) -> tuple[str, bool, i
     return text, sub.is_suspended, len(tenants), sub.id
 
 
-async def _render_client_subscription_text() -> str:
-    """Render subscription status card visible to client admins."""
+async def _render_client_subscription_text(user_id: Optional[int] = None) -> str:
+    """Render enriched tenant subscription, AI quota, groups, and APK device status card."""
     async with async_session_maker() as db:
         sub_status = await evaluate_subscription_status(db)
-    sub = sub_status.state
+        sub = sub_status.state
+        _, ai_used, ai_limit = await check_tenant_ai_quota(db, tenant_id=sub.id)
+        clients = await list_clients(db, active_only=True)
+        report_grp = await get_group_config(db, "report")
+        dev_count = 0
+        if user_id:
+            dev_count = int(
+                await db.scalar(
+                    select(func.count(ApiSession.id)).where(
+                        ApiSession.telegram_id == int(user_id),
+                        ApiSession.is_revoked.is_(False),
+                        ApiSession.expires_at > now_utc(),
+                    )
+                )
+                or 0
+            )
     exp_str = format_local_dt(sub.expires_at, "%d.%m.%Y")
+    bound_clients = sum(1 for c in clients if c.group_chat_id)
+    rep_status = (
+        f"✅ {html.escape(report_grp.title)}"
+        if report_grp
+        else "⚠️ Ulanmagan"
+    )
+    ai_line = (
+        f"♾️ Cheksiz (bugun: <b>{ai_used}</b> so'rov)"
+        if ai_limit <= 0
+        else f"<b>{ai_used} / {ai_limit}</b> so'rov (bugun)"
+    )
+    meta = apk_meta.get_apk_version_metadata()
+    ver_lbl = f"v{meta.get('version', '1.0.0')}"
 
     status_map = {
         "active": f"🟢 Faol ({sub_status.days_left} kun qoldi)",
@@ -185,21 +220,26 @@ async def _render_client_subscription_text() -> str:
     }
 
     return (
-        "💎 <b>Norin AI Obuna Holati</b>\n"
+        "💎 <b>Norin AI — Obuna va Filial Statusi</b>\n"
         "===============================\n"
         f"🏢 Sex / Filial: <b>{html.escape(sub.tenant_name)}</b> (<code>#{sub.id}</code>)\n"
-        f"📦 Tarif: <b>{html.escape(sub.plan_name)}</b>\n"
-        f"💳 Oylik to'lov: <b>{format_uzs(sub.monthly_price)} so'm</b>\n"
+        f"📦 Tarif: <b>{html.escape(sub.plan_name)}</b> — <b>{format_uzs(sub.monthly_price)} so'm/oy</b>\n"
         f"📅 Amal qilish muddati: <b>{exp_str}</b>\n"
-        f"📌 Holat: <b>{status_map.get(sub_status.status, sub_status.status)}</b>\n\n"
+        f"📌 Obuna holati: <b>{status_map.get(sub_status.status, sub_status.status)}</b>\n"
+        "-------------------------------\n"
+        f"🤖 Kunlik AI kvota: {ai_line}\n"
+        f"🏪 Mijoz guruhlari: <b>{bound_clients} / {len(clients)} ta</b> ulangan\n"
+        f"📊 Hisobot guruhi: {rep_status}\n"
+        f"📱 Mobil ilova ({html.escape(ver_lbl)}): <b>{dev_count} ta</b> faol qurilma\n"
+        "-------------------------------\n"
         f"To'lovni amalga oshirib, <b>«💳 To'lov qildim»</b> tugmasini bosing — "
         f"administrator darhol muddatni uzaytirib beradi.\n"
-        f"📞 Yordam / Aloqa: <b>{html.escape(sub.owner_contact)}</b>"
+        f"📞 Aloqa: <b>{html.escape(sub.owner_contact)}</b>"
     )
 
 
 # ---------------------------------------------------------------------------
-# /myid & Client Subscription Views
+# /myid, /status & Client Subscription Views
 # ---------------------------------------------------------------------------
 
 
@@ -216,21 +256,38 @@ async def cmd_myid(message: Message) -> None:
     )
 
 
+@router.message(Command("status"), F.chat.type == "private")
+@router.message(F.text == BTN_STATUS, F.chat.type == "private")
+async def cmd_tenant_status(message: Message, state: FSMContext) -> None:
+    """Show live filial, subscription, AI quota, groups, and APK device status."""
+    uid = message.from_user.id if message.from_user else None
+    async with async_session_maker() as db:
+        if not await is_user_authorized(db, uid):
+            return
+    await state.clear()
+    text = await _render_client_subscription_text(user_id=uid)
+    await send_inline_panel(
+        message,
+        text,
+        reply_markup=subscription_status_kb(is_super_admin=is_super_admin(uid)),
+        delete_prev=True,
+    )
+
+
 @router.callback_query(F.data == "sub:status")
 async def cb_subscription_status(cb: CallbackQuery) -> None:
-    """Show client subscription status screen."""
+    """Show client subscription & filial status screen."""
     uid = cb.from_user.id if cb.from_user else None
     async with async_session_maker() as db:
         if not await is_user_authorized(db, uid):
             await cb.answer("Ruxsat yo'q", show_alert=True)
             return
-    text = await _render_client_subscription_text()
-    await cb.message.edit_text(
+    text = await _render_client_subscription_text(user_id=uid)
+    await fast_edit(
+        cb,
         text,
-        parse_mode="HTML",
-        reply_markup=subscription_status_kb(),
+        reply_markup=subscription_status_kb(is_super_admin=is_super_admin(uid)),
     )
-    await cb.answer()
 
 
 @router.callback_query(F.data == "sub:paid_notify")
