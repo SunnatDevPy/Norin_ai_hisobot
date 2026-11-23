@@ -11,6 +11,7 @@ import '../../core/utils/formatters.dart';
 import '../../core/version.dart';
 import '../../core/widgets/metric_cards.dart';
 import '../../core/widgets/norin_widgets.dart';
+import '../admin/admin_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -180,6 +181,8 @@ class SettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final auth = ref.watch(authProvider);
+    final isAdmin = auth.isSuperAdmin;
     final settingsAsync = ref.watch(settingsProvider);
     final productsAsync = ref.watch(productsProvider);
     final bioLock = ref.watch(biometricLockProvider);
@@ -197,6 +200,10 @@ class SettingsScreen extends ConsumerWidget {
             onPressed: () {
               ref.invalidate(settingsProvider);
               ref.invalidate(productsProvider);
+              if (isAdmin) {
+                ref.invalidate(adminTenantsProvider);
+                ref.invalidate(adminAnalyticsProvider);
+              }
             },
           ),
         ],
@@ -204,6 +211,10 @@ class SettingsScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
         children: [
+          if (isAdmin) ...[
+            _SuperAdminSettingsCard(selectedTenantId: auth.selectedTenantId),
+            const SizedBox(height: 16),
+          ],
           settingsAsync.when(
             loading: () => const Card(
               child: Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator())),
@@ -549,6 +560,128 @@ class _DevicesSheetState extends State<_DevicesSheet> {
           },
         );
       },
+    );
+  }
+}
+
+class _SuperAdminSettingsCard extends ConsumerWidget {
+  const _SuperAdminSettingsCard({required this.selectedTenantId});
+
+  final int selectedTenantId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tenantsAsync = ref.watch(adminTenantsProvider);
+    final tenants = tenantsAsync.valueOrNull ?? const <Map<String, dynamic>>[];
+
+    return SpotlightHeroCard(
+      padding: const EdgeInsets.all(16),
+      borderRadius: 20,
+      glowColor: NorinPalette.magenta,
+      accentColor: NorinPalette.indigo,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: NorinPalette.magenta.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.admin_panel_settings_rounded,
+                  color: NorinPalette.emeraldLight,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Super Admin & Filial Boshqaruvi",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      "Faqat sizga ko'rinadi • Filialni 1-bosishda almashtiring",
+                      style: TextStyle(color: Colors.white70, fontSize: 11.5),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (tenants.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 36,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: tenants.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (ctx, i) {
+                  final t = tenants[i];
+                  final tid = asInt(t['id']);
+                  final tName = asStr(t['tenant_name'] ?? t['name'], 'Filial #$tid');
+                  final active = tid == selectedTenantId;
+                  return ChoiceChip(
+                    selected: active,
+                    label: Text(
+                      "#$tid $tName",
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                      ),
+                    ),
+                    onSelected: (_) async {
+                      await ref.read(authProvider.notifier).selectTenant(tid);
+                      invalidateOperationalData(ref);
+                      if (context.mounted) {
+                        showSnack(context, "Faol filial: #$tid $tName");
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const AdminScreen(initialTab: 0)),
+                    );
+                  },
+                  icon: const Icon(Icons.insights_rounded, size: 18),
+                  label: const Text("Admin Panel"),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const AdminScreen(initialTab: 1)),
+                    );
+                  },
+                  icon: const Icon(Icons.store_mall_directory_rounded, size: 18),
+                  label: const Text("Filiallar"),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

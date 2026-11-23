@@ -5,7 +5,6 @@ import '../../core/state/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/update/app_updater.dart';
 import '../../core/widgets/metric_cards.dart';
-import '../admin/admin_screen.dart';
 import '../cash/cash_screen.dart';
 import '../clients/clients_screen.dart';
 import '../dashboard/dashboard_screen.dart';
@@ -36,19 +35,16 @@ class _MainShellState extends ConsumerState<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = ref.watch(authProvider);
-    final isAdmin = auth.isSuperAdmin;
     final rawIdx = ref.watch(shellTabIndexProvider);
 
-    final pages = <Widget>[
-      const DashboardScreen(),
-      const ClientsScreen(),
-      const CashScreen(),
-      if (isAdmin) const AdminScreen(),
-      const SettingsScreen(),
+    const pages = <Widget>[
+      DashboardScreen(),
+      ClientsScreen(),
+      CashScreen(),
+      SettingsScreen(),
     ];
 
-    final navItems = <({IconData icon, IconData activeIcon, String label})>[
+    const navItems = <({IconData icon, IconData activeIcon, String label})>[
       (icon: Icons.home_outlined, activeIcon: Icons.home_rounded, label: "Asosiy"),
       (icon: Icons.people_outline_rounded, activeIcon: Icons.people_rounded, label: "Mijozlar"),
       (
@@ -56,17 +52,10 @@ class _MainShellState extends ConsumerState<MainShell> {
         activeIcon: Icons.account_balance_wallet_rounded,
         label: "Kassa"
       ),
-      if (isAdmin)
-        (
-          icon: Icons.admin_panel_settings_outlined,
-          activeIcon: Icons.admin_panel_settings_rounded,
-          label: "Admin"
-        ),
-      (icon: Icons.tune_outlined, activeIcon: Icons.tune_rounded, label: "Sozlama"),
+      (icon: Icons.tune_outlined, activeIcon: Icons.tune_rounded, label: "Sozlamalar"),
     ];
 
     final idx = rawIdx >= pages.length ? 0 : rawIdx;
-    final showSaleFab = idx <= 2;
 
     return Scaffold(
       extendBody: true,
@@ -74,36 +63,11 @@ class _MainShellState extends ConsumerState<MainShell> {
       body: CosmicBackground(
         child: IndexedStack(index: idx, children: pages),
       ),
-      floatingActionButton: showSaleFab
-          ? Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(999),
-                gradient: NorinPalette.neonPurpleGradient,
-                boxShadow: [
-                  BoxShadow(
-                    color: NorinPalette.emerald.withValues(alpha: 0.48),
-                    blurRadius: 18,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: FloatingActionButton.extended(
-                backgroundColor: Colors.transparent,
-                foregroundColor: const Color(0xFF190A2E),
-                elevation: 0,
-                onPressed: () => openNewSaleSheet(context, ref),
-                icon: const Icon(Icons.auto_awesome_rounded),
-                label: const Text(
-                  "Sotuv / AI",
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-            )
-          : null,
       bottomNavigationBar: _FloatingGlassDock(
         items: navItems,
         selectedIndex: idx,
         onTap: (v) => ref.read(shellTabIndexProvider.notifier).state = v,
+        onCenterAiTap: () => openNewSaleSheet(context, ref),
       ),
     );
   }
@@ -114,11 +78,13 @@ class _FloatingGlassDock extends StatelessWidget {
     required this.items,
     required this.selectedIndex,
     required this.onTap,
+    required this.onCenterAiTap,
   });
 
   final List<({IconData icon, IconData activeIcon, String label})> items;
   final int selectedIndex;
   final ValueChanged<int> onTap;
+  final VoidCallback onCenterAiTap;
 
   @override
   Widget build(BuildContext context) {
@@ -127,37 +93,123 @@ class _FloatingGlassDock extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: Container(
-          height: 64,
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xF2151421) : const Color(0xF5FFFFFF),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: isDark ? const Color(0xFF312C4A) : NorinPalette.lightBorder,
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: (isDark ? Colors.black : NorinPalette.emeraldDark).withValues(alpha: 0.35),
-                blurRadius: 24,
-                offset: const Offset(0, 10),
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+        child: SizedBox(
+          height: 76,
+          child: Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.bottomCenter,
+            children: [
+              Container(
+                height: 64,
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xF2151421) : const Color(0xF5FFFFFF),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF312C4A) : NorinPalette.lightBorder,
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (isDark ? Colors.black : NorinPalette.emeraldDark)
+                          .withValues(alpha: 0.35),
+                      blurRadius: 24,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    for (int i = 0; i < 2; i++)
+                      Expanded(
+                        child: _DockButton(
+                          icon: items[i].icon,
+                          activeIcon: items[i].activeIcon,
+                          label: items[i].label,
+                          selected: i == selectedIndex,
+                          onTap: () => onTap(i),
+                        ),
+                      ),
+                    const SizedBox(width: 72),
+                    for (int i = 2; i < items.length; i++)
+                      Expanded(
+                        child: _DockButton(
+                          icon: items[i].icon,
+                          activeIcon: items[i].activeIcon,
+                          label: items[i].label,
+                          selected: i == selectedIndex,
+                          onTap: () => onTap(i),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Positioned(
+                top: 0,
+                child: _CenterCircularAiButton(onTap: onCenterAiTap),
               ),
             ],
           ),
-          child: Row(
+        ),
+      ),
+    );
+  }
+}
+
+class _CenterCircularAiButton extends StatelessWidget {
+  const _CenterCircularAiButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 62,
+        height: 62,
+        padding: const EdgeInsets.all(3.5),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isDark ? const Color(0xFF151421) : Colors.white,
+          border: Border.all(
+            color: NorinPalette.magenta.withValues(alpha: 0.55),
+            width: 1.4,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: NorinPalette.emerald.withValues(alpha: 0.55),
+              blurRadius: 20,
+              spreadRadius: 1,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Container(
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: NorinPalette.neonPurpleGradient,
+          ),
+          child: const Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              for (int i = 0; i < items.length; i++)
-                Expanded(
-                  child: _DockButton(
-                    icon: items[i].icon,
-                    activeIcon: items[i].activeIcon,
-                    label: items[i].label,
-                    selected: i == selectedIndex,
-                    onTap: () => onTap(i),
-                  ),
+              Icon(
+                Icons.auto_awesome_rounded,
+                size: 23,
+                color: Color(0xFF1A0B2E),
+              ),
+              Text(
+                "AI",
+                style: TextStyle(
+                  fontSize: 9.5,
+                  height: 1.05,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF1A0B2E),
+                  letterSpacing: 0.4,
                 ),
+              ),
             ],
           ),
         ),

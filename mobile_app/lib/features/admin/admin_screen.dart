@@ -10,7 +10,9 @@ import '../../core/widgets/norin_widgets.dart';
 import '../shell/main_shell.dart';
 
 class AdminScreen extends ConsumerStatefulWidget {
-  const AdminScreen({super.key});
+  const AdminScreen({super.key, this.initialTab = 0});
+
+  final int initialTab;
 
   @override
   ConsumerState<AdminScreen> createState() => _AdminScreenState();
@@ -26,7 +28,11 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 3, vsync: this);
+    _tabs = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.initialTab.clamp(0, 2),
+    );
     _tabs.addListener(() {
       if (_tabs.index == 2 && _auditLogs == null && !_loadingAudit) {
         _loadAudit();
@@ -178,9 +184,10 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabs,
-        children: [
+      body: CosmicBackground(
+        child: TabBarView(
+          controller: _tabs,
+          children: [
           // 1. Statistika / MRR
           RefreshIndicator(
             onRefresh: () async {
@@ -321,6 +328,9 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                         ref.read(shellTabIndexProvider.notifier).state = 0;
                         if (context.mounted) {
                           showSnack(context, "Faol filial: ${asStr(t['tenant_name'] ?? t['name'])}");
+                          if (Navigator.canPop(context)) {
+                            Navigator.pop(context);
+                          }
                         }
                       },
                       onManage: () async {
@@ -423,6 +433,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
             ],
           ),
         ],
+      ),
       ),
     );
   }
