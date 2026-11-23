@@ -181,6 +181,7 @@ docker compose logs -f norin-bot
 | `SUPER_ADMIN_IDS` | Loyiha egasi / Super Admin Telegram ID lari (vergul bilan) | `5649321700` |
 | `ADMIN_IDS` | `#1` Test filial admin/xodimlari ID lari (ixtiyoriy `:Ism` bilan) | `5649321700:Asad` |
 | `API_JWT_SECRET` | FastAPI JWT/OTP imzo siri (ixtiyoriy, bo‘sh bo‘lsa `BOT_TOKEN` dan olinadi) | Ixtiyoriy |
+| `API_PUBLIC_URL` | Tashqi HTTPS API & APK yuklab olish manzili | `https://minishop.okaposai.uz` |
 | `OWNER_CONTACT` | Obuna eslatmalarida ko‘rsatiladigan aloqa | `@your_username` |
 | `DEFAULT_MONTHLY_PRICE` | Standart oylik obuna narxi (so‘m) | `400000` |
 | `DEFAULT_TRIAL_DAYS` | Boshlang‘ich sinov muddati (kun) | `30` |

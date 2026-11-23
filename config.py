@@ -66,7 +66,7 @@ class Settings(BaseSettings):
 
     # Mobile app API (norin-api)
     API_JWT_SECRET: str = ""
-    API_PUBLIC_URL: str = "http://46.8.194.206:8000"
+    API_PUBLIC_URL: str = "https://minishop.okaposai.uz"
     API_ACCESS_TTL_MIN: int = 30
     API_REFRESH_TTL_DAYS: int = 30
     API_OTP_TTL_MIN: int = 5

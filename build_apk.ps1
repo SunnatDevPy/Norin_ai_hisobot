@@ -67,7 +67,7 @@ try {
     flutter test
 
     Write-Host "=== 3. Release APK yig'ilmoqda (v$NewVersion+$Build) ===" -ForegroundColor Cyan
-    flutter build apk --release --build-name=$NewVersion --build-number=$Build
+    flutter build apk --release --target-platform android-arm,android-arm64 --build-name=$NewVersion --build-number=$Build
 
     $BuiltApk = "$RootDir\mobile_app\build\app\outputs\flutter-apk\app-release.apk"
     $DistApk = "$DistDir\norin_ai.apk"

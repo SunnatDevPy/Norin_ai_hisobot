@@ -338,7 +338,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   keyboardType: TextInputType.url,
                                   decoration: const InputDecoration(
                                     labelText: "API Base URL",
-                                    hintText: "http://46.8.194.206:8000/api/v1",
+                                    hintText: "https://minishop.okaposai.uz/api/v1",
                                   ),
                                 ),
                                 const SizedBox(height: 10),

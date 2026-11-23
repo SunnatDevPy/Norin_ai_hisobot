@@ -8,7 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 class ApiConfig {
-  static const defaultBaseUrl = 'http://46.8.194.206:8000/api/v1';
+  static const defaultBaseUrl = 'https://minishop.okaposai.uz/api/v1';
 }
 
 class ApiClient {
