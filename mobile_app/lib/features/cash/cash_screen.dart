@@ -297,8 +297,8 @@ class _CashScreenState extends ConsumerState<CashScreen> {
                         children: [
                           Text(
                             "KASSA (${asStr(session['report_date'])})",
-                            style: const TextStyle(
-                              color: Colors.white70,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.7,
@@ -308,13 +308,12 @@ class _CashScreenState extends ConsumerState<CashScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.18),
+                              color: NorinPalette.emerald.withValues(alpha: 0.16),
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
                               isClosed ? "Yopilgan" : "Ochiq smena",
                               style: const TextStyle(
-                                color: Colors.white,
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -326,7 +325,6 @@ class _CashScreenState extends ConsumerState<CashScreen> {
                       Text(
                         formatUzs(expected),
                         style: tNumStyle.copyWith(
-                          color: Colors.white,
                           fontSize: 28,
                           fontWeight: FontWeight.w900,
                         ),
@@ -334,14 +332,17 @@ class _CashScreenState extends ConsumerState<CashScreen> {
                       const SizedBox(height: 8),
                       Text(
                         "Boshi: ${formatCompactUzs(opening)}  •  Naqd tushum: ${formatCompactUzs(cashIn)}  •  Kirim: ${formatCompactUzs(mainIn)}  •  Xarajat: ${formatCompactUzs(totalExp)}",
-                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                        ),
                       ),
                       if (kassaDebtOut > 0) ...[
                         const SizedBox(height: 4),
                         Text(
                           "Kassa qarzi qoldig'i: ${formatUzs(kassaDebtOut)}",
                           style: const TextStyle(
-                            color: Color(0xFFFDE68A),
+                            color: NorinPalette.amber,
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                           ),

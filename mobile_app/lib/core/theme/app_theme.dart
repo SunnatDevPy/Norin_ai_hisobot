@@ -66,8 +66,11 @@ class AppTheme {
         seedColor: NorinPalette.emerald,
         brightness: Brightness.light,
         primary: NorinPalette.emeraldDark,
-        secondary: NorinPalette.sky,
+        onPrimary: Colors.white,
+        secondary: const Color(0xFF0284C7),
         surface: NorinPalette.lightCard,
+        onSurface: const Color(0xFF14111F),
+        onSurfaceVariant: NorinPalette.lightMuted,
         error: NorinPalette.danger,
       ),
       scaffoldBackgroundColor: NorinPalette.lightBg,
@@ -80,6 +83,21 @@ class AppTheme {
         scrolledUnderElevation: 0,
         centerTitle: false,
       ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: const BorderSide(color: NorinPalette.lightBorder, width: 1),
+        ),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: Colors.white,
+        modalBackgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+        ),
+      ),
       cardTheme: CardThemeData(
         color: NorinPalette.lightCard,
         elevation: 0,
@@ -89,9 +107,17 @@ class AppTheme {
           side: const BorderSide(color: NorinPalette.lightBorder, width: 1),
         ),
       ),
+      chipTheme: base.chipTheme.copyWith(
+        backgroundColor: const Color(0xFFF3EFFC),
+        selectedColor: NorinPalette.emerald.withValues(alpha: 0.18),
+        side: const BorderSide(color: NorinPalette.lightBorder),
+        labelStyle: const TextStyle(color: Color(0xFF14111F), fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: const Color(0xFFF9F8FE),
+        hintStyle: const TextStyle(color: NorinPalette.lightMuted),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
@@ -104,6 +130,20 @@ class AppTheme {
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: NorinPalette.emeraldDark, width: 1.6),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: NorinPalette.emeraldDark,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: NorinPalette.emeraldDark,
+          side: const BorderSide(color: NorinPalette.lightBorder),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
       ),
       dividerTheme: const DividerThemeData(

@@ -51,7 +51,6 @@ class DashboardScreen extends ConsumerWidget {
     final todayAsync = ref.watch(todayProvider);
     final settingsAsync = ref.watch(settingsProvider);
     final tenantsAsync = auth.isSuperAdmin ? ref.watch(adminTenantsProvider) : null;
-    final themeMode = ref.watch(themeModeProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     String activeTenantName = asStr(
@@ -126,9 +125,9 @@ class DashboardScreen extends ConsumerWidget {
           const SizedBox(width: 6),
           _GlassCircleAction(
             tooltip: "Mavzu (Kun/Tun)",
-            icon: themeMode == ThemeMode.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+            icon: isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
             onPressed: () {
-              final next = themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+              final next = isDark ? ThemeMode.light : ThemeMode.dark;
               ref.read(themeModeProvider.notifier).state = next;
             },
           ),
@@ -225,12 +224,16 @@ class DashboardScreen extends ConsumerWidget {
                         color: isDark ? NorinPalette.darkBorder : NorinPalette.lightBorder,
                       ),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.file_download_outlined, size: 16, color: NorinPalette.emeraldLight),
-                        SizedBox(width: 5),
-                        Text("Eksport", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                        Icon(
+                          Icons.file_download_outlined,
+                          size: 16,
+                          color: isDark ? NorinPalette.emeraldLight : NorinPalette.emeraldDark,
+                        ),
+                        const SizedBox(width: 5),
+                        const Text("Eksport", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                       ],
                     ),
                   ),
@@ -733,12 +736,21 @@ class _EarningsDistributionCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(
                   flex: flexOf(totalCostAndExp),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      color: const Color(0xFF252336),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                    ),
+                  child: Builder(
+                    builder: (context) {
+                      final isDark = Theme.of(context).brightness == Brightness.dark;
+                      return Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          color: isDark ? const Color(0xFF252336) : const Color(0xFFE8E2F6),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : NorinPalette.lightBorder,
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],
@@ -765,7 +777,7 @@ class _EarningsDistributionCard extends StatelessWidget {
                 child: _CapsuleMetricColumn(
                   amount: formatCompactUzs(cost + returnsAmount),
                   label: returnsAmount > 0 ? "Tannarx/Vozv" : "Tannarx",
-                  color: NorinPalette.darkMuted,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
@@ -959,7 +971,9 @@ class _ProfitMarginSparkCard extends StatelessWidget {
                               spots: spots,
                               isCurved: true,
                               preventCurveOverShooting: true,
-                              color: NorinPalette.emeraldLight,
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? NorinPalette.emeraldLight
+                                  : NorinPalette.emeraldDark,
                               barWidth: 2.5,
                               dotData: FlDotData(
                                 show: true,
@@ -967,7 +981,9 @@ class _ProfitMarginSparkCard extends StatelessWidget {
                                   radius: 3.2,
                                   color: NorinPalette.magenta,
                                   strokeWidth: 1.5,
-                                  strokeColor: const Color(0xFF13121B),
+                                  strokeColor: Theme.of(context).brightness == Brightness.dark
+                                      ? const Color(0xFF13121B)
+                                      : Colors.white,
                                 ),
                               ),
                               belowBarData: BarAreaData(
@@ -1000,6 +1016,7 @@ class _ProductWeightBreakdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final entries = weightMap.entries.toList()
       ..sort((a, b) => asDouble(b.value).compareTo(asDouble(a.value)));
     final total = entries.fold<double>(0, (s, e) => s + asDouble(e.value));
@@ -1034,7 +1051,7 @@ class _ProductWeightBreakdown extends StatelessWidget {
                       value: ratio,
                       minHeight: 7,
                       backgroundColor: NorinPalette.emerald.withValues(alpha: 0.14),
-                      color: NorinPalette.emeraldLight,
+                      color: isDark ? NorinPalette.emeraldLight : NorinPalette.emeraldDark,
                     ),
                   ),
                 ],
@@ -1063,6 +1080,7 @@ class _CashFlowBarTrendsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? NorinPalette.darkMuted : NorinPalette.lightMuted;
     final view = daily.length > 8 ? daily.sublist(daily.length - 8) : daily;
     double maxY = 1;
     for (final d in view) {
@@ -1077,18 +1095,18 @@ class _CashFlowBarTrendsCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      const Text(
                         "Pul oqimi dinamikasi",
                         style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
                       ),
-                      SizedBox(height: 2),
+                      const SizedBox(height: 2),
                       Text(
                         "Kunlik savdo tushumi va sof foyda",
-                        style: TextStyle(fontSize: 11.5, color: NorinPalette.darkMuted),
+                        style: TextStyle(fontSize: 11.5, color: mutedColor),
                       ),
                     ],
                   ),
@@ -1114,7 +1132,7 @@ class _CashFlowBarTrendsCard extends StatelessWidget {
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(8),
                             color: active
-                                ? NorinPalette.emerald.withValues(alpha: 0.25)
+                                ? NorinPalette.emerald.withValues(alpha: isDark ? 0.25 : 0.16)
                                 : Colors.transparent,
                           ),
                           child: Text(
@@ -1122,7 +1140,9 @@ class _CashFlowBarTrendsCard extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-                              color: active ? NorinPalette.emeraldLight : NorinPalette.darkMuted,
+                              color: active
+                                  ? (isDark ? NorinPalette.emeraldLight : NorinPalette.emeraldDark)
+                                  : mutedColor,
                             ),
                           ),
                         ),
@@ -1188,7 +1208,7 @@ class _CashFlowBarTrendsCard extends StatelessWidget {
                             padding: const EdgeInsets.only(right: 6),
                             child: Text(
                               formatCompactUzs(v),
-                              style: const TextStyle(fontSize: 10, color: NorinPalette.darkMuted),
+                              style: TextStyle(fontSize: 10, color: mutedColor),
                             ),
                           ),
                         ),
@@ -1204,7 +1224,7 @@ class _CashFlowBarTrendsCard extends StatelessWidget {
                               padding: const EdgeInsets.only(top: 6),
                               child: Text(
                                 formatShortDate(asStr(view[idx]['date'])),
-                                style: const TextStyle(fontSize: 10, color: NorinPalette.darkMuted),
+                                style: TextStyle(fontSize: 10, color: mutedColor),
                               ),
                             );
                           },
@@ -1364,6 +1384,7 @@ class _TopClientRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final name = asStr(client['name'], 'Mijoz');
     final rev = asDouble(client['revenue']);
     final kg = asDouble(client['kg']);
@@ -1378,7 +1399,9 @@ class _TopClientRow extends StatelessWidget {
           '$rank',
           style: TextStyle(
             fontWeight: FontWeight.w800,
-            color: rank == 1 ? NorinPalette.magenta : NorinPalette.emeraldLight,
+            color: rank == 1
+                ? (isDark ? NorinPalette.magenta : const Color(0xFFA21CAF))
+                : (isDark ? NorinPalette.emeraldLight : NorinPalette.emeraldDark),
           ),
         ),
       ),

@@ -251,7 +251,6 @@ class SettingsScreen extends ConsumerWidget {
                               child: Text(
                                 "${asStr(tenant['name'], 'Filial')} (#${asInt(tenant['id'])})",
                                 style: const TextStyle(
-                                  color: Colors.white,
                                   fontSize: 18,
                                   fontWeight: FontWeight.w800,
                                 ),
@@ -260,13 +259,12 @@ class SettingsScreen extends ConsumerWidget {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.18),
+                                color: NorinPalette.emerald.withValues(alpha: 0.16),
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
                                 "${asStr(sub['plan'], 'Standard')} • $status",
                                 style: const TextStyle(
-                                  color: Colors.white,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                 ),
@@ -277,7 +275,10 @@ class SettingsScreen extends ConsumerWidget {
                         const SizedBox(height: 8),
                         Text(
                           "Obuna: $daysLeft kun qoldi • AI limit: ${aiLimit == 0 ? 'Cheksiz' : '$aiUsed / $aiLimit bugun'}",
-                          style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontSize: 12.5,
+                          ),
                         ),
                       ],
                     ),
@@ -592,26 +593,28 @@ class _SuperAdminSettingsCard extends ConsumerWidget {
                 ),
                 child: const Icon(
                   Icons.admin_panel_settings_rounded,
-                  color: NorinPalette.emeraldLight,
+                  color: NorinPalette.emerald,
                   size: 20,
                 ),
               ),
               const SizedBox(width: 10),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       "Super Admin & Filial Boshqaruvi",
                       style: TextStyle(
-                        color: Colors.white,
                         fontSize: 15.5,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
                     Text(
                       "Faqat sizga ko'rinadi • Filialni 1-bosishda almashtiring",
-                      style: TextStyle(color: Colors.white70, fontSize: 11.5),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 11.5,
+                      ),
                     ),
                   ],
                 ),

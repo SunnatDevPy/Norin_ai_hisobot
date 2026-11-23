@@ -223,10 +223,10 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             "OYLIK MRR (FAOL OBUNALAR)",
                             style: TextStyle(
-                              color: Colors.white70,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.7,
@@ -236,7 +236,6 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                           Text(
                             formatUzs(mrr),
                             style: tNumStyle.copyWith(
-                              color: Colors.white,
                               fontSize: 28,
                               fontWeight: FontWeight.w900,
                             ),
@@ -244,7 +243,10 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                           const SizedBox(height: 10),
                           Text(
                             "Jami filiallar: $totalTenants  •  Faol: $activeT  •  Sinov: $trialT  •  Muddati tugagan: $expT  •  Muzlatilgan: $suspT",
-                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),

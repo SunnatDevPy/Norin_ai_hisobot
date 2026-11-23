@@ -258,32 +258,43 @@ class _BiometricLockScreenState extends ConsumerState<BiometricLockScreen> {
                     ),
                     const SizedBox(height: 22),
                     if (lock.hasPin) ...[
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(4, (i) {
-                          final filled = i < _pin.length;
-                          return Container(
-                            width: 16,
-                            height: 16,
-                            margin: const EdgeInsets.symmetric(horizontal: 10),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: filled ? NorinPalette.emeraldLight : Colors.transparent,
-                              border: Border.all(
-                                color: filled ? NorinPalette.magenta : NorinPalette.darkBorderGlow,
-                                width: 1.8,
-                              ),
-                              boxShadow: filled
-                                  ? [
-                                      BoxShadow(
-                                        color: NorinPalette.emerald.withValues(alpha: 0.6),
-                                        blurRadius: 10,
-                                      ),
-                                    ]
-                                  : null,
-                            ),
+                      Builder(
+                        builder: (context) {
+                          final isDark = Theme.of(context).brightness == Brightness.dark;
+                          return Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: List.generate(4, (i) {
+                              final filled = i < _pin.length;
+                              return Container(
+                                width: 16,
+                                height: 16,
+                                margin: const EdgeInsets.symmetric(horizontal: 10),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: filled
+                                      ? (isDark ? NorinPalette.emeraldLight : NorinPalette.emeraldDark)
+                                      : Colors.transparent,
+                                  border: Border.all(
+                                    color: filled
+                                        ? NorinPalette.magenta
+                                        : (isDark
+                                            ? NorinPalette.darkBorderGlow
+                                            : NorinPalette.emeraldDark.withValues(alpha: 0.45)),
+                                    width: 1.8,
+                                  ),
+                                  boxShadow: filled
+                                      ? [
+                                          BoxShadow(
+                                            color: NorinPalette.emerald.withValues(alpha: 0.6),
+                                            blurRadius: 10,
+                                          ),
+                                        ]
+                                      : null,
+                                ),
+                              );
+                            }),
                           );
-                        }),
+                        },
                       ),
                       const SizedBox(height: 22),
                       _PinPad(
@@ -339,14 +350,15 @@ class _PinPad extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     Widget keyBtn(String label, {VoidCallback? onTap, Widget? child}) {
       return Padding(
         padding: const EdgeInsets.all(6),
         child: Material(
-          color: NorinPalette.darkCard,
+          color: isDark ? NorinPalette.darkCard : NorinPalette.lightCard,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
-            side: const BorderSide(color: NorinPalette.darkBorder),
+            side: BorderSide(color: isDark ? NorinPalette.darkBorder : NorinPalette.lightBorder),
           ),
           child: InkWell(
             onTap: onTap,
@@ -385,7 +397,11 @@ class _PinPad extends StatelessWidget {
               keyBtn(
                 '',
                 onTap: onBiometric,
-                child: const Icon(Icons.fingerprint_rounded, size: 28, color: NorinPalette.emeraldLight),
+                child: Icon(
+                  Icons.fingerprint_rounded,
+                  size: 28,
+                  color: isDark ? NorinPalette.emeraldLight : NorinPalette.emeraldDark,
+                ),
               )
             else
               const SizedBox(width: 90, height: 70),

@@ -72,4 +72,20 @@ void main() {
     expect(find.textContaining('5649321700'), findsNothing);
     expect(find.textContaining('okaposai'), findsNothing);
   });
+
+  testWidgets('LoginScreen renders cleanly in Light mode as well', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const LoginScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Sotuv AI'), findsOneWidget);
+    expect(find.text('Tizimga kirish'), findsOneWidget);
+    expect(find.text('Telegram orqali 1-bosishda kirish'), findsOneWidget);
+  });
 }

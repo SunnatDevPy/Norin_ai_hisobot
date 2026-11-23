@@ -397,8 +397,8 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
                         children: [
                           Text(
                             debt > 0 ? "JORIY QARZ" : (debt < 0 ? "AVANS / HAQI" : "BALANS TOZA"),
-                            style: const TextStyle(
-                              color: Colors.white70,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                               fontSize: 11.5,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.7,
@@ -408,7 +408,7 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
                           IconButton(
                             tooltip: "Tahrirlash",
                             visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.edit_outlined, color: Colors.white),
+                            icon: const Icon(Icons.edit_outlined),
                             onPressed: () => _editClientDialog(card),
                           ),
                         ],
@@ -416,7 +416,6 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
                       Text(
                         formatUzs(debt),
                         style: tNumStyle.copyWith(
-                          color: Colors.white,
                           fontSize: 28,
                           fontWeight: FontWeight.w900,
                         ),
@@ -424,23 +423,25 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
                       const SizedBox(height: 8),
                       Text(
                         "Savdo: ${formatCompactUzs(asDouble(card['total_sales']))}  •  To'lov: ${formatCompactUzs(asDouble(card['total_payments']))}  •  Vozvrat: ${formatCompactUzs(asDouble(card['total_returns']))}",
-                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                        ),
                       ),
                       if (hasGroup) ...[
                         const SizedBox(height: 8),
                         Row(
                           children: [
-                            const Icon(Icons.groups_rounded, size: 16, color: Colors.white),
+                            const Icon(Icons.groups_rounded, size: 16, color: NorinPalette.emerald),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
                                 asStr(card['group_title'], "Guruh #${card['group_chat_id']}"),
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12.5),
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5),
                               ),
                             ),
                             TextButton(
                               style: TextButton.styleFrom(
-                                foregroundColor: Colors.white,
                                 visualDensity: VisualDensity.compact,
                               ),
                               onPressed: () async {

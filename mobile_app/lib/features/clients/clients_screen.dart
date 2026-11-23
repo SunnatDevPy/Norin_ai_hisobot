@@ -156,20 +156,27 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                   accentColor: NorinPalette.indigo,
                   child: Row(
                     children: [
-                      const Icon(Icons.account_balance_wallet_outlined, color: Colors.white, size: 30),
+                      const Icon(
+                        Icons.account_balance_wallet_outlined,
+                        color: NorinPalette.emerald,
+                        size: 30,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
+                            Text(
                               "Jami mijozlar qarzi",
-                              style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                             Text(
                               formatUzs(totalDebt),
                               style: tNumStyle.copyWith(
-                                color: Colors.white,
                                 fontSize: 21,
                                 fontWeight: FontWeight.w900,
                               ),
@@ -180,12 +187,12 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.14),
+                          color: NorinPalette.emerald.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
                           "$debtorsCount qarzdor / ${clients.length}",
-                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                         ),
                       ),
                     ],

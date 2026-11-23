@@ -154,37 +154,20 @@ class SpotlightHeroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    if (!isDark) {
-      return Container(
-        padding: padding,
-        decoration: BoxDecoration(
-          gradient: NorinPalette.heroGradient,
-          borderRadius: BorderRadius.circular(borderRadius),
-          boxShadow: [
-            BoxShadow(
-              color: NorinPalette.emeraldDark.withValues(alpha: 0.28),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: DefaultTextStyle.merge(
-          style: const TextStyle(color: Colors.white),
-          child: child,
-        ),
-      );
-    }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF14121E),
+          color: isDark ? const Color(0xFF14121E) : Colors.white,
           borderRadius: BorderRadius.circular(borderRadius),
-          border: Border.all(color: glowColor.withValues(alpha: 0.34), width: 1),
+          border: Border.all(
+            color: glowColor.withValues(alpha: isDark ? 0.34 : 0.40),
+            width: 1,
+          ),
           boxShadow: [
             BoxShadow(
-              color: glowColor.withValues(alpha: 0.16),
+              color: glowColor.withValues(alpha: isDark ? 0.16 : 0.12),
               blurRadius: 24,
               offset: const Offset(0, 8),
             ),
@@ -200,8 +183,8 @@ class SpotlightHeroCard extends StatelessWidget {
                       center: const Alignment(0, -1.15),
                       radius: 1.25,
                       colors: [
-                        glowColor.withValues(alpha: 0.28),
-                        accentColor.withValues(alpha: 0.10),
+                        glowColor.withValues(alpha: isDark ? 0.28 : 0.15),
+                        accentColor.withValues(alpha: isDark ? 0.10 : 0.06),
                         Colors.transparent,
                       ],
                     ),
@@ -227,7 +210,7 @@ class SpotlightHeroCard extends StatelessWidget {
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: glowColor.withValues(alpha: 0.8),
+                      color: glowColor.withValues(alpha: isDark ? 0.8 : 0.45),
                       blurRadius: 12,
                     ),
                   ],
