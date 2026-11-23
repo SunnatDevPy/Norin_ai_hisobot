@@ -92,7 +92,6 @@ async def _list_active_sessions(telegram_id: int) -> List[ApiSession]:
 
 
 def _apk_panel_kb(device_count: int, is_sa: bool = False) -> InlineKeyboardMarkup:
-    pub_url = (get_settings().API_PUBLIC_URL or "").strip().rstrip("/")
     rows: List[List[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton(
@@ -100,35 +99,22 @@ def _apk_panel_kb(device_count: int, is_sa: bool = False) -> InlineKeyboardMarku
                 callback_data="apk:download_file",
             )
         ],
-    ]
-    if pub_url.startswith("https://") or pub_url.startswith("http://"):
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="🌐 Brauzerdan yuklab olish (Tezkor)",
-                    url=f"{pub_url}/download/norin_ai.apk",
-                )
-            ]
-        )
-    rows.extend(
+        [InlineKeyboardButton(text="🔑 Yangi 6 xonali kod", callback_data="apk:new_code")],
         [
-            [InlineKeyboardButton(text="🔑 Yangi 6 xonali kod", callback_data="apk:new_code")],
-            [
-                InlineKeyboardButton(
-                    text=f"📱 Ulangan qurilmalar ({device_count})",
-                    callback_data="apk:devices",
-                )
-            ],
-            [
-                *(
-                    [InlineKeyboardButton(text="👑 Bosh panel", callback_data="sa:menu")]
-                    if is_sa
-                    else []
-                ),
-                InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
-            ],
-        ]
-    )
+            InlineKeyboardButton(
+                text=f"📱 Ulangan qurilmalar ({device_count})",
+                callback_data="apk:devices",
+            )
+        ],
+        [
+            *(
+                [InlineKeyboardButton(text="👑 Bosh panel", callback_data="sa:menu")]
+                if is_sa
+                else []
+            ),
+            InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
+        ],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -147,10 +133,8 @@ async def _render_apk_home(
     size_line = (
         f"📦 Fayl hajmi: <b>{size_bytes / (1024 * 1024):.1f} MB</b>"
         if meta.get("apk_available") and size_bytes > 0
-        else "⚠️ <i>Serverga hali APK fayli yuklanmagan</i>"
+        else "⚠️ <i>APK fayli hali yuklanmagan</i>"
     )
-    pub_url = (settings.API_PUBLIC_URL or "").strip().rstrip("/")
-    url_line = f"\n🌐 Server: <code>{html.escape(pub_url)}</code>" if pub_url else ""
     branch_line = f"\n🏢 Filial: <b>{html.escape(tenant_name)}</b>" if tenant_name else ""
     ttl = max(1, settings.API_OTP_TTL_MIN)
 
@@ -161,8 +145,7 @@ async def _render_apk_home(
         f"🆕 Versiya: <b>{html.escape(ver_label)}</b>\n"
         f"{size_line}\n"
         f"🔑 Kirish kodi ({ttl} daqiqa — ID kiritish shart emas):\n\n"
-        f"👉  <code>{code}</code>\n"
-        f"{url_line}\n"
+        f"👉  <code>{code}</code>\n\n"
         "===============================\n"
         f"📲 Faol qurilmalar: <b>{len(sessions)} ta</b>\n\n"
         "<i>Ilovada «Telegram orqali 1-bosishda kirish» ni bosing yoki yuqoridagi 6 xonali kodni tering.</i>"
@@ -271,17 +254,8 @@ async def cb_apk_download_file(cb: CallbackQuery) -> None:
     if not allowed:
         await cb.answer("🔒 Ruxsat yo'q", show_alert=True)
         return
-    settings = get_settings()
-    pub_url = (settings.API_PUBLIC_URL or "").strip().rstrip("/")
-    dl_link = f"{pub_url}/download/norin_ai.apk" if pub_url else ""
-
     if not apk_meta.APK_BINARY_PATH.is_file():
-        await cb.answer("⚠️ Serverda APK fayli topilmadi", show_alert=True)
-        if cb.message and dl_link:
-            await cb.message.answer(
-                f"📥 <b>Sotuv AI APK yuklab olish havolasi:</b>\n👉 <a href=\"{html.escape(dl_link)}\">{html.escape(dl_link)}</a>",
-                parse_mode="HTML",
-            )
+        await cb.answer("⚠️ Hozircha APK fayli tayyor emas.", show_alert=True)
         return
 
     await cb.answer("📥 APK yuborilmoqda...")
@@ -295,10 +269,8 @@ async def cb_apk_download_file(cb: CallbackQuery) -> None:
     meta = apk_meta.get_apk_version_metadata()
     ver_num = str(meta.get("version") or "1.0.0")
     ver_label = f"v{ver_num} (build #{meta.get('build', 1)})"
-    url_line = f"🌐 Server: <code>{html.escape(pub_url)}/api/v1</code>\n" if pub_url else ""
     caption = (
         f"📱 <b>Sotuv AI Android — {html.escape(ver_label)}</b>\n\n"
-        f"{url_line}"
         f"🔑 Kirish kodi (5 daqiqa): <code>{code}</code>\n\n"
         "<i>APK ni o'rnatib, «Telegram orqali 1-bosishda kirish» ni bosing yoki yuqoridagi kodni kiriting.</i>"
     )
@@ -337,13 +309,11 @@ async def cb_apk_download_file(cb: CallbackQuery) -> None:
                 await set_raw_app_setting(db, "norin_apk_tg_fid", sent.document.file_id)
     except Exception as exc:
         logger.warning("Failed to send APK document via Telegram: %s", exc)
-        if dl_link:
-            await cb.message.answer(
-                f"📥 <b>Sotuv AI APK havolasi:</b>\n"
-                f"👉 <a href=\"{html.escape(dl_link)}\">{html.escape(dl_link)}</a>\n\n"
-                f"🔑 Kirish kodi: <code>{code}</code>",
-                parse_mode="HTML",
-            )
+        await cb.message.answer(
+            "⚠️ <b>APK faylini yuborishda vaqtincha xatolik yuz berdi.</b>\n"
+            f"Birozdan so'ng qayta urinib ko'ring.\n\n🔑 Kirish kodi: <code>{code}</code>",
+            parse_mode="HTML",
+        )
 
 
 @router.callback_query(F.data == "apk:devices")

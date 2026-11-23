@@ -23,7 +23,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
   final _quickCodeCtrl = TextEditingController();
   final _tgCtrl = TextEditingController();
   final _otpCtrl = TextEditingController();
-  late final TextEditingController _urlCtrl;
 
   String? _activeTicket;
   String? _activeBotUrl;
@@ -40,7 +39,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _urlCtrl = TextEditingController(text: ref.read(apiClientProvider).baseUrl);
   }
 
   @override
@@ -51,7 +49,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
     _quickCodeCtrl.dispose();
     _tgCtrl.dispose();
     _otpCtrl.dispose();
-    _urlCtrl.dispose();
     super.dispose();
   }
 
@@ -79,18 +76,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
     });
   }
 
-  Future<void> _applyServerUrlIfEdited() async {
-    final url = _urlCtrl.text.trim();
-    if (url.isNotEmpty) {
-      await ref.read(apiClientProvider).setBaseUrl(url);
-    }
-  }
-
   Future<void> _startOneTapTelegram() async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      await _applyServerUrlIfEdited();
       final res = await ref.read(authProvider.notifier).startTelegramTicket();
       final ticket = asStr(res['ticket']);
       final tgUri = asStr(res['tg_uri']);
@@ -169,7 +158,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
     }
     setState(() => _busy = true);
     try {
-      await _applyServerUrlIfEdited();
       await ref.read(authProvider.notifier).loginWithCode(code: code);
     } catch (e) {
       if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
@@ -186,7 +174,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
     }
     setState(() => _busy = true);
     try {
-      await _applyServerUrlIfEdited();
       await ref.read(authProvider.notifier).requestOtp(tgId);
       if (!mounted) return;
       setState(() => _codeSent = true);
@@ -208,7 +195,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
     }
     setState(() => _busy = true);
     try {
-      await _applyServerUrlIfEdited();
       await ref.read(authProvider.notifier).verifyOtp(
             telegramId: tgId,
             code: code,
@@ -410,16 +396,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
                       child: Column(
                         children: [
                           ListTile(
-                            leading: const Icon(Icons.tune_rounded, color: NorinPalette.emeraldLight),
+                            leading: const Icon(Icons.key_outlined, color: NorinPalette.emeraldLight),
                             title: const Text(
-                              "ID orqali kirish & Server manzili",
+                              "Telegram ID orqali kod olish",
                               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
                             ),
-                            subtitle: Text(
-                              _urlCtrl.text,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11.5),
+                            subtitle: const Text(
+                              "Qo'shimcha kirish usuli",
+                              style: TextStyle(fontSize: 11.5),
                             ),
                             trailing: Icon(
                               _showAdvanced ? Icons.expand_less : Icons.expand_more,
@@ -441,7 +425,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
                                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                                     decoration: const InputDecoration(
                                       labelText: "Telegram ID",
-                                      hintText: "Masalan: 5649321700",
+                                      hintText: "Telegram ID raqamingiz",
                                       prefixIcon: Icon(Icons.badge_outlined),
                                     ),
                                   ),
@@ -480,51 +464,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
                                       ],
                                     ],
                                   ),
-                                  const SizedBox(height: 14),
-                                  const Text(
-                                    "Server manzili",
-                                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  TextField(
-                                    controller: _urlCtrl,
-                                    keyboardType: TextInputType.url,
-                                    decoration: const InputDecoration(
-                                      labelText: "API Base URL",
-                                      hintText: "https://minishop.okaposai.uz/api/v1",
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: OutlinedButton(
-                                          onPressed: () async {
-                                            _urlCtrl.text = ApiConfig.defaultBaseUrl;
-                                            await ref
-                                                .read(apiClientProvider)
-                                                .setBaseUrl(ApiConfig.defaultBaseUrl);
-                                            if (context.mounted) {
-                                              showSnack(context, "Standart server tiklandi");
-                                            }
-                                          },
-                                          child: const Text("Standart"),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: FilledButton.tonal(
-                                          onPressed: () async {
-                                            await _applyServerUrlIfEdited();
-                                            if (context.mounted) {
-                                              showSnack(context, "Server manzili saqlandi");
-                                            }
-                                          },
-                                          child: const Text("Saqlash"),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
                                 ],
                               ),
                             ),
@@ -533,7 +472,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      "Telegram @norin_ai_hisobot botida /apk yozib ham 6 xonali kod olishingiz mumkin.",
+                      "Telegram botda /apk buyrug'i orqali ham 6 xonali kirish kodini olishingiz mumkin.",
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodySmall?.copyWith(
                         fontSize: 11.5,

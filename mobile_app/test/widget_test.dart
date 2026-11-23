@@ -44,7 +44,7 @@ void main() {
     expect(unavailable.hasUpdate, isFalse);
   });
 
-  testWidgets('LoginScreen renders 1-tap Telegram, ID-less code, and expandable ID/Server settings', (tester) async {
+  testWidgets('LoginScreen renders 1-tap Telegram, ID-less code, and hides private ID/Server URL', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
         child: MaterialApp(
@@ -60,7 +60,7 @@ void main() {
     expect(find.text('Telegram orqali 1-bosishda kirish'), findsOneWidget);
     expect(find.text('6 xonali /apk kod'), findsOneWidget);
 
-    final advancedTile = find.text('ID orqali kirish & Server manzili');
+    final advancedTile = find.text('Telegram ID orqali kod olish');
     await tester.ensureVisible(advancedTile);
     await tester.tap(advancedTile);
     await tester.pump();
@@ -68,6 +68,8 @@ void main() {
 
     expect(find.text('Telegram ID'), findsOneWidget);
     expect(find.text('Kod olish'), findsOneWidget);
-    expect(find.text('Server manzili'), findsOneWidget);
+    expect(find.text('Server manzili'), findsNothing);
+    expect(find.textContaining('5649321700'), findsNothing);
+    expect(find.textContaining('okaposai'), findsNothing);
   });
 }

@@ -76,7 +76,7 @@ class ApiClient {
   bool get isSuperAdmin => _role == 'super_admin';
 
   Future<void> init() async {
-    _baseUrl = await _storage.read(key: 'base_url') ?? ApiConfig.defaultBaseUrl;
+    _baseUrl = ApiConfig.defaultBaseUrl;
     _accessToken = await _storage.read(key: 'access_token');
     _refreshToken = await _storage.read(key: 'refresh_token');
     _role = await _storage.read(key: 'role');
@@ -88,11 +88,9 @@ class ApiClient {
   }
 
   Future<void> setBaseUrl(String url) async {
-    final cleaned = url.trim().replaceAll(RegExp(r'/+$'), '');
-    if (cleaned.isEmpty) return;
-    _baseUrl = cleaned;
-    _dio.options.baseUrl = cleaned;
-    await _storage.write(key: 'base_url', value: cleaned);
+    // Backend endpoint is locked internally for security and privacy.
+    _baseUrl = ApiConfig.defaultBaseUrl;
+    _dio.options.baseUrl = _baseUrl;
   }
 
   Future<void> setSelectedTenant(int tenantId) async {
@@ -164,12 +162,19 @@ class ApiClient {
       }
       if (error.type == DioExceptionType.connectionTimeout ||
           error.type == DioExceptionType.receiveTimeout ||
+          error.type == DioExceptionType.sendTimeout ||
           error.type == DioExceptionType.connectionError) {
-        return "Server bilan aloqa yo'q. Internetni tekshiring.";
+        return "Tizim bilan aloqa yo'q. Internetni tekshiring.";
       }
-      return error.message ?? "Tarmoq xatoligi";
+      final code = error.response?.statusCode;
+      if (code != null) {
+        return "So'rov bajarilmadi (kod: $code).";
+      }
+      return "Aloqa xatoligi yuz berdi. Qaytadan urinib ko'ring.";
     }
-    return error.toString();
+    var msg = error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+    msg = msg.replaceAll(RegExp(r'https?://\S+'), '[tizim]');
+    return msg.trim().isEmpty ? "Xatolik yuz berdi." : msg.trim();
   }
 
   Future<dynamic> get(String path, {Map<String, dynamic>? query}) async {
