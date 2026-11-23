@@ -210,72 +210,76 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
 
     await showModalBottomSheet<void>(
       context: context,
+      useSafeArea: true,
       showDragHandle: true,
-      builder: (ctx) => ListView.separated(
-        shrinkWrap: true,
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-        itemCount: products.length + 1,
-        separatorBuilder: (_, _) => const SizedBox(height: 8),
-        itemBuilder: (ctx, i) {
-          if (i == 0) {
-            return Text(
-              "Shaxsiy narxlar — ${asStr(card['name'])}",
-              style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-            );
-          }
-          final p = products[i - 1];
-          final pid = asInt(p['id']);
-          final customVal = customPrices['$pid'];
-          final defVal = asDouble(p['default_sell_price']);
-          return ListTile(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            tileColor: Theme.of(ctx).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-            title: Text(asStr(p['name']), style: const TextStyle(fontWeight: FontWeight.w700)),
-            subtitle: Text(
-              customVal != null
-                  ? "Shaxsiy: ${formatUzs(asDouble(customVal))} (Standart: ${formatUzs(defVal)})"
-                  : "Standart: ${formatUzs(defVal)}",
-            ),
-            trailing: const Icon(Icons.edit_outlined),
-            onTap: () async {
-              final ctrl = TextEditingController(
-                text: customVal != null ? asDouble(customVal).round().toString() : '',
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: ListView.separated(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          itemCount: products.length + 1,
+          separatorBuilder: (_, _) => const SizedBox(height: 8),
+          itemBuilder: (ctx, i) {
+            if (i == 0) {
+              return Text(
+                "Shaxsiy narxlar — ${asStr(card['name'])}",
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               );
-              final act = await showDialog<String>(
-                context: ctx,
-                builder: (dCtx) => AlertDialog(
-                  title: Text("${asStr(p['name'])} narxi"),
-                  content: TextField(
-                    controller: ctrl,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: "Shaxsiy sotuv narxi",
-                      hintText: defVal.round().toString(),
-                    ),
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(dCtx, 'reset'), child: const Text("Standartga")),
-                    TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text("Bekor")),
-                    FilledButton(onPressed: () => Navigator.pop(dCtx, 'save'), child: const Text("Saqlash")),
-                  ],
-                ),
-              );
-              if (act == null) return;
-              try {
-                final val = act == 'reset' ? null : double.tryParse(ctrl.text.trim());
-                await ref.read(apiClientProvider).put(
-                  '/clients/${widget.clientId}/prices/$pid',
-                  data: {'sell_price': val},
+            }
+            final p = products[i - 1];
+            final pid = asInt(p['id']);
+            final customVal = customPrices['$pid'];
+            final defVal = asDouble(p['default_sell_price']);
+            return ListTile(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              tileColor: Theme.of(ctx).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+              title: Text(asStr(p['name']), style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(
+                customVal != null
+                    ? "Shaxsiy: ${formatUzs(asDouble(customVal))} (Standart: ${formatUzs(defVal)})"
+                    : "Standart: ${formatUzs(defVal)}",
+              ),
+              trailing: const Icon(Icons.edit_outlined),
+              onTap: () async {
+                final ctrl = TextEditingController(
+                  text: customVal != null ? asDouble(customVal).round().toString() : '',
                 );
-                _refresh();
-                if (ctx.mounted) Navigator.pop(ctx);
-                if (mounted) showSnack(context, "Narx yangilandi");
-              } catch (e) {
-                if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
-              }
-            },
-          );
-        },
+                final act = await showDialog<String>(
+                  context: ctx,
+                  builder: (dCtx) => AlertDialog(
+                    title: Text("${asStr(p['name'])} narxi"),
+                    content: TextField(
+                      controller: ctrl,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: "Shaxsiy sotuv narxi",
+                        hintText: defVal.round().toString(),
+                      ),
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(dCtx, 'reset'), child: const Text("Standartga")),
+                      TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text("Bekor")),
+                      FilledButton(onPressed: () => Navigator.pop(dCtx, 'save'), child: const Text("Saqlash")),
+                    ],
+                  ),
+                );
+                if (act == null) return;
+                try {
+                  final val = act == 'reset' ? null : double.tryParse(ctrl.text.trim());
+                  await ref.read(apiClientProvider).put(
+                    '/clients/${widget.clientId}/prices/$pid',
+                    data: {'sell_price': val},
+                  );
+                  _refresh();
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) showSnack(context, "Narx yangilandi");
+                } catch (e) {
+                  if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+                }
+              },
+            );
+          },
+        ),
       ),
     );
   }

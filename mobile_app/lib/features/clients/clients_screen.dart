@@ -148,7 +148,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
             final debtorsCount = clients.where((c) => asDouble(c['current_debt']) > 0).length;
 
             return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+              padding: EdgeInsets.fromLTRB(16, 8, 16, dockBottomClearance(context)),
               children: [
                 SpotlightHeroCard(
                   padding: const EdgeInsets.all(16),

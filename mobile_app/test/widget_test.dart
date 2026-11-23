@@ -119,4 +119,40 @@ void main() {
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pumpAndSettle();
   });
+
+  testWidgets('Bottom clearances adapt to 3-button nav bar vs zero-inset screens', (tester) async {
+    late double dockWithBar;
+    late double screenWithBar;
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(viewPadding: EdgeInsets.only(bottom: 48)),
+        child: Builder(
+          builder: (ctx) {
+            dockWithBar = dockBottomClearance(ctx);
+            screenWithBar = screenBottomClearance(ctx);
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+    expect(dockWithBar, 156);
+    expect(screenWithBar, 72);
+
+    late double dockNoBar;
+    late double screenNoBar;
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(viewPadding: EdgeInsets.zero),
+        child: Builder(
+          builder: (ctx) {
+            dockNoBar = dockBottomClearance(ctx);
+            screenNoBar = screenBottomClearance(ctx);
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+    expect(dockNoBar, 108);
+    expect(screenNoBar, 24);
+  });
 }

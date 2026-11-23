@@ -215,7 +215,12 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                 final aiTokens = asInt(an['ai_tokens_30d']);
 
                 return ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    12,
+                    16,
+                    screenBottomClearance(context, extra: 28),
+                  ),
                   children: [
                     SpotlightHeroCard(
                       padding: const EdgeInsets.all(20),
@@ -311,7 +316,12 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                 onRetry: () => ref.invalidate(adminTenantsProvider),
               ),
               data: (tenants) => ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  12,
+                  16,
+                  screenBottomClearance(context, extra: 28),
+                ),
                 children: [
                   FilledButton.icon(
                     onPressed: _createTenantDialog,
@@ -363,7 +373,12 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
 
           // 3. Broadcast & Audit Log
           ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              12,
+              16,
+              screenBottomClearance(context, extra: 28),
+            ),
             children: [
               Card(
                 child: Padding(

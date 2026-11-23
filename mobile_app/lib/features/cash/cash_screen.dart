@@ -229,8 +229,9 @@ class _CashScreenState extends ConsumerState<CashScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
-      builder: (ctx) => _SessionHistorySheet(parentRef: ref),
+      builder: (ctx) => SafeArea(top: false, child: _SessionHistorySheet(parentRef: ref)),
     );
   }
 
@@ -284,7 +285,7 @@ class _CashScreenState extends ConsumerState<CashScreen> {
             final isClosed = asStr(session['status']) == 'closed';
 
             return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+              padding: EdgeInsets.fromLTRB(16, 8, 16, dockBottomClearance(context)),
               children: [
                 SpotlightHeroCard(
                   padding: const EdgeInsets.all(18),

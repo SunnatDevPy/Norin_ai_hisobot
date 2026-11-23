@@ -146,7 +146,7 @@ class DashboardScreen extends ConsumerWidget {
           ]);
         },
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 120),
+          padding: EdgeInsets.fromLTRB(16, 6, 16, dockBottomClearance(context)),
           children: [
             if (auth.isSuperAdmin && auth.selectedTenantId != 1) ...[
               SpotlightHeroCard(

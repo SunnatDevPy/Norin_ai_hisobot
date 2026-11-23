@@ -115,8 +115,12 @@ class SettingsScreen extends ConsumerWidget {
   Future<void> _showDevicesSheet(BuildContext context, WidgetRef ref) async {
     await showModalBottomSheet<void>(
       context: context,
+      useSafeArea: true,
       showDragHandle: true,
-      builder: (ctx) => _DevicesSheet(api: ref.read(apiClientProvider)),
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: _DevicesSheet(api: ref.read(apiClientProvider)),
+      ),
     );
   }
 
@@ -208,7 +212,7 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+        padding: EdgeInsets.fromLTRB(16, 8, 16, dockBottomClearance(context)),
         children: [
           if (isAdmin) ...[
             _SuperAdminSettingsCard(selectedTenantId: auth.selectedTenantId),

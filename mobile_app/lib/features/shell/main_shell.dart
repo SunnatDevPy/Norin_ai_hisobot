@@ -89,12 +89,16 @@ class _FloatingGlassDock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
 
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-        child: SizedBox(
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        14,
+        0,
+        14,
+        bottomInset + (bottomInset > 0 ? 8 : 12),
+      ),
+      child: SizedBox(
           height: 76,
           child: Stack(
             clipBehavior: Clip.none,
@@ -152,8 +156,7 @@ class _FloatingGlassDock extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
+      );
   }
 }
 
@@ -271,14 +274,17 @@ class _DockButton extends StatelessWidget {
               color: selected ? activeCol : mutedCol,
             ),
             const SizedBox(height: 2),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: selected ? (isDark ? Colors.white : activeCol) : mutedCol,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected ? (isDark ? Colors.white : activeCol) : mutedCol,
+                ),
               ),
             ),
           ],

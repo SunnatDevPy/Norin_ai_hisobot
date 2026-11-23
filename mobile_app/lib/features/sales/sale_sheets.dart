@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -291,7 +292,12 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
     final (previewKg, previewSum) = _computeManualPreview(products);
 
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: math.max(
+          MediaQuery.viewInsetsOf(context).bottom,
+          MediaQuery.viewPaddingOf(context).bottom,
+        ),
+      ),
       child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.78,
         child: Column(
@@ -965,7 +971,12 @@ class _SaleReviewSheetState extends ConsumerState<_SaleReviewSheet> {
     final hasGroupMsg = _sale['group_message_id'] != null;
 
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: math.max(
+          MediaQuery.viewInsetsOf(context).bottom,
+          MediaQuery.viewPaddingOf(context).bottom,
+        ),
+      ),
       child: DraggableScrollableSheet(
         expand: false,
         initialChildSize: 0.78,
