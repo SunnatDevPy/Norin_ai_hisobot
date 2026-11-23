@@ -51,7 +51,7 @@ async def _authorize_apk_bot_user(user_id: Optional[int]) -> Tuple[bool, str, st
             return (
                 False,
                 "",
-                f"🔒 Sizga Norin AI tizimiga ruxsat berilmagan.\n🆔 Telegram ID: <code>{uid}</code>",
+                f"🔒 Sizga Sotuv AI tizimiga ruxsat berilmagan.\n🆔 Telegram ID: <code>{uid}</code>",
             )
         sub = await evaluate_subscription_status(db, tenant_id=tid)
         if not sub.is_allowed and not _is_super_admin(uid):
@@ -155,7 +155,7 @@ async def _render_apk_home(
     ttl = max(1, settings.API_OTP_TTL_MIN)
 
     text = (
-        "📱 <b>Norin AI — Android APK & Kirish</b>\n"
+        "📱 <b>Sotuv AI — Android APK & Kirish</b>\n"
         "==============================="
         f"{branch_line}\n"
         f"🆕 Versiya: <b>{html.escape(ver_label)}</b>\n"
@@ -209,9 +209,9 @@ async def cmd_start_apk_ticket(message: Message, state: FSMContext) -> None:
     )
     if approved:
         await message.answer(
-            "✅ <b>Norin AI ilovasiga kirish tasdiqlandi!</b>\n"
+            "✅ <b>Sotuv AI ilovasiga kirish tasdiqlandi!</b>\n"
             f"🏢 Filial: <b>{html.escape(tenant_name)}</b>\n\n"
-            "📲 <b>Endi Norin AI ilovasiga qayting</b> — ilova avtomatik ravishda tizimga kiradi.\n\n"
+            "📲 <b>Endi Sotuv AI ilovasiga qayting</b> — ilova avtomatik ravishda tizimga kiradi.\n\n"
             f"<i>Agar avtomatik kirmasa, ushbu kodni kiriting:</i> <code>{backup_code}</code>",
             parse_mode="HTML",
             reply_markup=kb,
@@ -279,7 +279,7 @@ async def cb_apk_download_file(cb: CallbackQuery) -> None:
         await cb.answer("⚠️ Serverda APK fayli topilmadi", show_alert=True)
         if cb.message and dl_link:
             await cb.message.answer(
-                f"📥 <b>Norin AI APK yuklab olish havolasi:</b>\n👉 <a href=\"{html.escape(dl_link)}\">{html.escape(dl_link)}</a>",
+                f"📥 <b>Sotuv AI APK yuklab olish havolasi:</b>\n👉 <a href=\"{html.escape(dl_link)}\">{html.escape(dl_link)}</a>",
                 parse_mode="HTML",
             )
         return
@@ -297,7 +297,7 @@ async def cb_apk_download_file(cb: CallbackQuery) -> None:
     ver_label = f"v{ver_num} (build #{meta.get('build', 1)})"
     url_line = f"🌐 Server: <code>{html.escape(pub_url)}/api/v1</code>\n" if pub_url else ""
     caption = (
-        f"📱 <b>Norin AI Android — {html.escape(ver_label)}</b>\n\n"
+        f"📱 <b>Sotuv AI Android — {html.escape(ver_label)}</b>\n\n"
         f"{url_line}"
         f"🔑 Kirish kodi (5 daqiqa): <code>{code}</code>\n\n"
         "<i>APK ni o'rnatib, «Telegram orqali 1-bosishda kirish» ni bosing yoki yuqoridagi kodni kiriting.</i>"
@@ -323,7 +323,7 @@ async def cb_apk_download_file(cb: CallbackQuery) -> None:
             parse_mode="HTML",
         )
         sent = await cb.message.answer_document(
-            document=FSInputFile(apk_meta.APK_BINARY_PATH, filename=f"Norin_AI_v{ver_num}.apk"),
+            document=FSInputFile(apk_meta.APK_BINARY_PATH, filename=f"Sotuv_AI_v{ver_num}.apk"),
             caption=caption,
             parse_mode="HTML",
         )
@@ -339,7 +339,7 @@ async def cb_apk_download_file(cb: CallbackQuery) -> None:
         logger.warning("Failed to send APK document via Telegram: %s", exc)
         if dl_link:
             await cb.message.answer(
-                f"📥 <b>Norin AI APK havolasi:</b>\n"
+                f"📥 <b>Sotuv AI APK havolasi:</b>\n"
                 f"👉 <a href=\"{html.escape(dl_link)}\">{html.escape(dl_link)}</a>\n\n"
                 f"🔑 Kirish kodi: <code>{code}</code>",
                 parse_mode="HTML",

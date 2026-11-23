@@ -94,16 +94,16 @@ def _safe_file_part(raw: str, fallback: str = "Filial") -> str:
 
 
 def render_daily_report_text(summary: DailyReportSummary) -> str:
-    """Format complete internal daily Norin sales, kg, cost, profit, cash, and client debt summary."""
+    """Format complete internal daily sales, quantity, cost, profit, cash, and client debt summary."""
     lines = [
-        f"📊 <b>NORIN KUNLIK HISOBOT ({summary.session.report_date})</b>",
+        f"📊 <b>KUNLIK HISOBOT ({summary.session.report_date})</b>",
         "===============================",
     ]
     if summary.session.status == "open" and summary.session.report_date != today_iso():
         lines.append(
             f"⚠️ <i>Diqqat: {summary.session.report_date} smenasi hali yopilmagan! Kunni yakunlang.</i>"
         )
-    lines.append(f"🥩 <b>Sotilgan mahsulotlar ({len(summary.confirmed_sales)} ta sotuv):</b>")
+    lines.append(f"📦 <b>Sotilgan mahsulotlar ({len(summary.confirmed_sales)} ta sotuv):</b>")
     if not summary.weight_by_product:
         lines.append("<i>Bugun hali tasdiqlangan sotuvlar yo'q</i>")
     else:
@@ -349,7 +349,7 @@ async def cb_export_excel(cb: CallbackQuery) -> None:
 
     async with async_session_maker() as db:
         sub = await get_subscription_state(db)
-        tenant_name = sub.tenant_name or "Norin Sexi"
+        tenant_name = sub.tenant_name or "Sotuv AI"
         t_slug = _safe_file_part(tenant_name, "Filial")
         if kind == "daily":
             sess_id = int(parts[2])
@@ -411,7 +411,7 @@ async def redirect_legacy_kassa_to_apk(message: Message, state: FSMContext) -> N
         return
     await state.clear()
     await message.answer(
-        "📱 <b>Kassa, xarajat va kunni yopish amallari Norin AI Android ilovasiga ko'chirildi.</b>\n\n"
+        "📱 <b>Kassa, xarajat va kunni yopish amallari Sotuv AI Android ilovasiga ko'chirildi.</b>\n\n"
         "Ilovada tez, qulay va jonli hisob bilan bajarishingiz mumkin.",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
@@ -427,6 +427,6 @@ async def redirect_legacy_kassa_to_apk(message: Message, state: FSMContext) -> N
 )
 async def redirect_legacy_kassa_callbacks(cb: CallbackQuery) -> None:
     await cb.answer(
-        "📱 Xarajat, kassa va kun yopish endi Norin AI APK ilovasida bajariladi.",
+        "📱 Xarajat, kassa va kun yopish endi Sotuv AI APK ilovasida bajariladi.",
         show_alert=True,
     )

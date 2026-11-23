@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
@@ -350,7 +348,7 @@ class GlowingSquircleEmblem extends StatelessWidget {
                   ),
                 ),
                 child: CustomPaint(
-                  painter: _SunburstEmblemPainter(),
+                  painter: _SotuvAiEmblemPainter(),
                 ),
               ),
             ),
@@ -361,34 +359,97 @@ class GlowingSquircleEmblem extends StatelessWidget {
   }
 }
 
-class _SunburstEmblemPainter extends CustomPainter {
+class _SotuvAiEmblemPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final outerR = size.width * 0.34;
-    final innerR = size.width * 0.15;
-    const rays = 11;
+    final w = size.width;
+    final h = size.height;
+
+    // 3 ascending sales bars along bottom-left
+    final barColors = [
+      NorinPalette.indigo.withValues(alpha: 0.78),
+      NorinPalette.magenta.withValues(alpha: 0.88),
+      const Color(0xFFF5D0FE),
+    ];
+    final barHeights = [0.14, 0.22, 0.31];
+    final barW = w * 0.11;
+    final baseY = h * 0.80;
+    for (int i = 0; i < 3; i++) {
+      final bx = w * (0.20 + i * 0.145);
+      final bh = h * barHeights[i];
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(bx, baseY - bh, barW, bh),
+          Radius.circular(w * 0.03),
+        ),
+        Paint()..color = barColors[i],
+      );
+    }
+
+    // Dynamic upward sales growth trend arrow
+    final trendPath = Path()
+      ..moveTo(w * 0.21, h * 0.52)
+      ..lineTo(w * 0.40, h * 0.36)
+      ..lineTo(w * 0.53, h * 0.44)
+      ..lineTo(w * 0.79, h * 0.20);
 
     final glowPaint = Paint()
-      ..color = NorinPalette.magenta.withValues(alpha: 0.45)
-      ..strokeWidth = size.width * 0.11
+      ..style = PaintingStyle.stroke
+      ..color = NorinPalette.magenta.withValues(alpha: 0.55)
+      ..strokeWidth = w * 0.12
       ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+    canvas.drawPath(trendPath, glowPaint);
 
-    final paint = Paint()
-      ..shader = const RadialGradient(
-        colors: [Color(0xFFFFFFFF), Color(0xFFF5D0FE), Color(0xFFE879F9)],
-      ).createShader(Rect.fromCircle(center: center, radius: outerR))
-      ..strokeWidth = size.width * 0.085
-      ..strokeCap = StrokeCap.round;
+    final linePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..shader = const LinearGradient(
+        begin: Alignment.bottomLeft,
+        end: Alignment.topRight,
+        colors: [Color(0xFFF5D0FE), Color(0xFFFFFFFF)],
+      ).createShader(Rect.fromLTWH(0, 0, w, h))
+      ..strokeWidth = w * 0.075
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    canvas.drawPath(trendPath, linePaint);
 
-    for (int i = 0; i < rays; i++) {
-      final a = (i / rays) * math.pi * 2 - math.pi / 2;
-      final p1 = Offset(center.dx + math.cos(a) * innerR, center.dy + math.sin(a) * innerR);
-      final p2 = Offset(center.dx + math.cos(a) * outerR, center.dy + math.sin(a) * outerR);
-      canvas.drawLine(p1, p2, glowPaint);
-      canvas.drawLine(p1, p2, paint);
-    }
+    final headPath = Path()
+      ..moveTo(w * 0.62, h * 0.20)
+      ..lineTo(w * 0.79, h * 0.20)
+      ..lineTo(w * 0.79, h * 0.37);
+    canvas.drawPath(headPath, glowPaint);
+    canvas.drawPath(headPath, linePaint);
+
+    // 4-point AI sparkle star (top-left)
+    final sx = w * 0.23;
+    final sy = h * 0.26;
+    final sr = w * 0.095;
+    final si = sr * 0.28;
+    final star = Path()
+      ..moveTo(sx, sy - sr)
+      ..lineTo(sx + si, sy - si)
+      ..lineTo(sx + sr, sy)
+      ..lineTo(sx + si, sy + si)
+      ..lineTo(sx, sy + sr)
+      ..lineTo(sx - si, sy + si)
+      ..lineTo(sx - sr, sy)
+      ..lineTo(sx - si, sy - si)
+      ..close();
+    canvas.drawPath(star, Paint()..color = const Color(0xFFF5D0FE));
+
+    // Glowing coin/target accent at bottom-right
+    final dotCenter = Offset(w * 0.73, h * 0.71);
+    canvas.drawCircle(
+      dotCenter,
+      w * 0.095,
+      Paint()..color = NorinPalette.magenta.withValues(alpha: 0.40),
+    );
+    canvas.drawCircle(
+      dotCenter,
+      w * 0.055,
+      Paint()..color = const Color(0xFFFFFFFF),
+    );
   }
 
   @override

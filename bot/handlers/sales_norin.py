@@ -58,7 +58,7 @@ def render_sale_group_caption(
 
     ts = format_local_dt(sale.created_at, "%d.%m.%Y %H:%M")
     lines = [
-        f"{prefix}🥩 <b>Norin Hisob #{sale.id}</b>",
+        f"{prefix}🧾 <b>Sotuv Hisob #{sale.id}</b>",
         f"🏪 Mijoz: <b>{html.escape(client_name)}</b>",
         f"📅 Sana: {ts}",
         "-------------------------------",
@@ -295,7 +295,7 @@ def _apk_only_kb() -> InlineKeyboardMarkup:
 )
 async def redirect_legacy_sale_callbacks(cb: CallbackQuery) -> None:
     await cb.answer(
-        "📱 Sotuv, chek o'qish, to'lov, vozvrat va tahrirlash endi Norin AI APK ilovasida bajariladi.",
+        "📱 Sotuv, chek o'qish, to'lov, vozvrat va tahrirlash endi Sotuv AI APK ilovasida bajariladi.",
         show_alert=True,
     )
 
@@ -309,7 +309,7 @@ async def redirect_legacy_sale_buttons(message: Message, state: FSMContext) -> N
         return
     await state.clear()
     await message.answer(
-        "📱 <b>Sotuv, chek rasmi, to'lov va tahrirlash amallari Norin AI Android APK ilovasiga ko'chirilgan.</b>\n\n"
+        "📱 <b>Sotuv, chek rasmi, to'lov va tahrirlash amallari Sotuv AI Android ilovasiga ko'chirilgan.</b>\n\n"
         "Botda faqat <b>APK yuklash</b>, <b>Status</b>, <b>Dashboardlar</b> va <b>Guruh sozlash</b> ishlaydi.",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
@@ -328,7 +328,7 @@ async def redirect_private_fallback_to_apk(message: Message) -> None:
     if not await is_authorized_async(message.from_user.id if message.from_user else None):
         return
     await message.answer(
-        "📱 <b>Chek rasmi, ovozli va matnli sotuvlar endi Norin AI Android ilovasida qabul qilinadi!</b>\n\n"
+        "📱 <b>Chek rasmi, ovozli va matnli sotuvlar endi Sotuv AI Android ilovasida qabul qilinadi!</b>\n\n"
         "Bu botda esa ilovani yuklab olish (<code>/apk</code>), obuna va status (<code>/status</code>), "
         "hisobot dashboardlari (<code>/dashboard</code>) hamda Telegram guruhlarni ulash (<code>/groups</code>) mavjud.",
         parse_mode="HTML",

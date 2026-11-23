@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Deep cosmic midnight base -->
+    <path
+        android:fillColor="#110B22"
+        android:pathData="M0,0 H108 V108 H0 Z" />
+    <!-- Diagonal rich violet ambiance -->
+    <path
+        android:fillColor="#552E1065"
+        android:pathData="M0,0 H108 V72 L0,108 Z" />
+    <!-- Central cosmic glow halo -->
+    <path
+        android:fillColor="#447C3AED"
+        android:pathData="M54,54 m-44,0 a44,44 0 1,0 88,0 a44,44 0 1,0 -88,0" />
+    <path
+        android:fillColor="#38A855F7"
+        android:pathData="M54,48 m-28,0 a28,28 0 1,0 56,0 a28,28 0 1,0 -56,0" />
+    <path
+        android:fillColor="#26E879F9"
+        android:pathData="M62,40 m-18,0 a18,18 0 1,0 36,0 a18,18 0 1,0 -36,0" />
+</vector>

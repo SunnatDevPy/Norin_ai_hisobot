@@ -244,7 +244,7 @@ class ApiClient {
   }) async {
     final file = await downloadExcelFile(path, filename, query: query);
     if (share) {
-      await Share.shareXFiles([XFile(file.path)], text: 'Norin AI Hisobot: $filename');
+      await Share.shareXFiles([XFile(file.path)], text: 'Sotuv AI: $filename');
     } else {
       await OpenFilex.open(file.path);
     }

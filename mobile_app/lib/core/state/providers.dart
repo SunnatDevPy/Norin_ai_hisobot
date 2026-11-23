@@ -118,7 +118,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> verifyOtp({
     required int telegramId,
     required String code,
-    String deviceName = 'Norin AI Android',
+    String deviceName = 'Sotuv AI Android',
   }) async {
     final res = await _api.post(
       '/auth/verify-code',
@@ -152,7 +152,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> loginWithCode({
     required String code,
-    String deviceName = 'Norin AI Android',
+    String deviceName = 'Sotuv AI Android',
   }) async {
     final res = await _api.post(
       '/auth/login-code',
@@ -165,7 +165,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<Map<String, dynamic>> startTelegramTicket({
-    String deviceName = 'Norin AI Android',
+    String deviceName = 'Sotuv AI Android',
   }) async {
     final res = await _api.post(
       '/auth/telegram-ticket',
@@ -176,7 +176,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<bool> pollTelegramTicket({
     required String ticket,
-    String deviceName = 'Norin AI Android',
+    String deviceName = 'Sotuv AI Android',
   }) async {
     final res = await _api.post(
       '/auth/telegram-poll',

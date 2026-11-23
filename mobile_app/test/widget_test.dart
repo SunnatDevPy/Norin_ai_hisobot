@@ -55,7 +55,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Norin AI Hisobot'), findsOneWidget);
+    expect(find.text('Sotuv AI'), findsOneWidget);
     expect(find.text('Tizimga kirish'), findsOneWidget);
     expect(find.text('Telegram orqali 1-bosishda kirish'), findsOneWidget);
     expect(find.text('6 xonali /apk kod'), findsOneWidget);

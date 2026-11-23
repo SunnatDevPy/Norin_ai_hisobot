@@ -194,7 +194,7 @@ class _InAppUpdateProgressDialogState extends State<_InAppUpdateProgressDialog> 
     });
     try {
       final dir = await getTemporaryDirectory();
-      final target = File('${dir.path}/Norin_AI_v${widget.info.version}.apk');
+      final target = File('${dir.path}/Sotuv_AI_v${widget.info.version}.apk');
       if (await target.exists()) {
         await target.delete();
       }
@@ -239,7 +239,7 @@ class _InAppUpdateProgressDialogState extends State<_InAppUpdateProgressDialog> 
       if (res == 'PERMISSION_REQUESTED') {
         setState(() {
           _statusMessage =
-              "Telefon sozlamalarida «Norin AI» ilovasiga o'rnatish ruxsatini yoqing — qaytishingiz bilan o'rnatish avtomatik boshlanadi.";
+              "Telefon sozlamalarida «Sotuv AI» ilovasiga o'rnatish ruxsatini yoqing — qaytishingiz bilan o'rnatish avtomatik boshlanadi.";
         });
       } else {
         setState(() {
@@ -260,7 +260,7 @@ class _InAppUpdateProgressDialogState extends State<_InAppUpdateProgressDialog> 
 
     return AlertDialog(
       title: Text(
-        "Norin AI v${widget.info.version}",
+        "Sotuv AI v${widget.info.version}",
         style: const TextStyle(fontWeight: FontWeight.w800),
       ),
       content: Column(

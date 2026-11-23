@@ -97,7 +97,7 @@ class DashboardScreen extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    "Salom, Norin AI!",
+                    "Salom, Sotuv AI!",
                     style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
                   ),
                   Text(
@@ -211,7 +211,7 @@ class DashboardScreen extends ConsumerWidget {
                       title: "Davriy hisobot Excel",
                       path: '/export/period',
                       query: {'period': p},
-                      filename: 'Norin_Davriy_$p.xlsx',
+                      filename: 'SotuvAI_Davriy_$p.xlsx',
                     );
                   },
                   borderRadius: BorderRadius.circular(12),
@@ -452,7 +452,7 @@ class DashboardScreen extends ConsumerWidget {
                         title: "Davriy hisobot Excel",
                         path: '/export/period',
                         query: {'period': p},
-                        filename: 'Norin_Davriy_$p.xlsx',
+                        filename: 'SotuvAI_Davriy_$p.xlsx',
                       );
                     },
                     icon: const Icon(Icons.table_chart_outlined),
@@ -473,7 +473,7 @@ class DashboardScreen extends ConsumerWidget {
                         ref.read(apiClientProvider),
                         title: "Kunlik hisobot Excel",
                         path: '/export/daily/$sessId',
-                        filename: 'Norin_Kunlik_$sessId.xlsx',
+                        filename: 'SotuvAI_Kunlik_$sessId.xlsx',
                       );
                     },
                     icon: const Icon(Icons.today_outlined),
@@ -488,7 +488,7 @@ class DashboardScreen extends ConsumerWidget {
                       ref.read(apiClientProvider),
                       title: "Yopilgan kunlar tarixi",
                       path: '/export/history',
-                      filename: 'Norin_Kunlik_Tarix.xlsx',
+                      filename: 'SotuvAI_Kunlik_Tarix.xlsx',
                     ),
                     icon: const Icon(Icons.history_rounded),
                     label: const Text("Tarix"),

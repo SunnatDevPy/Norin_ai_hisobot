@@ -431,7 +431,7 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
                         maxLines: 4,
                         decoration: const InputDecoration(
                           labelText: "Buyruq matni",
-                          hintText: "Masalan: Iftiqor 15 kg yoki Sardor ot 8.5 qo'y 3",
+                          hintText: "Masalan: Anvar 15 kg yoki Sardor 10 dona",
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -439,8 +439,8 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
                         spacing: 8,
                         children: [
                           for (final sample in const [
-                            "Iftiqor 10 kg",
-                            "Sardor ot 12.5 kg",
+                            "Anvar 10 kg",
+                            "Sardor 15 dona",
                           ])
                             ActionChip(
                               label: Text(sample),

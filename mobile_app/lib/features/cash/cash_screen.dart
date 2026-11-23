@@ -133,12 +133,13 @@ class _CashScreenState extends ConsumerState<CashScreen> {
   int _segment = 0; // 0: Sotuvlar, 1: To'lovlar, 2: Vozvrat, 3: Xarajat/Kassa
 
   static const _expenseCats = <String>[
-    "Go'sht",
-    "Xamir",
-    "Masalliq",
+    "Xomashyo",
+    "Tovar / Yuk",
+    "Qadoqlash",
     "Ish haqi",
     "Transport",
-    "Komunal",
+    "Ijara / Komunal",
+    "Masalliq",
     "Boshqa",
   ];
 
@@ -712,13 +713,13 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
                       style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
                     ),
                     const Spacer(),
-                    TextButton.icon(
+                      TextButton.icon(
                       onPressed: () => showExcelActionPicker(
                         context,
                         widget.parentRef.read(apiClientProvider),
                         title: "Tarix Excel",
                         path: '/export/history',
-                        filename: 'Norin_Kunlik_Tarix.xlsx',
+                        filename: 'SotuvAI_Kunlik_Tarix.xlsx',
                       ),
                       icon: const Icon(Icons.table_chart_outlined),
                       label: const Text("Excel"),
@@ -751,7 +752,7 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
                           widget.parentRef.read(apiClientProvider),
                           title: "Kunlik Excel (${asStr(s['report_date'])})",
                           path: '/export/daily/$sid',
-                          filename: 'Norin_${asStr(s['report_date'])}.xlsx',
+                          filename: 'SotuvAI_${asStr(s['report_date'])}.xlsx',
                         ),
                       ),
                       if (closed)

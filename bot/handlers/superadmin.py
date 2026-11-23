@@ -220,7 +220,7 @@ async def _render_client_subscription_text(user_id: Optional[int] = None) -> str
     }
 
     return (
-        "💎 <b>Norin AI — Obuna va Filial Statusi</b>\n"
+        "💎 <b>Sotuv AI — Obuna va Filial Statusi</b>\n"
         "===============================\n"
         f"🏢 Sex / Filial: <b>{html.escape(sub.tenant_name)}</b> (<code>#{sub.id}</code>)\n"
         f"📦 Tarif: <b>{html.escape(sub.plan_name)}</b> — <b>{format_uzs(sub.monthly_price)} so'm/oy</b>\n"
@@ -1142,7 +1142,7 @@ async def _finalize_sa_user_binding(
         await message.bot.send_message(
             chat_id=tg_id,
             text=(
-                "🎉 <b>Norin AI Hisobot botiga xush kelibsiz!</b>\n\n"
+                "🎉 <b>Sotuv AI botiga xush kelibsiz!</b>\n\n"
                 f"🏢 Siz <b>#{final_tid} {html.escape(sub_status.state.tenant_name)}</b> filialiga ulandingiz.\n"
                 "Boshlash uchun /start tugmasini bosing 👇"
             ),
@@ -1551,7 +1551,7 @@ async def cb_superadmin_send_reminder(cb: CallbackQuery) -> None:
             await cb.bot.send_message(
                 chat_id=target_uid,
                 text=(
-                    "🔔 <b>Obuna eslatmasi — Norin AI Hisobot</b>\n\n"
+                    "🔔 <b>Obuna eslatmasi — Sotuv AI</b>\n\n"
                     f"🏢 Filial: <b>#{sub.id} {html.escape(sub.tenant_name)}</b>\n"
                     f"📦 Tarif: <b>{html.escape(sub.plan_name)}</b>\n"
                     f"💳 Oylik to'lov: <b>{format_uzs(sub.monthly_price)} so'm</b>\n"

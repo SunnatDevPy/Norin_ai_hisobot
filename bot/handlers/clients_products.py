@@ -121,7 +121,7 @@ def render_debts_overview_text(debts: list[ClientDebtSummary]) -> str:
     if not debts:
         return (
             "💳 <b>Mijozlar Qarz Daftari</b>\n\n"
-            "<i>Hozircha mijozlar qo'shilmagan. Mijozlarni Norin AI Android ilovasida qo'shing.</i>"
+            "<i>Hozircha mijozlar qo'shilmagan. Mijozlarni Sotuv AI Android ilovasida qo'shing.</i>"
         )
     total_debt = sum(d.current_debt for d in debts)
     total_kg = sum(d.total_kg for d in debts)
@@ -220,14 +220,14 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         warn_line = "\n\n🔒 <b>Obuna muddati tugagan.</b> Davom ettirish uchun 💎 Obuna va Status bo'limiga kiring."
 
     await message.answer(
-        "👋 <b>Assalomu alaykum! Norin AI Hisobot botiga xush kelibsiz.</b>\n"
+        "👋 <b>Assalomu alaykum! Sotuv AI botiga xush kelibsiz.</b>\n"
         f"🏢 Filial: <b>{html.escape(sub_status.state.tenant_name)}</b> (<code>#{sub_status.state.id}</code>)\n\n"
-        "Botda faqat quyidagi asosiy boshqaruv bo'limlari qoldirilgan:\n"
+        "Botda quyidagilar mavjud:\n"
         "• 📱 <b>Mobil ilova (APK)</b> — ilovani yuklab olish, 1-bosishda ulanish va kirish kodi\n"
         "• 📊 <b>Dashboardlar</b> — kunlik, 7/30 kunlik va oylik hisobotlar, qarzlar, Excel\n"
         "• 🔗 <b>Guruh sozlash</b> — rahbariyat hisobot guruhi va mijoz guruhlarini ulash\n"
         "• 💎 <b>Obuna va Status</b> — tarif muddati, AI kvota va faol qurilmalar\n\n"
-        "<i>🥩 Savdo, chek rasmi, to'lov, vozvrat va xarajatlar Norin AI Android APK ilovasida bajariladi.</i>"
+        "<i>🧾 Savdo, chek rasmi, to'lov, vozvrat va xarajatlar Sotuv AI Android ilovasida bajariladi.</i>"
         f"{warn_line}\n\n"
         f"🆔 Sizning ID: <code>{uid or 0}</code>",
         parse_mode="HTML",
@@ -285,7 +285,7 @@ async def cmd_start_group_bind(message: Message, command: CommandObject) -> None
             return
         await message.answer(
             f"✅ Ushbu guruh <b>{html.escape(cli.name)}</b> mijoziga muvaffaqiyatli biriktirildi!\n"
-            "Endi Norin AI ilovasida tasdiqlangan sotuv va to'lov cheklari avtomatik shu guruhga yuboriladi.",
+            "Endi Sotuv AI ilovasida tasdiqlangan sotuv va to'lov cheklari avtomatik shu guruhga yuboriladi.",
             parse_mode="HTML",
         )
         await _refresh_open_client_card(message.bot, uid, cli.id)
@@ -570,7 +570,7 @@ async def cb_report_group_ping(cb: CallbackQuery) -> None:
     try:
         await cb.bot.send_message(
             cfg.chat_id,
-            "✅ Test xabar: Ushbu guruh <b>Norin AI Hisobot</b> rahbariyat guruhi sifatida ulangan.",
+            "✅ Test xabar: Ushbu guruh <b>Sotuv AI</b> rahbariyat guruhi sifatida ulangan.",
             parse_mode="HTML",
         )
         await cb.answer("✅ Test xabar yuborildi!", show_alert=True)
@@ -600,9 +600,9 @@ async def _render_client_card_text(client_id: int) -> tuple[str, Optional[object
     price_lines = []
     for p in products:
         if p.id in custom_map:
-            price_lines.append(f"  • {html.escape(p.name)}: <b>{format_uzs(custom_map[p.id])} so'm/kg</b> (Maxsus)")
+            price_lines.append(f"  • {html.escape(p.name)}: <b>{format_uzs(custom_map[p.id])} so'm/{html.escape(p.unit)}</b> (Maxsus)")
         else:
-            price_lines.append(f"  • {html.escape(p.name)}: {format_uzs(p.default_sell_price)} so'm/kg (Standart)")
+            price_lines.append(f"  • {html.escape(p.name)}: {format_uzs(p.default_sell_price)} so'm/{html.escape(p.unit)} (Standart)")
 
     text = (
         f"🏪 <b>Mijoz: {html.escape(cli.name)}</b>\n"
@@ -622,7 +622,7 @@ async def cb_clients_menu(cb: CallbackQuery) -> None:
         clients = await list_clients(db, active_only=True)
     if not clients:
         await cb.answer(
-            "Hozircha mijozlar yo'q. Mijozni Norin AI APK ilovasida qo'shing.",
+            "Hozircha mijozlar yo'q. Mijozni Sotuv AI APK ilovasida qo'shing.",
             show_alert=True,
         )
         return
@@ -852,6 +852,6 @@ async def cb_debt_client_detail(cb: CallbackQuery) -> None:
 )
 async def redirect_legacy_catalog_callbacks(cb: CallbackQuery) -> None:
     await cb.answer(
-        "📱 Mahsulot, mijoz va narx sozlamalari endi Norin AI APK ilovasida bajariladi.",
+        "📱 Mahsulot, mijoz va narx sozlamalari endi Sotuv AI APK ilovasida bajariladi.",
         show_alert=True,
     )

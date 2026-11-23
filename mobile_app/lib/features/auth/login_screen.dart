@@ -212,7 +212,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
       await ref.read(authProvider.notifier).verifyOtp(
             telegramId: tgId,
             code: code,
-            deviceName: 'Norin AI Android',
+            deviceName: 'Sotuv AI Android',
           );
     } catch (e) {
       if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
@@ -241,7 +241,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
                     const Center(child: GlowingSquircleEmblem(size: 102)),
                     const SizedBox(height: 4),
                     Text(
-                      "Norin AI Hisobot",
+                      "Sotuv AI",
                       textAlign: TextAlign.center,
                       style: theme.textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.w900,
@@ -250,7 +250,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      "Savdo, kassa, AI chek va SaaS boshqaruvi • v$kAppVersion",
+                      "Kichik biznes va uyda sotuvchilar uchun aqlli hisob • v$kAppVersion",
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,

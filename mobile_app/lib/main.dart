@@ -65,7 +65,7 @@ class _NorinAiAppState extends ConsumerState<NorinAiApp> with WidgetsBindingObse
     }
 
     return MaterialApp(
-      title: 'Norin AI Hisobot',
+      title: 'Sotuv AI',
       debugShowCheckedModeBanner: false,
       themeMode: themeMode,
       theme: AppTheme.light(),
@@ -90,8 +90,16 @@ class _SplashView extends StatelessWidget {
               const GlowingSquircleEmblem(size: 98),
               const SizedBox(height: 12),
               const Text(
-                "Norin AI Hisobot",
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                "Sotuv AI",
+                style: TextStyle(fontSize: 23, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                "Savdo, qarz va kassa daftari",
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 16),
               SizedBox(

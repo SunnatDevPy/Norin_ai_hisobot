@@ -33,7 +33,7 @@ class NativeBridge {
   }
 
   static Future<bool> authenticateBiometric({
-    String title = "Norin AI Himoyasi",
+    String title = "Sotuv AI Himoyasi",
     String subtitle = "Kirish uchun barmoq izini bosing",
   }) async {
     if (!Platform.isAndroid) return false;
@@ -129,7 +129,7 @@ class BiometricLockNotifier extends StateNotifier<BiometricLockState> {
 
   Future<bool> unlockWithBiometric() async {
     final ok = await NativeBridge.authenticateBiometric(
-      title: "Norin AI Hisobot",
+      title: "Sotuv AI",
       subtitle: "Davom etish uchun barmoq izini bosing",
     );
     if (ok) {
@@ -242,7 +242,7 @@ class _BiometricLockScreenState extends ConsumerState<BiometricLockScreen> {
                     const GlowingSquircleEmblem(size: 82),
                     const SizedBox(height: 8),
                     const Text(
-                      "Norin AI Himoyalangan",
+                      "Sotuv AI Himoyalangan",
                       style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
                     ),
                     const SizedBox(height: 6),
