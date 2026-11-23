@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import html
+import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -10,7 +13,7 @@ from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from api import apk_meta
 from api.routers import admin as admin_router
@@ -100,6 +103,58 @@ def create_app() -> FastAPI:
             filename=f"Norin_AI_v{meta['version']}.apk",
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
+
+    @app.get("/app/open")
+    async def open_mobile_app(ticket: str = "") -> HTMLResponse:
+        safe_ticket = re.sub(r"[^A-Za-z0-9_-]", "", ticket or "")[:64]
+        q = f"?ticket={safe_ticket}" if safe_ticket else ""
+        scheme_url = f"sotuvai://auth-done{q}"
+        intent_url = (
+            f"intent://auth-done{q}"
+            "#Intent;scheme=sotuvai;package=uz.norinai.norin_ai_app;end"
+        )
+        esc_intent = html.escape(intent_url, quote=True)
+        esc_scheme = html.escape(scheme_url, quote=True)
+        js_intent = json.dumps(intent_url)
+        js_scheme = json.dumps(scheme_url)
+        page = f"""<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Sotuv AI</title>
+  <style>
+    body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(circle at top,#241242 0%,#0b0a0f 65%);color:#fff;
+    font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:24px}}
+    .card{{max-width:340px;width:100%;padding:28px 22px;border-radius:24px;
+    background:#14121e;border:1px solid rgba(168,85,247,.38);box-shadow:0 16px 40px rgba(0,0,0,.5)}}
+    h2{{margin:0 0 8px;font-size:22px}}
+    p{{margin:0 0 22px;color:#b8b4cc;font-size:14px;line-height:1.45}}
+    .btn{{display:block;padding:14px 18px;border-radius:999px;text-decoration:none;
+    font-weight:700;font-size:15px;color:#1a0b2e;
+    background:linear-gradient(90deg,#e9d5ff,#a855f7);margin-bottom:10px}}
+    .sub{{display:inline-block;color:#c084fc;font-size:13px;text-decoration:none;margin-top:6px}}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Sotuv AI</h2>
+    <p>Kirish tasdiqlandi. Ilovaga qaytish uchun quyidagi tugmani bosing.</p>
+    <a class="btn" id="openBtn" href="{esc_intent}">🚀 Sotuv AI ilovasini ochish</a>
+    <a class="sub" href="{esc_scheme}">Ilova ochilmasa bosing</a>
+  </div>
+  <script>
+    window.addEventListener('load', function(){{
+      try {{ window.location.replace({js_intent}); }} catch(e) {{}}
+      setTimeout(function(){{
+        try {{ window.location.href = {js_scheme}; }} catch(e) {{}}
+      }}, 350);
+    }});
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=page, headers={"Cache-Control": "no-store"})
 
     prefix = "/api/v1"
     app.include_router(auth_router.router, prefix=prefix)

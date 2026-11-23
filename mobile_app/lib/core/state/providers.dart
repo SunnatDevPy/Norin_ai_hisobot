@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -61,9 +62,32 @@ class AuthNotifier extends StateNotifier<AuthState> {
         role: role,
         selectedTenantId: baseTid,
       );
+    } on DioException catch (e) {
+      final code = e.response?.statusCode;
+      if (code == 401 || code == 403 || !_api.isAuthenticated) {
+        await _api.clearSession();
+        state = const AuthState(stage: AuthStage.unauthenticated);
+      } else {
+        // Network/timeout/5xx error: keep cached session active rather than logging user out.
+        state = AuthState(
+          stage: AuthStage.authenticated,
+          telegramId: _api.telegramId,
+          role: _api.role ?? 'owner',
+          selectedTenantId: _api.baseTenantId,
+        );
+      }
     } catch (_) {
-      await _api.clearSession();
-      state = const AuthState(stage: AuthStage.unauthenticated);
+      if (!_api.isAuthenticated) {
+        await _api.clearSession();
+        state = const AuthState(stage: AuthStage.unauthenticated);
+      } else {
+        state = AuthState(
+          stage: AuthStage.authenticated,
+          telegramId: _api.telegramId,
+          role: _api.role ?? 'owner',
+          selectedTenantId: _api.baseTenantId,
+        );
+      }
     }
   }
 

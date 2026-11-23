@@ -42,7 +42,7 @@ class ApiClient {
           final alreadyRetried = err.requestOptions.extra['_retried'] == true;
           if (status == 401 &&
               !alreadyRetried &&
-              !path.contains('/auth/') &&
+              !isPublicAuthPath(path) &&
               await _refreshAccessToken()) {
             err.requestOptions.extra['_retried'] = true;
             err.requestOptions.headers['Authorization'] = 'Bearer $_accessToken';
@@ -65,14 +65,33 @@ class ApiClient {
   String? _refreshToken;
   String? _role;
   int? _telegramId;
+  int _baseTenantId = 1;
   int? _selectedTenantId;
   Completer<bool>? _refreshCompleter;
+
+  static const _publicAuthPaths = <String>{
+    '/auth/refresh',
+    '/auth/request-code',
+    '/auth/verify-code',
+    '/auth/login-code',
+    '/auth/telegram-ticket',
+    '/auth/telegram-poll',
+  };
+
+  /// Returns true only for unauthenticated auth endpoints that must NOT trigger token refresh.
+  static bool isPublicAuthPath(String path) {
+    final clean = path.split('?').first;
+    return _publicAuthPaths.any((p) => clean.endsWith(p));
+  }
 
   String get baseUrl => _baseUrl;
   String? get role => _role;
   int? get telegramId => _telegramId;
+  int get baseTenantId => _baseTenantId;
   int? get selectedTenantId => _selectedTenantId;
-  bool get isAuthenticated => _accessToken != null && _accessToken!.isNotEmpty;
+  bool get isAuthenticated =>
+      (_accessToken != null && _accessToken!.isNotEmpty) ||
+      (_refreshToken != null && _refreshToken!.isNotEmpty);
   bool get isSuperAdmin => _role == 'super_admin';
 
   Future<void> init() async {
@@ -82,8 +101,10 @@ class ApiClient {
     _role = await _storage.read(key: 'role');
     final tidRaw = await _storage.read(key: 'telegram_id');
     _telegramId = tidRaw != null ? int.tryParse(tidRaw) : null;
-    // Always default to own filial (#1 for Super Admin; server-enforced for tenants) on startup
-    _selectedTenantId = 1;
+    final baseTidRaw = await _storage.read(key: 'tenant_id');
+    _baseTenantId = (baseTidRaw != null ? int.tryParse(baseTidRaw) : null) ?? 1;
+    // Always default to own filial on startup (Super Admin #1; enforced server-side for tenants)
+    _selectedTenantId = _baseTenantId;
     await _storage.delete(key: 'selected_tenant_id');
     _dio.options.baseUrl = _baseUrl;
   }
@@ -109,11 +130,13 @@ class ApiClient {
     _refreshToken = refreshToken;
     _role = role;
     _telegramId = telegramId;
+    _baseTenantId = tenantId;
     _selectedTenantId ??= tenantId;
     await _storage.write(key: 'access_token', value: accessToken);
     await _storage.write(key: 'refresh_token', value: refreshToken);
     await _storage.write(key: 'role', value: role);
     await _storage.write(key: 'telegram_id', value: '$telegramId');
+    await _storage.write(key: 'tenant_id', value: '$tenantId');
   }
 
   Future<void> clearSession() async {
@@ -121,10 +144,13 @@ class ApiClient {
     _refreshToken = null;
     _role = null;
     _telegramId = null;
+    _baseTenantId = 1;
+    _selectedTenantId = 1;
     await _storage.delete(key: 'access_token');
     await _storage.delete(key: 'refresh_token');
     await _storage.delete(key: 'role');
     await _storage.delete(key: 'telegram_id');
+    await _storage.delete(key: 'tenant_id');
   }
 
   Future<bool> _refreshAccessToken() async {
@@ -133,7 +159,13 @@ class ApiClient {
     final completer = Completer<bool>();
     _refreshCompleter = completer;
     try {
-      final refreshDio = Dio(BaseOptions(baseUrl: _baseUrl));
+      final refreshDio = Dio(
+        BaseOptions(
+          baseUrl: _baseUrl,
+          connectTimeout: const Duration(seconds: 12),
+          receiveTimeout: const Duration(seconds: 20),
+        ),
+      );
       final resp = await refreshDio.post(
         '/auth/refresh',
         data: {'refresh_token': _refreshToken},
@@ -145,8 +177,14 @@ class ApiClient {
       await _storage.write(key: 'refresh_token', value: _refreshToken);
       completer.complete(true);
       return true;
+    } on DioException catch (e) {
+      final code = e.response?.statusCode;
+      if (code == 401 || code == 403) {
+        await clearSession();
+      }
+      completer.complete(false);
+      return false;
     } catch (_) {
-      await clearSession();
       completer.complete(false);
       return false;
     } finally {

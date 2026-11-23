@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:norin_ai_app/core/api/api_client.dart';
 import 'package:norin_ai_app/core/theme/app_theme.dart';
 import 'package:norin_ai_app/core/update/app_updater.dart';
 import 'package:norin_ai_app/core/utils/formatters.dart';
@@ -213,5 +214,16 @@ void main() {
     await tester.fling(find.byType(PageView), const Offset(300, 0), 1000);
     await tester.pumpAndSettle();
     expect(page, 0);
+  });
+
+  test('ApiClient.isPublicAuthPath allows auto-refresh on /auth/me and /auth/devices', () {
+    expect(ApiClient.isPublicAuthPath('/auth/me'), isFalse);
+    expect(ApiClient.isPublicAuthPath('/auth/devices'), isFalse);
+    expect(ApiClient.isPublicAuthPath('/auth/logout'), isFalse);
+    expect(ApiClient.isPublicAuthPath('/dashboard/summary'), isFalse);
+    expect(ApiClient.isPublicAuthPath('/auth/refresh'), isTrue);
+    expect(ApiClient.isPublicAuthPath('/auth/telegram-poll'), isTrue);
+    expect(ApiClient.isPublicAuthPath('/auth/telegram-ticket'), isTrue);
+    expect(ApiClient.isPublicAuthPath('/auth/login-code?x=1'), isTrue);
   });
 }

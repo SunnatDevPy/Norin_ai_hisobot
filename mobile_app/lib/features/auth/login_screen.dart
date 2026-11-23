@@ -55,6 +55,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _activeTicket != null) {
+      _startPollingLoop();
       _pollTicketOnce();
     }
   }

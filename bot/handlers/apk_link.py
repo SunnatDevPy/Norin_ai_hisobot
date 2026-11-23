@@ -185,24 +185,32 @@ async def cmd_start_apk_ticket(message: Message, state: FSMContext) -> None:
                 approved = True
 
     backup_code = await _issue_bot_otp(int(uid))
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📱 APK & Qurilmalar", callback_data="apk:home")]
-        ]
-    )
+    public_url = (get_settings().API_PUBLIC_URL or "").strip().rstrip("/")
+    rows: List[List[InlineKeyboardButton]] = []
+    if approved and public_url:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🚀 Sotuv AI ilovasiga qaytish",
+                    url=f"{public_url}/app/open?ticket={ticket}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="📱 APK & Qurilmalar", callback_data="apk:home")])
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
     if approved:
         await message.answer(
             "✅ <b>Sotuv AI ilovasiga kirish tasdiqlandi!</b>\n"
-            f"🏢 Filial: <b>{html.escape(tenant_name)}</b>\n\n"
-            "📲 <b>Endi Sotuv AI ilovasiga qayting</b> — ilova avtomatik ravishda tizimga kiradi.\n\n"
-            f"<i>Agar avtomatik kirmasa, ushbu kodni kiriting:</i> <code>{backup_code}</code>",
+            f"🏪 Do'kon: <b>{html.escape(tenant_name)}</b>\n\n"
+            "📲 Pastdagi tugmani bosing yoki Sotuv AI ilovasiga qayting — avtomatik ulanadi.\n\n"
+            f"<i>Zaxira kirish kodi:</i> <code>{backup_code}</code>",
             parse_mode="HTML",
             reply_markup=kb,
         )
     else:
         await message.answer(
             "⏳ <b>Kirish havolasi eskirgan yoki ishlatilgan.</b>\n\n"
-            "Ilovada <b>«Telegram orqali 1-bosishda kirish»</b> tugmasini qayta bosing "
+            "Ilovada <b>«Telegram orqali kirish»</b> tugmasini qayta bosing "
             f"yoki ushbu kodni tering: <code>{backup_code}</code>",
             parse_mode="HTML",
             reply_markup=kb,

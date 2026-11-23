@@ -338,6 +338,7 @@ async def refresh(body: RefreshIn, db: AsyncSession = Depends(get_db)) -> TokenO
     sess.role, sess.tenant_id = resolved
     new_refresh = make_refresh_token()
     sess.refresh_hash = hash_secret(new_refresh)
+    sess.expires_at = now_utc() + timedelta(days=max(1, get_settings().API_REFRESH_TTL_DAYS))
     sess.last_used_at = now_utc()
     await db.commit()
     access, ttl = create_access_token(sess.telegram_id, sess.role, sess.tenant_id, sess.id)

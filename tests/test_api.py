@@ -561,4 +561,10 @@ def test_multitenant_idless_code_and_telegram_ticket_isolation(tmp_path: Path, m
         p2 = (await client.post(f"{PFX}/auth/telegram-poll", json={"ticket": ticket})).json()
         assert p2["status"] == "expired"
 
+        # 4. Return-to-app trampoline page (/app/open) returns HTML with custom scheme & intent
+        open_res = await client.get("/app/open", params={"ticket": "abc_123<script>"})
+        assert open_res.status_code == 200
+        assert "sotuvai://auth-done?ticket=abc_123script" in open_res.text
+        assert "<script>" not in open_res.text.split("</style>", 1)[0]
+
     asyncio.run(_with_api(tmp_path, monkeypatch, _logic))
