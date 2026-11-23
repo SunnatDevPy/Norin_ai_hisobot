@@ -363,7 +363,14 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
             icon: const Icon(Icons.add_shopping_cart_rounded),
             onPressed: () => openNewSaleSheet(context, ref, initialClientId: widget.clientId),
           ),
-          IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: _refresh),
+          SpinningRefreshButton(
+            onRefresh: () async {
+              _refresh();
+              await ref
+                  .read(clientDetailProvider(widget.clientId).future)
+                  .catchError((_) => <String, dynamic>{});
+            },
+          ),
         ],
       ),
       body: CosmicBackground(

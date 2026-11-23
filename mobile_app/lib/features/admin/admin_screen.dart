@@ -163,15 +163,17 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text("Super Admin Panel", style: TextStyle(fontWeight: FontWeight.w800)),
+        title: const Text("Admin Panel", style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
-          IconButton(
-            tooltip: "Yangilash",
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: () {
+          SpinningRefreshButton(
+            onRefresh: () async {
               ref.invalidate(adminAnalyticsProvider);
               ref.invalidate(adminTenantsProvider);
-              _loadAudit();
+              await Future.wait<Object?>([
+                ref.read(adminAnalyticsProvider.future),
+                ref.read(adminTenantsProvider.future),
+                _loadAudit(),
+              ]).catchError((_) => <Object?>[]);
             },
           ),
         ],
@@ -179,8 +181,8 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
           controller: _tabs,
           tabs: const [
             Tab(icon: Icon(Icons.insights_rounded), text: "Statistika"),
-            Tab(icon: Icon(Icons.store_mall_directory_rounded), text: "Filiallar"),
-            Tab(icon: Icon(Icons.campaign_rounded), text: "E'lon & Log"),
+            Tab(icon: Icon(Icons.store_mall_directory_rounded), text: "Do'konlar"),
+            Tab(icon: Icon(Icons.campaign_rounded), text: "Tarix"),
           ],
         ),
       ),
@@ -401,10 +403,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
               const SizedBox(height: 16),
               SectionHeader(
                 title: "Audit Log",
-                trailing: IconButton(
-                  icon: const Icon(Icons.refresh_rounded),
-                  onPressed: _loadAudit,
-                ),
+                trailing: SpinningRefreshButton(onRefresh: _loadAudit),
               ),
               const SizedBox(height: 8),
               if (_loadingAudit)

@@ -6,6 +6,7 @@ import 'package:norin_ai_app/core/theme/app_theme.dart';
 import 'package:norin_ai_app/core/update/app_updater.dart';
 import 'package:norin_ai_app/core/utils/formatters.dart';
 import 'package:norin_ai_app/core/version.dart';
+import 'package:norin_ai_app/core/widgets/norin_widgets.dart';
 import 'package:norin_ai_app/features/auth/login_screen.dart';
 
 void main() {
@@ -56,11 +57,11 @@ void main() {
     await tester.pump();
 
     expect(find.text('Sotuv AI'), findsOneWidget);
-    expect(find.text('Tizimga kirish'), findsOneWidget);
-    expect(find.text('Telegram orqali 1-bosishda kirish'), findsOneWidget);
-    expect(find.text('6 xonali /apk kod'), findsOneWidget);
+    expect(find.text('Kirish'), findsAtLeastNWidgets(1));
+    expect(find.text('Telegram orqali kirish'), findsOneWidget);
+    expect(find.text('6 xonali kod'), findsOneWidget);
 
-    final advancedTile = find.text('Telegram ID orqali kod olish');
+    final advancedTile = find.text('ID orqali kirish');
     await tester.ensureVisible(advancedTile);
     await tester.tap(advancedTile);
     await tester.pump();
@@ -85,7 +86,37 @@ void main() {
     await tester.pump();
 
     expect(find.text('Sotuv AI'), findsOneWidget);
-    expect(find.text('Tizimga kirish'), findsOneWidget);
-    expect(find.text('Telegram orqali 1-bosishda kirish'), findsOneWidget);
+    expect(find.text('Kirish'), findsAtLeastNWidgets(1));
+    expect(find.text('Telegram orqali kirish'), findsOneWidget);
+  });
+
+  testWidgets('SpinningRefreshButton animates and invokes onRefresh callback', (tester) async {
+    int calls = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: Scaffold(
+          appBar: AppBar(
+            actions: [
+              SpinningRefreshButton(
+                glassCircle: true,
+                onRefresh: () async {
+                  calls++;
+                  await Future<void>.delayed(const Duration(milliseconds: 50));
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byIcon(Icons.refresh_rounded));
+    await tester.pump();
+    expect(calls, 1);
+
+    // Advance past minimum 650ms spin + settle animation cleanly without pending timers.
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pumpAndSettle();
   });
 }

@@ -216,270 +216,274 @@ class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingOb
       body: CosmicBackground(
         showBottomHorizonGlow: true,
         child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-            child: Center(
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Center(child: GlowingSquircleEmblem(size: 102)),
-                    const SizedBox(height: 4),
-                    Text(
-                      "Sotuv AI",
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      "Kichik biznes va uyda sotuvchilar uchun aqlli hisob • v$kAppVersion",
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    SpotlightHeroCard(
-                      padding: const EdgeInsets.all(20),
-                      glowColor: NorinPalette.emeraldLight,
-                      accentColor: NorinPalette.indigo,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: const BoxDecoration(
-                                  color: NorinPalette.magenta,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                "Tizimga kirish",
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
+                constraints: BoxConstraints(
+                  minHeight: (constraints.maxHeight - 28).clamp(0.0, double.infinity),
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Center(child: GlowingSquircleEmblem(size: 102)),
+                        const SizedBox(height: 4),
+                        Text(
+                          "Sotuv AI",
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.5,
                           ),
-                          const SizedBox(height: 14),
-                          if (waitingTg) ...[
-                            Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: NorinPalette.emerald.withValues(alpha: 0.16),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: NorinPalette.emeraldLight.withValues(alpha: 0.5),
-                                ),
-                              ),
-                              child: Column(
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          "Savdo, qarz va kassa",
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        SpotlightHeroCard(
+                          padding: const EdgeInsets.all(20),
+                          glowColor: NorinPalette.emeraldLight,
+                          accentColor: NorinPalette.indigo,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
                                 children: [
-                                  const Row(
-                                    children: [
-                                      SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2.2,
-                                          color: NorinPalette.emeraldLight,
-                                        ),
-                                      ),
-                                      SizedBox(width: 12),
-                                      Expanded(
-                                        child: Text(
-                                          "Telegram botda START tugmasini bosing — ilova avtomatik ulanadi...",
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w700,
-                                            height: 1.35,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: const BoxDecoration(
+                                      color: NorinPalette.magenta,
+                                      shape: BoxShape.circle,
+                                    ),
                                   ),
-                                  const SizedBox(height: 10),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      if (_activeBotUrl != null)
-                                        TextButton.icon(
-                                          onPressed: () => NativeBridge.openExternalUrl(_activeBotUrl!),
-                                          icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                                          label: const Text("Telegramni ochish"),
-                                        ),
-                                      TextButton(
-                                        onPressed: _cancelTicketPolling,
-                                        child: const Text("Bekor qilish"),
-                                      ),
-                                    ],
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    "Kirish",
+                                    style: theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                 ],
                               ),
-                            ),
-                          ] else
-                            NeonPillButton(
-                              onPressed: _busy ? null : _startOneTapTelegram,
-                              busy: _busy,
-                              icon: Icons.telegram_rounded,
-                              label: "Telegram orqali 1-bosishda kirish",
-                            ),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              const Expanded(child: Divider()),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 10),
-                                child: Text(
-                                  "yoki botdagi kod bilan",
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ),
-                              const Expanded(child: Divider()),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: _quickCodeCtrl,
-                                  enabled: !_busy,
-                                  keyboardType: TextInputType.number,
-                                  maxLength: 6,
-                                  textAlign: TextAlign.center,
-                                  style: tNumStyle.copyWith(
-                                    fontSize: 19,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 5,
-                                  ),
-                                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                  decoration: const InputDecoration(
-                                    labelText: "6 xonali /apk kod",
-                                    hintText: "••••••",
-                                    counterText: "",
-                                    prefixIcon: Icon(Icons.key_rounded),
-                                  ),
-                                  onChanged: (v) {
-                                    if (v.trim().length == 6 && !_busy) {
-                                      _loginWithCodeOnly();
-                                    }
-                                  },
-                                  onSubmitted: (_) => _loginWithCodeOnly(),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              SizedBox(
-                                height: 52,
-                                child: FilledButton.tonal(
-                                  onPressed: _busy ? null : _loginWithCodeOnly,
-                                  child: const Text("Kirish", style: TextStyle(fontWeight: FontWeight.w800)),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Card(
-                      child: Column(
-                        children: [
-                          ListTile(
-                            leading: const Icon(Icons.key_outlined, color: NorinPalette.emeraldLight),
-                            title: const Text(
-                              "Telegram ID orqali kod olish",
-                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
-                            ),
-                            subtitle: const Text(
-                              "Qo'shimcha kirish usuli",
-                              style: TextStyle(fontSize: 11.5),
-                            ),
-                            trailing: Icon(
-                              _showAdvanced ? Icons.expand_less : Icons.expand_more,
-                            ),
-                            onTap: () => setState(() => _showAdvanced = !_showAdvanced),
-                          ),
-                          if (_showAdvanced)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  const Divider(),
-                                  const SizedBox(height: 12),
-                                  TextField(
-                                    controller: _tgCtrl,
-                                    enabled: !_busy && !_codeSent,
-                                    keyboardType: TextInputType.number,
-                                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                    decoration: const InputDecoration(
-                                      labelText: "Telegram ID",
-                                      hintText: "Telegram ID raqamingiz",
-                                      prefixIcon: Icon(Icons.badge_outlined),
+                              const SizedBox(height: 14),
+                              if (waitingTg) ...[
+                                Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: NorinPalette.emerald.withValues(alpha: 0.16),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: NorinPalette.emeraldLight.withValues(alpha: 0.5),
                                     ),
                                   ),
-                                  if (_codeSent) ...[
-                                    const SizedBox(height: 10),
-                                    TextField(
-                                      controller: _otpCtrl,
+                                  child: Column(
+                                    children: [
+                                      const Row(
+                                        children: [
+                                          SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2.2,
+                                              color: NorinPalette.emeraldLight,
+                                            ),
+                                          ),
+                                          SizedBox(width: 12),
+                                          Expanded(
+                                            child: Text(
+                                              "Telegramda START bosing — ilova avtomatik ulanadi...",
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                height: 1.35,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          if (_activeBotUrl != null)
+                                            TextButton.icon(
+                                              onPressed: () => NativeBridge.openExternalUrl(_activeBotUrl!),
+                                              icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                                              label: const Text("Telegramni ochish"),
+                                            ),
+                                          TextButton(
+                                            onPressed: _cancelTicketPolling,
+                                            child: const Text("Bekor qilish"),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ] else
+                                NeonPillButton(
+                                  onPressed: _busy ? null : _startOneTapTelegram,
+                                  busy: _busy,
+                                  icon: Icons.telegram_rounded,
+                                  label: "Telegram orqali kirish",
+                                ),
+                              const SizedBox(height: 16),
+                              Row(
+                                children: [
+                                  const Expanded(child: Divider()),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                                    child: Text(
+                                      "yoki 6 xonali kod",
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        color: theme.colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ),
+                                  const Expanded(child: Divider()),
+                                ],
+                              ),
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _quickCodeCtrl,
                                       enabled: !_busy,
                                       keyboardType: TextInputType.number,
                                       maxLength: 6,
+                                      textAlign: TextAlign.center,
+                                      style: tNumStyle.copyWith(
+                                        fontSize: 19,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 5,
+                                      ),
                                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                                       decoration: const InputDecoration(
-                                        labelText: "6 xonali OTP kod",
+                                        labelText: "6 xonali kod",
+                                        hintText: "••••••",
                                         counterText: "",
-                                        prefixIcon: Icon(Icons.lock_outline_rounded),
+                                        prefixIcon: Icon(Icons.key_rounded),
                                       ),
-                                      onSubmitted: (_) => _verifyCode(),
+                                      onChanged: (v) {
+                                        if (v.trim().length == 6 && !_busy) {
+                                          _loginWithCodeOnly();
+                                        }
+                                      },
+                                      onSubmitted: (_) => _loginWithCodeOnly(),
                                     ),
-                                  ],
-                                  const SizedBox(height: 10),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: FilledButton.tonal(
-                                          onPressed:
-                                              _busy ? null : (_codeSent ? _verifyCode : _requestCode),
-                                          child: Text(_codeSent ? "Kirish" : "Kod olish"),
-                                        ),
-                                      ),
-                                      if (_codeSent) ...[
-                                        const SizedBox(width: 8),
-                                        TextButton(
-                                          onPressed: (_busy || _resendSeconds > 0) ? null : _requestCode,
-                                          child: Text(_resendSeconds > 0 ? "$_resendSeconds s" : "Qayta"),
-                                        ),
-                                      ],
-                                    ],
+                                  ),
+                                  const SizedBox(width: 10),
+                                  SizedBox(
+                                    height: 52,
+                                    child: FilledButton.tonal(
+                                      onPressed: _busy ? null : _loginWithCodeOnly,
+                                      child: const Text("Kirish", style: TextStyle(fontWeight: FontWeight.w800)),
+                                    ),
                                   ),
                                 ],
                               ),
-                            ),
-                        ],
-                      ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Card(
+                          child: Column(
+                            children: [
+                              ListTile(
+                                leading: const Icon(Icons.key_outlined, color: NorinPalette.emeraldLight),
+                                title: const Text(
+                                  "ID orqali kirish",
+                                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                                ),
+                                trailing: Icon(
+                                  _showAdvanced ? Icons.expand_less : Icons.expand_more,
+                                ),
+                                onTap: () => setState(() => _showAdvanced = !_showAdvanced),
+                              ),
+                              if (_showAdvanced)
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      const Divider(),
+                                      const SizedBox(height: 12),
+                                      TextField(
+                                        controller: _tgCtrl,
+                                        enabled: !_busy && !_codeSent,
+                                        keyboardType: TextInputType.number,
+                                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                                        decoration: const InputDecoration(
+                                          labelText: "Telegram ID",
+                                          hintText: "Telegram ID raqamingiz",
+                                          prefixIcon: Icon(Icons.badge_outlined),
+                                        ),
+                                      ),
+                                      if (_codeSent) ...[
+                                        const SizedBox(height: 10),
+                                        TextField(
+                                          controller: _otpCtrl,
+                                          enabled: !_busy,
+                                          keyboardType: TextInputType.number,
+                                          maxLength: 6,
+                                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                                          decoration: const InputDecoration(
+                                            labelText: "6 xonali OTP kod",
+                                            counterText: "",
+                                            prefixIcon: Icon(Icons.lock_outline_rounded),
+                                          ),
+                                          onSubmitted: (_) => _verifyCode(),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: FilledButton.tonal(
+                                              onPressed:
+                                                  _busy ? null : (_codeSent ? _verifyCode : _requestCode),
+                                              child: Text(_codeSent ? "Kirish" : "Kod olish"),
+                                            ),
+                                          ),
+                                          if (_codeSent) ...[
+                                            const SizedBox(width: 8),
+                                            TextButton(
+                                              onPressed: (_busy || _resendSeconds > 0) ? null : _requestCode,
+                                              child: Text(_resendSeconds > 0 ? "$_resendSeconds s" : "Qayta"),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          "Sotuv AI • v$kAppVersion",
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontSize: 11.5,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      "Telegram botda /apk buyrug'i orqali ham 6 xonali kirish kodini olishingiz mumkin.",
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        fontSize: 11.5,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),

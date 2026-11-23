@@ -241,17 +241,18 @@ class _CashScreenState extends ConsumerState<CashScreen> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text("Kassa & Smena", style: TextStyle(fontWeight: FontWeight.w800)),
+        title: const Text("Kassa", style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
           IconButton(
             tooltip: "Yopilgan kunlar tarixi",
             icon: const Icon(Icons.history_rounded),
             onPressed: _showHistorySheet,
           ),
-          IconButton(
-            tooltip: "Yangilash",
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: () => ref.invalidate(todayProvider),
+          SpinningRefreshButton(
+            onRefresh: () async {
+              ref.invalidate(todayProvider);
+              await ref.read(todayProvider.future).catchError((_) => <String, dynamic>{});
+            },
           ),
         ],
       ),

@@ -192,18 +192,17 @@ class SettingsScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text("Sozlamalar & Katalog", style: TextStyle(fontWeight: FontWeight.w800)),
+        title: const Text("Sozlamalar", style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
-          IconButton(
-            tooltip: "Yangilash",
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: () {
+          SpinningRefreshButton(
+            onRefresh: () async {
               ref.invalidate(settingsProvider);
               ref.invalidate(productsProvider);
               if (isAdmin) {
                 ref.invalidate(adminTenantsProvider);
                 ref.invalidate(adminAnalyticsProvider);
               }
+              await ref.read(settingsProvider.future).catchError((_) => <String, dynamic>{});
             },
           ),
         ],
@@ -249,7 +248,7 @@ class SettingsScreen extends ConsumerWidget {
                           children: [
                             Expanded(
                               child: Text(
-                                "${asStr(tenant['name'], 'Filial')} (#${asInt(tenant['id'])})",
+                                asStr(tenant['name'], "Do'konim"),
                                 style: const TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w800,
@@ -274,7 +273,7 @@ class SettingsScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          "Obuna: $daysLeft kun qoldi • AI limit: ${aiLimit == 0 ? 'Cheksiz' : '$aiUsed / $aiLimit bugun'}",
+                          "$daysLeft kun • AI: ${aiLimit == 0 ? 'Cheksiz' : '$aiUsed/$aiLimit'}",
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
                             fontSize: 12.5,
@@ -284,21 +283,21 @@ class SettingsScreen extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  const SectionHeader(title: "Bot Avtomatizatsiyasi"),
+                  const SectionHeader(title: "Avtomatizatsiya"),
                   const SizedBox(height: 8),
                   Card(
                     child: Column(
                       children: [
                         SwitchListTile(
-                          title: const Text("DM Avto-tasdiq", style: TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: const Text("Rasmdan tanilgan mijoz bo'lsa darhol tasdiqlash"),
+                          title: const Text("Avto-tasdiq", style: TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: const Text("Chekni darhol saqlash"),
                           value: se['auto_confirm'] == true,
                           onChanged: (v) => _patchSetting(context, ref, {'auto_confirm': v}),
                         ),
                         const Divider(),
                         SwitchListTile(
-                          title: const Text("Guruh Avto-hisob", style: TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: const Text("Guruhga tushgan rasmlarni AI avtomatik hisoblaydi"),
+                          title: const Text("Guruh avto-hisob", style: TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: const Text("Guruh rasmlarini hisoblash"),
                           value: se['group_auto_calc'] == true,
                           onChanged: (v) => _patchSetting(context, ref, {'group_auto_calc': v}),
                         ),
@@ -308,7 +307,7 @@ class SettingsScreen extends ConsumerWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text("Summa yaxlitlash", style: TextStyle(fontWeight: FontWeight.w600)),
+                              const Text("Yaxlitlash", style: TextStyle(fontWeight: FontWeight.w600)),
                               const SizedBox(height: 8),
                               SizedBox(
                                 width: double.infinity,
@@ -316,8 +315,8 @@ class SettingsScreen extends ConsumerWidget {
                                   showSelectedIcon: false,
                                   segments: const [
                                     ButtonSegment(value: 'none', label: Text("Yo'q")),
-                                    ButtonSegment(value: 'nearest_1000', label: Text("1000 yaqin")),
-                                    ButtonSegment(value: 'floor_1000', label: Text("Pastga 1000")),
+                                    ButtonSegment(value: 'nearest_1000', label: Text("1000")),
+                                    ButtonSegment(value: 'floor_1000', label: Text("Pastga")),
                                   ],
                                   selected: {roundMode},
                                   onSelectionChanged: (s) =>
@@ -332,7 +331,7 @@ class SettingsScreen extends ConsumerWidget {
                           ListTile(
                             leading: const Icon(Icons.groups_2_outlined),
                             title: const Text("Hisobot guruhi"),
-                            subtitle: Text("${asStr(rep['title'])} (${rep['chat_id']})"),
+                            subtitle: Text(asStr(rep['title'])),
                           ),
                         ],
                       ],
@@ -344,7 +343,7 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 18),
           SectionHeader(
-            title: "Mahsulotlar katalogi",
+            title: "Mahsulotlar",
             trailing: FilledButton.tonalIcon(
               onPressed: () => _productDialog(context, ref),
               icon: const Icon(Icons.add, size: 18),
@@ -372,7 +371,7 @@ class SettingsScreen extends ConsumerWidget {
                               style: const TextStyle(fontWeight: FontWeight.w700),
                             ),
                             subtitle: Text(
-                              "Tannarx: ${formatUzs(asDouble(products[i]['cost_price']))} • Sotuv: ${formatUzs(asDouble(products[i]['default_sell_price']))}",
+                              "${formatUzs(asDouble(products[i]['cost_price']))} → ${formatUzs(asDouble(products[i]['default_sell_price']))}",
                             ),
                             trailing: IconButton(
                               icon: const Icon(Icons.delete_outline, color: NorinPalette.danger),
@@ -395,21 +394,21 @@ class SettingsScreen extends ConsumerWidget {
                   ),
           ),
           const SizedBox(height: 18),
-          const SectionHeader(title: "Ilova & Xavfsizlik"),
+          const SectionHeader(title: "Ilova va xavfsizlik"),
           const SizedBox(height: 8),
           Card(
             child: Column(
               children: [
                 ListTile(
                   leading: const Icon(Icons.palette_outlined),
-                  title: const Text("Mavzu (Theme)"),
+                  title: const Text("Mavzu"),
                   trailing: DropdownButton<ThemeMode>(
                     value: themeMode,
                     underline: const SizedBox.shrink(),
                     items: const [
                       DropdownMenuItem(value: ThemeMode.system, child: Text("Tizim")),
-                      DropdownMenuItem(value: ThemeMode.light, child: Text("Yorug'")),
-                      DropdownMenuItem(value: ThemeMode.dark, child: Text("Qorong'i")),
+                      DropdownMenuItem(value: ThemeMode.light, child: Text("Oq")),
+                      DropdownMenuItem(value: ThemeMode.dark, child: Text("Qora")),
                     ],
                     onChanged: (m) {
                       if (m != null) ref.read(themeModeProvider.notifier).state = m;
@@ -419,13 +418,11 @@ class SettingsScreen extends ConsumerWidget {
                 const Divider(),
                 SwitchListTile(
                   secondary: const Icon(Icons.fingerprint_rounded, color: NorinPalette.emeraldLight),
-                  title: const Text("Otpechatka (Barmoq izi)"),
+                  title: const Text("Barmoq izi"),
                   subtitle: Text(
                     bioLock.enabled
-                        ? "Yoqilgan — ilova barmoq izi bilan himoyalangan"
-                        : (bioLock.biometricAvailable
-                            ? "Yoqib qo'ysangiz kirishda barmoq izi so'raladi"
-                            : "Telefonda barmoq izi sozlanmagan"),
+                        ? "Yoqilgan"
+                        : (bioLock.biometricAvailable ? "O'chirilgan" : "Mavjud emas"),
                   ),
                   value: bioLock.enabled,
                   onChanged: (v) async {
@@ -437,36 +434,35 @@ class SettingsScreen extends ConsumerWidget {
                       showSnack(
                         context,
                         ok
-                            ? "Otpechatka himoyasi yoqildi"
-                            : "Barmoq izi tasdiqlanmadi yoki telefonda yoqilmagan",
+                            ? "Barmoq izi yoqildi"
+                            : "Tasdiqlanmadi yoki sozlanmagan",
                         error: !ok,
                       );
                     } else {
-                      showSnack(context, "Otpechatka o'chirildi");
+                      showSnack(context, "Barmoq izi o'chirildi");
                     }
                   },
                 ),
                 const Divider(),
                 ListTile(
                   leading: const Icon(Icons.pin_outlined),
-                  title: const Text("4 xonali PIN-kod"),
-                  subtitle: Text(bioLock.hasPin ? "O'rnatilgan (••••)" : "O'rnatilmagan"),
+                  title: const Text("PIN-kod"),
+                  subtitle: Text(bioLock.hasPin ? "O'rnatilgan" : "O'rnatilmagan"),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => _pinDialog(context, ref, bioLock),
                 ),
                 const Divider(),
                 ListTile(
                   leading: const Icon(Icons.system_update_rounded, color: NorinPalette.emerald),
-                  title: const Text("Yangilanishni tekshirish"),
-                  subtitle: Text("Joriy versiya: v$kAppVersion (build #$kAppBuildNumber)"),
+                  title: const Text("Yangilash"),
+                  subtitle: Text("v$kAppVersion (#$kAppBuildNumber)"),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => checkAndPromptUpdate(context, api, silentIfLatest: false),
                 ),
                 const Divider(),
                 ListTile(
                   leading: const Icon(Icons.devices_rounded),
-                  title: const Text("Faol qurilmalar"),
-                  subtitle: const Text("Ulangan sessiyalarni ko'rish va uzish"),
+                  title: const Text("Qurilmalar"),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => _showDevicesSheet(context, ref),
                 ),
@@ -474,7 +470,7 @@ class SettingsScreen extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.logout_rounded, color: NorinPalette.danger),
                   title: const Text(
-                    "Hisobdan chiqish",
+                    "Chiqish",
                     style: TextStyle(color: NorinPalette.danger, fontWeight: FontWeight.w700),
                   ),
                   onTap: () async {
@@ -598,25 +594,13 @@ class _SuperAdminSettingsCard extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      "Super Admin & Filial Boshqaruvi",
-                      style: TextStyle(
-                        fontSize: 15.5,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    Text(
-                      "Faqat sizga ko'rinadi • Filialni 1-bosishda almashtiring",
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontSize: 11.5,
-                      ),
-                    ),
-                  ],
+              const Expanded(
+                child: Text(
+                  "Admin boshqaruvi",
+                  style: TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ],
@@ -632,12 +616,12 @@ class _SuperAdminSettingsCard extends ConsumerWidget {
                 itemBuilder: (ctx, i) {
                   final t = tenants[i];
                   final tid = asInt(t['id']);
-                  final tName = asStr(t['tenant_name'] ?? t['name'], 'Filial #$tid');
+                  final tName = asStr(t['tenant_name'] ?? t['name'], 'Do\'kon #$tid');
                   final active = tid == selectedTenantId;
                   return ChoiceChip(
                     selected: active,
                     label: Text(
-                      "#$tid $tName",
+                      tName,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: active ? FontWeight.w800 : FontWeight.w600,
@@ -647,7 +631,7 @@ class _SuperAdminSettingsCard extends ConsumerWidget {
                       await ref.read(authProvider.notifier).selectTenant(tid);
                       invalidateOperationalData(ref);
                       if (context.mounted) {
-                        showSnack(context, "Faol filial: #$tid $tName");
+                        showSnack(context, "Tanlandi: $tName");
                       }
                     },
                   );
@@ -666,7 +650,7 @@ class _SuperAdminSettingsCard extends ConsumerWidget {
                     );
                   },
                   icon: const Icon(Icons.insights_rounded, size: 18),
-                  label: const Text("Admin Panel"),
+                  label: const Text("Statistika"),
                 ),
               ),
               const SizedBox(width: 8),
@@ -678,7 +662,7 @@ class _SuperAdminSettingsCard extends ConsumerWidget {
                     );
                   },
                   icon: const Icon(Icons.store_mall_directory_rounded, size: 18),
-                  label: const Text("Filiallar"),
+                  label: const Text("Do'konlar"),
                 ),
               ),
             ],

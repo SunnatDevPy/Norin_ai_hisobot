@@ -100,17 +100,18 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text("Mijozlar & Qarzlar", style: TextStyle(fontWeight: FontWeight.w800)),
+        title: const Text("Mijozlar", style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
           IconButton(
             tooltip: "Yangi mijoz",
             icon: const Icon(Icons.person_add_alt_1_rounded),
             onPressed: _showAddClientDialog,
           ),
-          IconButton(
-            tooltip: "Yangilash",
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: () => ref.invalidate(clientsProvider),
+          SpinningRefreshButton(
+            onRefresh: () async {
+              ref.invalidate(clientsProvider);
+              await ref.read(clientsProvider.future).catchError((_) => <Map<String, dynamic>>[]);
+            },
           ),
         ],
       ),
@@ -167,7 +168,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              "Jami mijozlar qarzi",
+                              "Jami qarz",
                               style: TextStyle(
                                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                                 fontSize: 12,

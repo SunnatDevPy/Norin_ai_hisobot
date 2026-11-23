@@ -96,7 +96,7 @@ class DashboardScreen extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    "Salom, Sotuv AI!",
+                    "Sotuv AI",
                     style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800),
                   ),
                   Text(
@@ -116,7 +116,7 @@ class DashboardScreen extends ConsumerWidget {
         ),
         actions: [
           _GlassCircleAction(
-            tooltip: "Mavzu (Kun/Tun)",
+            tooltip: "Mavzu (Oq/Qora)",
             icon: isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
             onPressed: () {
               final next = isDark ? ThemeMode.light : ThemeMode.dark;
@@ -124,10 +124,15 @@ class DashboardScreen extends ConsumerWidget {
             },
           ),
           const SizedBox(width: 6),
-          _GlassCircleAction(
-            tooltip: "Yangilash",
-            icon: Icons.refresh_rounded,
-            onPressed: () => invalidateOperationalData(ref),
+          SpinningRefreshButton(
+            glassCircle: true,
+            onRefresh: () async {
+              invalidateOperationalData(ref);
+              await Future.wait([
+                ref.read(dashboardSummaryProvider.future),
+                ref.read(dashboardChartsProvider.future),
+              ]).catchError((_) => <Map<String, dynamic>>[]);
+            },
           ),
           const SizedBox(width: 12),
         ],
@@ -155,7 +160,7 @@ class DashboardScreen extends ConsumerWidget {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        "Boshqa filial ko'rilmoqda: #${auth.selectedTenantId} $activeTenantName",
+                        "Ko'rilmoqda: $activeTenantName",
                         style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
                       ),
                     ),
@@ -164,11 +169,11 @@ class DashboardScreen extends ConsumerWidget {
                         await ref.read(authProvider.notifier).selectTenant(1);
                         invalidateOperationalData(ref);
                         if (context.mounted) {
-                          showSnack(context, "O'z filialingizga (#1) qaytdingiz");
+                          showSnack(context, "Asosiy do'konga qaytdingiz");
                         }
                       },
                       child: const Text(
-                        "O'zimga (#1)",
+                        "O'zimga",
                         style: TextStyle(fontWeight: FontWeight.w800),
                       ),
                     ),

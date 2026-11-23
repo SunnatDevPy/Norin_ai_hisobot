@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
@@ -98,6 +101,107 @@ class StatusBadge extends StatelessWidget {
         label,
         style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700),
       ),
+    );
+  }
+}
+
+class SpinningRefreshButton extends StatefulWidget {
+  const SpinningRefreshButton({
+    super.key,
+    required this.onRefresh,
+    this.tooltip = 'Yangilash',
+    this.glassCircle = false,
+  });
+
+  final FutureOr<void> Function() onRefresh;
+  final String tooltip;
+  final bool glassCircle;
+
+  @override
+  State<SpinningRefreshButton> createState() => _SpinningRefreshButtonState();
+}
+
+class _SpinningRefreshButtonState extends State<SpinningRefreshButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  bool _spinning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleTap() async {
+    if (_spinning) return;
+    setState(() => _spinning = true);
+    _ctrl.repeat();
+    try {
+      await Future.wait([
+        Future<void>.sync(widget.onRefresh),
+        Future<void>.delayed(const Duration(milliseconds: 650)),
+      ]);
+    } catch (_) {
+      // Errors are surfaced by provider error cards; stop spinner cleanly.
+    } finally {
+      if (mounted) {
+        final remainingMs = math.max(120, ((1.0 - _ctrl.value) * 450).round());
+        await _ctrl.animateTo(
+          1.0,
+          duration: Duration(milliseconds: remainingMs),
+          curve: Curves.easeOut,
+        );
+        if (mounted) {
+          _ctrl.value = 0;
+          setState(() => _spinning = false);
+        }
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rotatedIcon = RotationTransition(
+      turns: _ctrl,
+      child: Icon(Icons.refresh_rounded, size: widget.glassCircle ? 19 : 22),
+    );
+
+    if (widget.glassCircle) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      return Tooltip(
+        message: widget.tooltip,
+        child: InkWell(
+          onTap: _spinning ? null : _handleTap,
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isDark ? NorinPalette.darkCardElevated : NorinPalette.lightCard,
+              border: Border.all(
+                color: isDark ? NorinPalette.darkBorder : NorinPalette.lightBorder,
+              ),
+            ),
+            child: rotatedIcon,
+          ),
+        ),
+      );
+    }
+
+    return IconButton(
+      tooltip: widget.tooltip,
+      icon: rotatedIcon,
+      onPressed: _spinning ? null : _handleTap,
     );
   }
 }

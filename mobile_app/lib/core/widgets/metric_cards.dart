@@ -107,20 +107,20 @@ class CosmicBackground extends StatelessWidget {
           ),
           if (showBottomHorizonGlow)
             Positioned(
-              left: -40,
-              right: -40,
-              bottom: -140,
+              left: -60,
+              right: -60,
+              bottom: -155,
               child: IgnorePointer(
                 child: Container(
-                  height: 210,
+                  height: 240,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(999),
                     gradient: RadialGradient(
                       center: Alignment.topCenter,
                       radius: 0.9,
                       colors: [
-                        NorinPalette.indigo.withValues(alpha: 0.42),
-                        NorinPalette.emeraldDark.withValues(alpha: 0.16),
+                        NorinPalette.indigo.withValues(alpha: 0.34),
+                        NorinPalette.emeraldDark.withValues(alpha: 0.12),
                         Colors.transparent,
                       ],
                     ),
