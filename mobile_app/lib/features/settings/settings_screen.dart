@@ -1,0 +1,455 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/api/api_client.dart';
+import '../../core/state/providers.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/utils/formatters.dart';
+import '../../core/widgets/metric_cards.dart';
+import '../../core/widgets/norin_widgets.dart';
+
+class SettingsScreen extends ConsumerWidget {
+  const SettingsScreen({super.key});
+
+  Future<void> _productDialog(
+    BuildContext context,
+    WidgetRef ref, {
+    Map<String, dynamic>? existing,
+  }) async {
+    final isEdit = existing != null;
+    final nameCtrl = TextEditingController(text: asStr(existing?['name']));
+    final costCtrl = TextEditingController(
+      text: existing != null ? asDouble(existing['cost_price']).round().toString() : '',
+    );
+    final sellCtrl = TextEditingController(
+      text: existing != null ? asDouble(existing['default_sell_price']).round().toString() : '',
+    );
+    final aliasCtrl = TextEditingController(text: asStr(existing?['aliases']));
+    String unit = asStr(existing?['unit'], 'kg');
+    if (!const ['kg', 'dona', 'porsiya', 'litr'].contains(unit)) unit = 'kg';
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text(isEdit ? "Mahsulotni tahrirlash" : "Yangi mahsulot"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Nomi *")),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: costCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: "Tannarxi (so'm) *"),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: sellCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: "Sotuv narxi (so'm) *"),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  key: ValueKey('unit_$unit'),
+                  initialValue: unit,
+                  decoration: const InputDecoration(labelText: "Birlik"),
+                  items: const [
+                    DropdownMenuItem(value: 'kg', child: Text("kg")),
+                    DropdownMenuItem(value: 'dona', child: Text("dona")),
+                    DropdownMenuItem(value: 'porsiya', child: Text("porsiya")),
+                    DropdownMenuItem(value: 'litr', child: Text("litr")),
+                  ],
+                  onChanged: (v) => setDlg(() => unit = v ?? 'kg'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: aliasCtrl,
+                  decoration: const InputDecoration(labelText: "Aliases (vergul bilan)"),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Saqlash")),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    final name = nameCtrl.text.trim();
+    final cost = double.tryParse(costCtrl.text.trim()) ?? -1;
+    final sell = double.tryParse(sellCtrl.text.trim()) ?? -1;
+    if (name.isEmpty || cost < 0 || sell <= 0) {
+      if (context.mounted) showSnack(context, "Maydonlarni to'g'ri to'ldiring", error: true);
+      return;
+    }
+    try {
+      final api = ref.read(apiClientProvider);
+      final body = {
+        'name': name,
+        'cost_price': cost,
+        'default_sell_price': sell,
+        'unit': unit,
+        'aliases': aliasCtrl.text.trim(),
+      };
+      if (isEdit) {
+        await api.patch('/products/${asInt(existing['id'])}', data: body);
+      } else {
+        await api.post('/products', data: body);
+      }
+      invalidateOperationalData(ref);
+      if (context.mounted) showSnack(context, isEdit ? "Mahsulot yangilandi" : "Mahsulot qo'shildi");
+    } catch (e) {
+      if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    }
+  }
+
+  Future<void> _showDevicesSheet(BuildContext context, WidgetRef ref) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => _DevicesSheet(api: ref.read(apiClientProvider)),
+    );
+  }
+
+  Future<void> _patchSetting(
+    BuildContext context,
+    WidgetRef ref,
+    Map<String, dynamic> patch,
+  ) async {
+    try {
+      await ref.read(apiClientProvider).patch('/settings', data: patch);
+      ref.invalidate(settingsProvider);
+      if (context.mounted) showSnack(context, "Sozlama saqlandi");
+    } catch (e) {
+      if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settingsAsync = ref.watch(settingsProvider);
+    final productsAsync = ref.watch(productsProvider);
+    final themeMode = ref.watch(themeModeProvider);
+    final api = ref.read(apiClientProvider);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Sozlamalar & Katalog", style: TextStyle(fontWeight: FontWeight.w800)),
+        actions: [
+          IconButton(
+            tooltip: "Yangilash",
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: () {
+              ref.invalidate(settingsProvider);
+              ref.invalidate(productsProvider);
+            },
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+        children: [
+          settingsAsync.when(
+            loading: () => const Card(
+              child: Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator())),
+            ),
+            error: (e, _) => AsyncErrorCard(
+              error: e,
+              onRetry: () => ref.invalidate(settingsProvider),
+            ),
+            data: (se) {
+              final tenant = asMap(se['tenant']);
+              final sub = asMap(se['subscription']);
+              final ai = asMap(se['ai']);
+              final rep = se['report_group'] == null ? null : asMap(se['report_group']);
+              final roundMode = asStr(se['round_mode'], 'none');
+              final status = asStr(sub['status']);
+              final daysLeft = asInt(sub['days_left']);
+              final aiLimit = asInt(ai['daily_limit']);
+              final aiUsed = asInt(ai['used_today']);
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      gradient: NorinPalette.heroGradient,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                "${asStr(tenant['name'], 'Filial')} (#${asInt(tenant['id'])})",
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                "${asStr(sub['plan'], 'Standard')} • $status",
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          "Obuna: $daysLeft kun qoldi • AI limit: ${aiLimit == 0 ? 'Cheksiz' : '$aiUsed / $aiLimit bugun'}",
+                          style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const SectionHeader(title: "Bot Avtomatizatsiyasi"),
+                  const SizedBox(height: 8),
+                  Card(
+                    child: Column(
+                      children: [
+                        SwitchListTile(
+                          title: const Text("DM Avto-tasdiq", style: TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: const Text("Rasmdan tanilgan mijoz bo'lsa darhol tasdiqlash"),
+                          value: se['auto_confirm'] == true,
+                          onChanged: (v) => _patchSetting(context, ref, {'auto_confirm': v}),
+                        ),
+                        const Divider(),
+                        SwitchListTile(
+                          title: const Text("Guruh Avto-hisob", style: TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: const Text("Guruhga tushgan rasmlarni AI avtomatik hisoblaydi"),
+                          value: se['group_auto_calc'] == true,
+                          onChanged: (v) => _patchSetting(context, ref, {'group_auto_calc': v}),
+                        ),
+                        const Divider(),
+                        Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text("Summa yaxlitlash", style: TextStyle(fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: SegmentedButton<String>(
+                                  showSelectedIcon: false,
+                                  segments: const [
+                                    ButtonSegment(value: 'none', label: Text("Yo'q")),
+                                    ButtonSegment(value: 'nearest_1000', label: Text("1000 yaqin")),
+                                    ButtonSegment(value: 'floor_1000', label: Text("Pastga 1000")),
+                                  ],
+                                  selected: {roundMode},
+                                  onSelectionChanged: (s) =>
+                                      _patchSetting(context, ref, {'round_mode': s.first}),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (rep != null) ...[
+                          const Divider(),
+                          ListTile(
+                            leading: const Icon(Icons.groups_2_outlined),
+                            title: const Text("Hisobot guruhi"),
+                            subtitle: Text("${asStr(rep['title'])} (${rep['chat_id']})"),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 18),
+          SectionHeader(
+            title: "Mahsulotlar katalogi",
+            trailing: FilledButton.tonalIcon(
+              onPressed: () => _productDialog(context, ref),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text("Qo'shish"),
+            ),
+          ),
+          const SizedBox(height: 8),
+          productsAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => AsyncErrorCard(
+              error: e,
+              onRetry: () => ref.invalidate(productsProvider),
+            ),
+            data: (products) => products.isEmpty
+                ? const EmptyStateCard(icon: Icons.inventory_2_outlined, title: "Mahsulotlar yo'q")
+                : Card(
+                    child: Column(
+                      children: [
+                        for (int i = 0; i < products.length; i++) ...[
+                          if (i > 0) const Divider(),
+                          ListTile(
+                            onTap: () => _productDialog(context, ref, existing: products[i]),
+                            title: Text(
+                              "${asStr(products[i]['name'])} (${asStr(products[i]['unit'], 'kg')})",
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            subtitle: Text(
+                              "Tannarx: ${formatUzs(asDouble(products[i]['cost_price']))} • Sotuv: ${formatUzs(asDouble(products[i]['default_sell_price']))}",
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline, color: NorinPalette.danger),
+                              onPressed: () async {
+                                final yes = await showConfirmDialog(
+                                  context,
+                                  title: "Mahsulotni o'chirish",
+                                  message: "\"${asStr(products[i]['name'])}\" o'chirilsinmi?",
+                                  destructive: true,
+                                );
+                                if (!yes) return;
+                                await api.delete('/products/${asInt(products[i]['id'])}');
+                                invalidateOperationalData(ref);
+                              },
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+          ),
+          const SizedBox(height: 18),
+          const SectionHeader(title: "Ilova & Xavfsizlik"),
+          const SizedBox(height: 8),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.palette_outlined),
+                  title: const Text("Mavzu (Theme)"),
+                  trailing: DropdownButton<ThemeMode>(
+                    value: themeMode,
+                    underline: const SizedBox.shrink(),
+                    items: const [
+                      DropdownMenuItem(value: ThemeMode.system, child: Text("Tizim")),
+                      DropdownMenuItem(value: ThemeMode.light, child: Text("Yorug'")),
+                      DropdownMenuItem(value: ThemeMode.dark, child: Text("Qorong'i")),
+                    ],
+                    onChanged: (m) {
+                      if (m != null) ref.read(themeModeProvider.notifier).state = m;
+                    },
+                  ),
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.devices_rounded),
+                  title: const Text("Faol qurilmalar"),
+                  subtitle: const Text("Ulangan sessiyalarni ko'rish va uzish"),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _showDevicesSheet(context, ref),
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.logout_rounded, color: NorinPalette.danger),
+                  title: const Text(
+                    "Hisobdan chiqish",
+                    style: TextStyle(color: NorinPalette.danger, fontWeight: FontWeight.w700),
+                  ),
+                  onTap: () async {
+                    final yes = await showConfirmDialog(
+                      context,
+                      title: "Chiqish",
+                      message: "Hisobdan chiqasizmi?",
+                      confirmLabel: "Chiqish",
+                      destructive: true,
+                    );
+                    if (yes) await ref.read(authProvider.notifier).logout();
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DevicesSheet extends StatefulWidget {
+  const _DevicesSheet({required this.api});
+  final ApiClient api;
+
+  @override
+  State<_DevicesSheet> createState() => _DevicesSheetState();
+}
+
+class _DevicesSheetState extends State<_DevicesSheet> {
+  late Future<List<Map<String, dynamic>>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  void _load() {
+    _future = widget.api.get('/auth/devices').then((d) => asMapList(d));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _future,
+      builder: (ctx, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const SizedBox(height: 180, child: Center(child: CircularProgressIndicator()));
+        }
+        if (snap.hasError) {
+          return AsyncErrorCard(error: snap.error!, onRetry: () => setState(_load));
+        }
+        final devs = snap.data ?? const [];
+        return ListView.separated(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          itemCount: devs.length + 1,
+          separatorBuilder: (_, _) => const SizedBox(height: 6),
+          itemBuilder: (ctx, i) {
+            if (i == 0) {
+              return const Text(
+                "Faol APK Qurilmalari",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              );
+            }
+            final d = devs[i - 1];
+            return ListTile(
+              leading: const Icon(Icons.phone_android_rounded),
+              title: Text(asStr(d['device_name'], 'Android')),
+              subtitle: Text("Yaratilgan: ${formatLocalDateTime(asStr(d['created_at']))}"),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline, color: NorinPalette.danger),
+                onPressed: () async {
+                  await widget.api.delete('/auth/devices/${asInt(d['id'])}');
+                  setState(_load);
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}

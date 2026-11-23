@@ -1,0 +1,239 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:dio/dio.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+
+class ApiConfig {
+  static const defaultBaseUrl = 'http://46.8.194.206:8000/api/v1';
+}
+
+class ApiClient {
+  ApiClient()
+      : _storage = const FlutterSecureStorage(
+          aOptions: AndroidOptions(encryptedSharedPreferences: true),
+        ),
+        _dio = Dio(
+          BaseOptions(
+            baseUrl: ApiConfig.defaultBaseUrl,
+            connectTimeout: const Duration(seconds: 12),
+            receiveTimeout: const Duration(seconds: 40),
+            sendTimeout: const Duration(seconds: 40),
+          ),
+        ) {
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          options.baseUrl = _baseUrl;
+          if (_accessToken != null && _accessToken!.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $_accessToken';
+          }
+          if (_selectedTenantId != null) {
+            options.headers['X-Tenant-Id'] = '$_selectedTenantId';
+          }
+          handler.next(options);
+        },
+        onError: (err, handler) async {
+          final status = err.response?.statusCode;
+          final path = err.requestOptions.path;
+          final alreadyRetried = err.requestOptions.extra['_retried'] == true;
+          if (status == 401 &&
+              !alreadyRetried &&
+              !path.contains('/auth/') &&
+              await _refreshAccessToken()) {
+            err.requestOptions.extra['_retried'] = true;
+            err.requestOptions.headers['Authorization'] = 'Bearer $_accessToken';
+            try {
+              final clone = await _dio.fetch(err.requestOptions);
+              return handler.resolve(clone);
+            } catch (_) {}
+          }
+          handler.next(err);
+        },
+      ),
+    );
+  }
+
+  final FlutterSecureStorage _storage;
+  final Dio _dio;
+
+  String _baseUrl = ApiConfig.defaultBaseUrl;
+  String? _accessToken;
+  String? _refreshToken;
+  String? _role;
+  int? _telegramId;
+  int? _selectedTenantId;
+  Completer<bool>? _refreshCompleter;
+
+  String get baseUrl => _baseUrl;
+  String? get role => _role;
+  int? get telegramId => _telegramId;
+  int? get selectedTenantId => _selectedTenantId;
+  bool get isAuthenticated => _accessToken != null && _accessToken!.isNotEmpty;
+  bool get isSuperAdmin => _role == 'super_admin';
+
+  Future<void> init() async {
+    _baseUrl = await _storage.read(key: 'base_url') ?? ApiConfig.defaultBaseUrl;
+    _accessToken = await _storage.read(key: 'access_token');
+    _refreshToken = await _storage.read(key: 'refresh_token');
+    _role = await _storage.read(key: 'role');
+    final tidRaw = await _storage.read(key: 'telegram_id');
+    _telegramId = tidRaw != null ? int.tryParse(tidRaw) : null;
+    final selRaw = await _storage.read(key: 'selected_tenant_id');
+    _selectedTenantId = selRaw != null ? int.tryParse(selRaw) : 1;
+    _dio.options.baseUrl = _baseUrl;
+  }
+
+  Future<void> setBaseUrl(String url) async {
+    final cleaned = url.trim().replaceAll(RegExp(r'/+$'), '');
+    if (cleaned.isEmpty) return;
+    _baseUrl = cleaned;
+    _dio.options.baseUrl = cleaned;
+    await _storage.write(key: 'base_url', value: cleaned);
+  }
+
+  Future<void> setSelectedTenant(int tenantId) async {
+    _selectedTenantId = tenantId;
+    await _storage.write(key: 'selected_tenant_id', value: '$tenantId');
+  }
+
+  Future<void> saveSession({
+    required String accessToken,
+    required String refreshToken,
+    required String role,
+    required int telegramId,
+    required int tenantId,
+  }) async {
+    _accessToken = accessToken;
+    _refreshToken = refreshToken;
+    _role = role;
+    _telegramId = telegramId;
+    _selectedTenantId ??= tenantId;
+    await _storage.write(key: 'access_token', value: accessToken);
+    await _storage.write(key: 'refresh_token', value: refreshToken);
+    await _storage.write(key: 'role', value: role);
+    await _storage.write(key: 'telegram_id', value: '$telegramId');
+  }
+
+  Future<void> clearSession() async {
+    _accessToken = null;
+    _refreshToken = null;
+    _role = null;
+    _telegramId = null;
+    await _storage.delete(key: 'access_token');
+    await _storage.delete(key: 'refresh_token');
+    await _storage.delete(key: 'role');
+    await _storage.delete(key: 'telegram_id');
+  }
+
+  Future<bool> _refreshAccessToken() async {
+    if (_refreshToken == null || _refreshToken!.isEmpty) return false;
+    if (_refreshCompleter != null) return _refreshCompleter!.future;
+    final completer = Completer<bool>();
+    _refreshCompleter = completer;
+    try {
+      final refreshDio = Dio(BaseOptions(baseUrl: _baseUrl));
+      final resp = await refreshDio.post(
+        '/auth/refresh',
+        data: {'refresh_token': _refreshToken},
+      );
+      final data = resp.data as Map<String, dynamic>;
+      _accessToken = data['access_token'] as String;
+      _refreshToken = data['refresh_token'] as String;
+      await _storage.write(key: 'access_token', value: _accessToken);
+      await _storage.write(key: 'refresh_token', value: _refreshToken);
+      completer.complete(true);
+      return true;
+    } catch (_) {
+      await clearSession();
+      completer.complete(false);
+      return false;
+    } finally {
+      _refreshCompleter = null;
+    }
+  }
+
+  static String extractError(Object error) {
+    if (error is DioException) {
+      final data = error.response?.data;
+      if (data is Map && data['detail'] != null) {
+        return data['detail'].toString();
+      }
+      if (error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.receiveTimeout ||
+          error.type == DioExceptionType.connectionError) {
+        return "Server bilan aloqa yo'q. Internetni tekshiring.";
+      }
+      return error.message ?? "Tarmoq xatoligi";
+    }
+    return error.toString();
+  }
+
+  Future<dynamic> get(String path, {Map<String, dynamic>? query}) async {
+    final resp = await _dio.get(path, queryParameters: query);
+    return resp.data;
+  }
+
+  Future<dynamic> post(String path, {dynamic data}) async {
+    final resp = await _dio.post(path, data: data);
+    return resp.data;
+  }
+
+  Future<dynamic> patch(String path, {dynamic data}) async {
+    final resp = await _dio.patch(path, data: data);
+    return resp.data;
+  }
+
+  Future<dynamic> put(String path, {dynamic data}) async {
+    final resp = await _dio.put(path, data: data);
+    return resp.data;
+  }
+
+  Future<dynamic> delete(String path) async {
+    final resp = await _dio.delete(path);
+    return resp.data;
+  }
+
+  Future<dynamic> uploadFile(
+    String path,
+    String filePath, {
+    String? caption,
+  }) async {
+    final form = FormData.fromMap({
+      'file': await MultipartFile.fromFile(filePath),
+      if (caption != null && caption.trim().isNotEmpty) 'caption': caption.trim(),
+    });
+    final resp = await _dio.post(path, data: form);
+    return resp.data;
+  }
+
+  Future<File> downloadExcelFile(String path, String filename, {Map<String, dynamic>? query}) async {
+    final dir = await getTemporaryDirectory();
+    final safeName = filename.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    final file = File('${dir.path}/$safeName');
+    final resp = await _dio.get<List<int>>(
+      path,
+      queryParameters: query,
+      options: Options(responseType: ResponseType.bytes),
+    );
+    await file.writeAsBytes(resp.data ?? <int>[], flush: true);
+    return file;
+  }
+
+  Future<void> openOrShareExcel(
+    String path,
+    String filename, {
+    Map<String, dynamic>? query,
+    bool share = false,
+  }) async {
+    final file = await downloadExcelFile(path, filename, query: query);
+    if (share) {
+      await Share.shareXFiles([XFile(file.path)], text: 'Norin AI Hisobot: $filename');
+    } else {
+      await OpenFilex.open(file.path);
+    }
+  }
+}

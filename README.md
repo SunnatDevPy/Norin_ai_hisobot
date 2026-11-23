@@ -46,6 +46,16 @@ Norin ishlab chiqaruvchi sexlar va ulgurji go‘sht/oziq-ovqat yetkazib beruvchi
 - **Barqaror DB FSM Xotira (`fsm_states`):** Barcha kiritish bosqichlari (FSM holatlari) PostgreSQL/SQLite da saqlanadi va konteyner qayta yonganda ham o‘chib ketmaydi.
 - **Kunlik Avtomatik Zaxira (`norin-backup`):** Har 24 soatda PostgreSQL bazasidan gzip siqilgan `pg_dump` olib, 14 kunlik nusxalarni saqlaydi.
 
+### 6. 📱 SaaS REST API (`norin-api`) & Android APK (`mobile_app/`)
+- **FastAPI Backend (`api/`):** Telegram bot bilan bitta PostgreSQL bazasi va biznes mantiqda ishlaydigan multi-tenant REST API (`uvicorn api.main:app`, port `8000`).
+- **Telegram Bot OTP Avtorizatsiyasi:** Ilovaga kirishda Telegram ID kiritiladi va `@norin_ai_hisobot` botidan 6 xonali bir martalik OTP kod yuboriladi (`V1` da faqat `SUPER_ADMIN_IDS` uchun). Access JWT (`30` daqiqa) + aylanuvchi Refresh token (`30` kun) va qurilma boshqaruvi (`api_sessions`).
+- **Flutter Material 3 Android Ilova (`mobile_app/`):**
+  - **Boshqaruv & Interaktiv Grafiklar:** `fl_chart` orqali Tushum va Sof Foyda chizmasi, Xarajatlar doira diagrammasi, Mahsulot ulushi, Top mijozlar va 1-bosishda Excel ochish/ulashish.
+  - **AI Chek / Matn / Qo‘lda Sotuv:** Kamera/Galereya orqali AI chek o‘qish, 0-token matnli buyruq (`from-text`), qo‘lda kiritish, takror sotuv ogohlantirishi, tasdiqlash va Telegram guruhga rasm bilan yuborish.
+  - **Mijozlar & Akt Sverka:** Qarzlar reytingi, shaxsiy narxlar, tezkor to‘lov (`Pul oldim`), `Vozvrat`, guruhga Sverka va xronologik balans tarixi (tannarxsiz).
+  - **Kassa & Kun Yakuni:** Real vaqt kassa balansi, 7 kategoriyali xarajatlar, jonli `Sverka farqi` hisoblagichi bilan kunni yopish, smenalar tarixi va qayta ochish.
+  - **Super Admin Paneli (`Admin`):** Faqat Super Admin uchun — SaaS MRR statistikasi, filiallar CRUD, obuna uzaytirish (`+7/+30/+90`), muzlatish, kunlik AI limit, xodimlar boshqaruvi, e'lon yuborish (`broadcast`) va audit log (`audit_logs`).
+
 ---
 
 ## 🤖 Buyruqlar Ro‘yxati
@@ -66,14 +76,10 @@ Norin ishlab chiqaruvchi sexlar va ulgurji go‘sht/oziq-ovqat yetkazib beruvchi
 ```mermaid
 flowchart TD
     U["Telegram DM / Guruhlar"] --> MW["SubscriptionMiddleware (Tenant & Auth Tekshiruvi)"]
+    APP["Android APK (mobile_app / Flutter)"] -->|JWT + X-Tenant-Id| API["FastAPI REST API (norin-api :8000)"]
     MW --> R["Aiogram 3 Routerlari"]
-    R --> CP["clients_products.py (Mijoz, Narx, Mahsulot, Qarz)"]
-    R --> WR["wallet_reports.py (Hisobot, Xarajat, Kassa, Excel)"]
-    R --> SN["sales_norin.py (Rasm/Ovoz/Matn Sotuv & Tahrir)"]
-    R --> SA["superadmin.py (/menu, /superadmin, Tenant & Odamlar)"]
-    SN --> AI["gemini_ai.py (Faqat Rasm/Ovoz AI + 0-Token Lokal Matn Parser)"]
-    WR --> EX["excel_export.py (OpenPyXL Formulali Excel & Akt Sverka)"]
-    CP & WR & SN & SA --> DB["crud.py + SQLAlchemy Async"]
+    R & API --> SN["gemini_ai.py / group_notify.py / excel_export.py"]
+    SN --> DB["crud.py + SQLAlchemy Async"]
     DB --> PG["PostgreSQL 16 (Multi-Tenant Baza)"]
     PG --> BK["norin-backup (Har 24 soatda pg_dump -> .sql.gz)"]
 ```
@@ -85,34 +91,37 @@ flowchart TD
 ```text
 Norin_AI_hisobot/
 ├── main.py                       # Bot kirish nuqtasi, BotCommandScope, Middleware & Obuna kuzatuvchisi
-├── config.py                     # Pydantic Settings (.env konfiguratsiyasi va ADMIN_IDS parseri)
+├── config.py                     # Pydantic Settings (.env, SUPER_ADMIN_IDS va JWT/OTP konfiguratsiyasi)
 ├── requirements.txt              # Python kutubxonalari
 ├── Dockerfile                    # Production konteyner obrazi (Python 3.12-slim)
-├── docker-compose.yml            # norin-postgres + norin-bot + norin-backup (kunlik pg_dump)
+├── docker-compose.yml            # norin-postgres + norin-api (:8000) + norin-bot + norin-backup
 ├── .env.example                  # Muhit o'zgaruvchilari namunasi
-├── REJA.md                       # Dastlabki biznes va arxitektura rejasi
 ├── README.md                     # Loyiha hujjati
+├── api/                          # FastAPI SaaS REST API (norin-api)
+│   ├── main.py                   # App, CORS, lifespan & Telegram bot bildirishnomalari
+│   ├── deps.py                   # JWT auth & Super Admin tenant_ctx (X-Tenant-Id)
+│   ├── security.py               # OTP/Refresh hash, JWT & rate limiter
+│   ├── serializers.py            # Toza JSON javob modellari
+│   └── routers/                  # auth.py, read.py, write.py, admin.py
 ├── database/
-│   ├── models.py                 # SQLAlchemy 2.0 ORM modellari (Tenant, Sale, ProductReturn, FSMStateRecord, AIUsageLog)
+│   ├── models.py                 # SQLAlchemy 2.0 ORM modellari (+ ApiLoginCode, ApiSession, AuditLog)
 │   ├── session.py                # Async engine, idempotent PostgreSQL migratsiya & seed
 │   ├── fsm_storage.py            # PostgreSQL/SQLite ga asoslangan doimiy FSM holatlar xotirasi
-│   └── crud.py                   # Tenant-izolyatsiyali CRUD, qarz/vozvrat/sverka, SaaS MRR, AI limit & hisob-kitob
+│   └── crud.py                   # Tenant-izolyatsiyali CRUD, qarz/vozvrat/sverka, SaaS MRR & hisob-kitob
 ├── services/
 │   ├── gemini_ai.py              # Rasm/Ovoz Gemini AI + 0-token Uzbek matn/caption parseri
+│   ├── group_notify.py           # Mijoz guruhlariga tannarxsiz umumiy xabar yuborish
 │   └── excel_export.py           # Formulali 4 varaqli kunlik/davriy Excel & to'liq Akt Sverka
 ├── bot/
-│   ├── states.py                 # Aiogram FSM holatlari
-│   ├── middlewares.py            # Obuna va ruxsat tekshiruvi (DM, guruh va CallbackQuery)
-│   ├── keyboards.py              # Reply/Inline tugmalar, Telegram user-picker & Deep-Link
-│   ├── ui_helpers.py             # Tezkor parallel callback javoblari va yagona inline UI boshqaruvi
-│   └── handlers/
-│       ├── __init__.py           # Routerlarni ustuvorlik tartibida ulash
-│       ├── superadmin.py         # /menu, /superadmin, /clear, /myid, tenant & odam boshqaruvi
-│       ├── clients_products.py   # /start, mahsulotlar, mijozlar, narxlar, guruh ulash, qarzlar
-│       ├── wallet_reports.py     # Kunlik/oylik hisobot, xarajat kategoriyasi, kassa, Excel
-│       └── sales_norin.py        # AI rasm/ovoz/matn sotuv, caption postavshik, to'lov & tahrir
+│   └── ...                       # Aiogram 3 handlerlari va UI yordamchilari
+├── mobile_app/                   # Flutter Material 3 Android APK loyihasi
+│   ├── pubspec.yaml              # Riverpod, Dio, fl_chart, image_picker, flutter_secure_storage
+│   └── lib/
+│       ├── core/                 # API client (JWT refresh), tema, formatterlar & Riverpod providerlar
+│       └── features/             # Auth, Dashboard, AI Chek/Sotuv, Mijozlar, Kassa, Sozlama, Super Admin
 └── tests/
-    └── test_all.py               # Avtomatik Pytest testlar to'plami (20 ta test)
+    ├── test_all.py               # Bot, DB, Excel va Super Admin testlari (23 ta test)
+    └── test_api.py               # FastAPI auth, read, write va admin testlari (5 ta test)
 ```
 
 ---
@@ -150,6 +159,16 @@ docker compose logs -f norin-bot
 
 > Zaxira fayllari avtomatik ravishda `./data/backups/norin_YYYY-MM-DD_HHMM.sql.gz` ko‘rinishida saqlanadi va 14 kundan eskisi tozalanadi.
 
+### 3-usul: Android APK (`mobile_app/`) Yig‘ish
+
+```bash
+cd mobile_app
+flutter pub get
+flutter test
+flutter build apk --release
+# Tayyor fayl: mobile_app/build/app/outputs/flutter-apk/app-release.apk
+```
+
 ---
 
 ## ⚙️ Muhit O‘zgaruvchilari (`.env`)
@@ -159,6 +178,7 @@ docker compose logs -f norin-bot
 | `BOT_TOKEN` | `@BotFather` dan olingan Telegram bot tokeni | Majburiy |
 | `SUPER_ADMIN_IDS` | Loyiha egasi / Super Admin Telegram ID lari (vergul bilan) | `5649321700` |
 | `ADMIN_IDS` | `#1` Test filial admin/xodimlari ID lari (ixtiyoriy `:Ism` bilan) | `5649321700:Asad` |
+| `API_JWT_SECRET` | FastAPI JWT/OTP imzo siri (ixtiyoriy, bo‘sh bo‘lsa `BOT_TOKEN` dan olinadi) | Ixtiyoriy |
 | `OWNER_CONTACT` | Obuna eslatmalarida ko‘rsatiladigan aloqa | `@your_username` |
 | `DEFAULT_MONTHLY_PRICE` | Standart oylik obuna narxi (so‘m) | `400000` |
 | `DEFAULT_TRIAL_DAYS` | Boshlang‘ich sinov muddati (kun) | `30` |
@@ -174,8 +194,12 @@ docker compose logs -f norin-bot
 
 ## 🧪 Avtomatik Testlar
 
-Loyihada barcha asosiy modullar (parserlar, 0-token matn rejimi, multi-tenant izolyatsiya, rasm tagidagi postavshik nomi, Excel formulalari, to‘liq Akt Sverka, Vozvrat hisob-kitobi, doimiy DB FSM xotira, kunlik AI limit, SaaS MRR analitika, SQL agregatlar & UI tugmalar xavfsizligi hamda Super Admin funksiyalari) bo‘yicha 23 ta avtomatik test mavjud:
+Loyihada backend (28 ta Pytest testi: bot, DB, Excel, Super Admin va `norin-api`) hamda `mobile_app` Flutter widget testlari mavjud:
 
 ```bash
-python -m pytest tests/test_all.py -v
+# Backend + API testlari
+python -m pytest tests/test_all.py tests/test_api.py -v
+
+# Flutter testlari
+cd mobile_app && flutter test
 ```

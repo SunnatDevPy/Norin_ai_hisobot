@@ -1,0 +1,35 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:norin_ai_app/core/theme/app_theme.dart';
+import 'package:norin_ai_app/core/utils/formatters.dart';
+import 'package:norin_ai_app/features/auth/login_screen.dart';
+
+void main() {
+  test('Uzbek formatters produce expected strings', () {
+    expect(formatUzs(1150000), "1 150 000 so'm");
+    expect(formatUzs(5000, withCurrency: false), "5 000");
+    expect(formatCompactUzs(2500000), "2.5 mln");
+    expect(formatCompactUzs(450000), "450k");
+    expect(formatKg(10.0), "10 kg");
+    expect(formatKg(2.55, unit: 'dona'), "2.55 dona");
+  });
+
+  testWidgets('LoginScreen renders Telegram ID input and server settings', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const LoginScreen(),
+        ),
+      ),
+    );
+
+    expect(find.text('Norin AI Hisobot'), findsOneWidget);
+    expect(find.text('Tizimga kirish'), findsOneWidget);
+    expect(find.text('Telegram ID'), findsOneWidget);
+    expect(find.text('Kod olish'), findsOneWidget);
+    expect(find.text('Server manzili'), findsOneWidget);
+  });
+}
