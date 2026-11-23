@@ -13,5 +13,6 @@ __pycache__
 .venv
 venv
 tests
+mobile_app
 .vscode
 .idea

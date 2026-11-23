@@ -64,6 +64,12 @@ class Settings(BaseSettings):
 
     TIMEZONE: str = "Asia/Tashkent"
 
+    # Mobile app API (norin-api)
+    API_JWT_SECRET: str = ""
+    API_ACCESS_TTL_MIN: int = 30
+    API_REFRESH_TTL_DAYS: int = 30
+    API_OTP_TTL_MIN: int = 5
+
     @field_validator("DATABASE_URL")
     @classmethod
     def ensure_sqlite_dir(cls, value: str) -> str:

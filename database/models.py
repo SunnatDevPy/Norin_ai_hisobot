@@ -376,6 +376,58 @@ class ProductReturn(Base):
     client: Mapped["Client"] = relationship(back_populates="product_returns")
 
 
+class ApiLoginCode(Base):
+    """One-time login code (OTP) delivered through Telegram for the mobile app."""
+
+    __tablename__ = "api_login_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    code_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ApiSession(Base):
+    """Logged-in device session of the mobile app (refresh token stored as hash)."""
+
+    __tablename__ = "api_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="super_admin")
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    device_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    refresh_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    is_revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class AuditLog(Base):
+    """Audit trail of sensitive admin actions performed through the API."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, index=True)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    detail: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    ip: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class FSMStateRecord(Base):
     """Persistent Aiogram FSM state and JSON data record surviving container restarts."""
 

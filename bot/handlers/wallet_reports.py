@@ -750,7 +750,7 @@ async def cb_export_excel(cb: CallbackQuery) -> None:
             days = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 30
             pdata = await get_period_excel_data(db, days=days)
             data = await asyncio.to_thread(build_period_excel, pdata)
-            filename = f"{t_slug}_{days}kunlik_{pdata['start_date']}_{pdata['end_date']}.xlsx"
+            filename = f"{t_slug}_{days}kunlik_{pdata['period'].start_date}_{pdata['period'].end_date}.xlsx"
         elif kind == "month":
             which = parts[2] if len(parts) > 2 else "cur"
             start_iso, end_iso, _ = _calendar_month_bounds(which)
