@@ -24,10 +24,15 @@ class MainShell extends ConsumerStatefulWidget {
 
 class _MainShellState extends ConsumerState<MainShell> {
   bool _checkedUpdate = false;
+  late final PageController _pageCtrl;
+  bool _programmaticJump = false;
 
   @override
   void initState() {
     super.initState();
+    _pageCtrl = PageController(
+      initialPage: ref.read(shellTabIndexProvider).clamp(0, 3),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_checkedUpdate || !mounted) return;
       _checkedUpdate = true;
@@ -36,15 +41,33 @@ class _MainShellState extends ConsumerState<MainShell> {
   }
 
   @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _goToPage(int target) async {
+    if (!_pageCtrl.hasClients) return;
+    final current = _pageCtrl.page?.round() ?? _pageCtrl.initialPage;
+    if (current == target) return;
+    _programmaticJump = true;
+    try {
+      await _pageCtrl.animateToPage(
+        target,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      );
+    } finally {
+      _programmaticJump = false;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final rawIdx = ref.watch(shellTabIndexProvider);
-
-    const pages = <Widget>[
-      DashboardScreen(),
-      ClientsScreen(),
-      CashScreen(),
-      SettingsScreen(),
-    ];
+    ref.listen<int>(shellTabIndexProvider, (prev, next) {
+      _goToPage(next.clamp(0, 3));
+    });
 
     const navItems = <({IconData icon, IconData activeIcon, String label})>[
       (icon: Icons.home_outlined, activeIcon: Icons.home_rounded, label: "Asosiy"),
@@ -57,19 +80,28 @@ class _MainShellState extends ConsumerState<MainShell> {
       (icon: Icons.tune_outlined, activeIcon: Icons.tune_rounded, label: "Sozlamalar"),
     ];
 
-    final idx = rawIdx >= pages.length ? 0 : rawIdx;
+    final idx = rawIdx >= navItems.length ? 0 : rawIdx;
 
     return Scaffold(
       extendBody: true,
       backgroundColor: Colors.transparent,
       body: CosmicBackground(
-        child: TweenAnimationBuilder<double>(
-          key: ValueKey('tab_$idx'),
-          tween: Tween(begin: 0.94, end: 1.0),
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          builder: (_, v, child) => Opacity(opacity: v, child: child),
-          child: IndexedStack(index: idx, children: pages),
+        child: PageView(
+          controller: _pageCtrl,
+          physics: const PageScrollPhysics(),
+          onPageChanged: (newIdx) {
+            if (_programmaticJump) return;
+            if (ref.read(shellTabIndexProvider) != newIdx) {
+              HapticFeedback.selectionClick();
+              ref.read(shellTabIndexProvider.notifier).state = newIdx;
+            }
+          },
+          children: const [
+            _KeepAlivePage(child: DashboardScreen()),
+            _KeepAlivePage(child: ClientsScreen()),
+            _KeepAlivePage(child: CashScreen()),
+            _KeepAlivePage(child: SettingsScreen()),
+          ],
         ),
       ),
       bottomNavigationBar: _FloatingGlassDock(
@@ -79,6 +111,26 @@ class _MainShellState extends ConsumerState<MainShell> {
         onCenterAiTap: () => openNewSaleSheet(context, ref),
       ),
     );
+  }
+}
+
+class _KeepAlivePage extends StatefulWidget {
+  const _KeepAlivePage({required this.child});
+  final Widget child;
+
+  @override
+  State<_KeepAlivePage> createState() => _KeepAlivePageState();
+}
+
+class _KeepAlivePageState extends State<_KeepAlivePage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }
 

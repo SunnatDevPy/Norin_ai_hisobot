@@ -187,4 +187,31 @@ void main() {
     expect(animatedUp.scale, 1.0);
     expect(tapped, isTrue);
   });
+
+  testWidgets('Horizontal swipe updates PageView index cleanly', (tester) async {
+    int page = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PageView(
+            onPageChanged: (idx) => page = idx,
+            children: const [
+              Center(child: Text('Sahifa 0')),
+              Center(child: Text('Sahifa 1')),
+              Center(child: Text('Sahifa 2')),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(page, 0);
+    await tester.fling(find.byType(PageView), const Offset(-300, 0), 1000);
+    await tester.pumpAndSettle();
+    expect(page, 1);
+
+    await tester.fling(find.byType(PageView), const Offset(300, 0), 1000);
+    await tester.pumpAndSettle();
+    expect(page, 0);
+  });
 }
