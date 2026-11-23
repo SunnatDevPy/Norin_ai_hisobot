@@ -45,6 +45,18 @@ Future<void> openSaleReviewSheet(
   );
 }
 
+class _ManualLine {
+  _ManualLine({this.productId});
+  int? productId;
+  final TextEditingController kgCtrl = TextEditingController();
+  final TextEditingController priceCtrl = TextEditingController();
+
+  void dispose() {
+    kgCtrl.dispose();
+    priceCtrl.dispose();
+  }
+}
+
 class _NewSaleSheet extends ConsumerStatefulWidget {
   const _NewSaleSheet({this.initialClientId});
   final int? initialClientId;
@@ -64,11 +76,9 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
   // Tab 2: Text 0-token
   final _textCtrl = TextEditingController();
 
-  // Tab 3: Manual
+  // Tab 3: Manual (supports multiple product rows!)
   int? _manualClientId;
-  int? _manualProductId;
-  final _manualKgCtrl = TextEditingController();
-  final _manualPriceCtrl = TextEditingController();
+  final List<_ManualLine> _manualLines = [_ManualLine()];
   final _manualNoteCtrl = TextEditingController();
   bool _confirmNow = true;
   bool _postToGroup = true;
@@ -87,8 +97,9 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
     _tabs.dispose();
     _captionCtrl.dispose();
     _textCtrl.dispose();
-    _manualKgCtrl.dispose();
-    _manualPriceCtrl.dispose();
+    for (final line in _manualLines) {
+      line.dispose();
+    }
     _manualNoteCtrl.dispose();
     super.dispose();
   }
@@ -179,11 +190,24 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
   }
 
   Future<void> _submitManual(List<Map<String, dynamic>> products) async {
-    final pid = _manualProductId ?? (products.isNotEmpty ? asInt(products.first['id']) : 0);
-    final kg = double.tryParse(_manualKgCtrl.text.trim().replaceAll(',', '.'));
-    final priceOverride = double.tryParse(_manualPriceCtrl.text.trim().replaceAll(',', '.'));
-    if (pid <= 0 || kg == null || kg <= 0) {
-      showSnack(context, "Mahsulot va vaznni to'g'ri kiriting", error: true);
+    final defaultPid = products.isNotEmpty ? asInt(products.first['id']) : 0;
+    final itemsPayload = <Map<String, dynamic>>[];
+    for (final line in _manualLines) {
+      final pid = line.productId ?? defaultPid;
+      final kg = double.tryParse(line.kgCtrl.text.trim().replaceAll(',', '.'));
+      final priceOverride = double.tryParse(line.priceCtrl.text.trim().replaceAll(',', '.'));
+      if (pid <= 0 || kg == null || kg <= 0) {
+        showSnack(context, "Har bir qatorda mahsulot va vaznni to'g'ri kiriting", error: true);
+        return;
+      }
+      itemsPayload.add({
+        'product_id': pid,
+        'weight_kg': kg,
+        if (priceOverride != null && priceOverride > 0) 'unit_sell_price': priceOverride,
+      });
+    }
+    if (itemsPayload.isEmpty) {
+      showSnack(context, "Kamida 1 ta mahsulot kiriting", error: true);
       return;
     }
     if (_confirmNow && _manualClientId == null) {
@@ -197,13 +221,7 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
           '/sales',
           data: {
             'client_id': _manualClientId,
-            'items': [
-              {
-                'product_id': pid,
-                'weight_kg': kg,
-                if (priceOverride != null && priceOverride > 0) 'unit_sell_price': priceOverride,
-              },
-            ],
+            'items': itemsPayload,
             'note': _manualNoteCtrl.text.trim(),
             'confirm_now': _confirmNow,
             'post_to_group': _confirmNow && _postToGroup,
@@ -236,15 +254,41 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
     }
   }
 
+  (double, double) _computeManualPreview(List<Map<String, dynamic>> products) {
+    double totalKg = 0;
+    double totalSum = 0;
+    for (final line in _manualLines) {
+      final pid = line.productId ?? (products.isNotEmpty ? asInt(products.first['id']) : 0);
+      final kg = double.tryParse(line.kgCtrl.text.trim().replaceAll(',', '.')) ?? 0;
+      double price = double.tryParse(line.priceCtrl.text.trim().replaceAll(',', '.')) ?? 0;
+      if (price <= 0) {
+        for (final p in products) {
+          if (asInt(p['id']) == pid) {
+            price = asDouble(p['default_sell_price']);
+            break;
+          }
+        }
+      }
+      if (kg > 0) {
+        totalKg += kg;
+        totalSum += kg * price;
+      }
+    }
+    return (totalKg, totalSum);
+  }
+
   @override
   Widget build(BuildContext context) {
     final clientsAsync = ref.watch(clientsProvider);
     final productsAsync = ref.watch(productsProvider);
     final clients = clientsAsync.valueOrNull ?? const <Map<String, dynamic>>[];
     final products = productsAsync.valueOrNull ?? const <Map<String, dynamic>>[];
-    if (_manualProductId == null && products.isNotEmpty) {
-      _manualProductId = asInt(products.first['id']);
+    if (products.isNotEmpty) {
+      for (final line in _manualLines) {
+        line.productId ??= asInt(products.first['id']);
+      }
     }
+    final (previewKg, previewSum) = _computeManualPreview(products);
 
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -415,7 +459,7 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
                       ),
                     ],
                   ),
-                  // 3. Qo'lda
+                  // 3. Qo'lda (ko'p mahsulot qatorli)
                   ListView(
                     padding: const EdgeInsets.all(20),
                     children: [
@@ -437,52 +481,127 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
                         onChanged: (v) => setState(() => _manualClientId = v),
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<int>(
-                        key: ValueKey('prod_$_manualProductId'),
-                        initialValue: _manualProductId,
-                        decoration: const InputDecoration(
-                          labelText: "Mahsulot",
-                          prefixIcon: Icon(Icons.inventory_2_outlined),
-                        ),
-                        items: products
-                            .map(
-                              (p) => DropdownMenuItem<int>(
-                                value: asInt(p['id']),
-                                child: Text(
-                                  "${asStr(p['name'])} (${formatCompactUzs(asDouble(p['default_sell_price']))}/${asStr(p['unit'], 'kg')})",
+                      for (int i = 0; i < _manualLines.length; i++) ...[
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: DropdownButtonFormField<int>(
+                                        key: ValueKey('prod_${i}_${_manualLines[i].productId}'),
+                                        initialValue: _manualLines[i].productId,
+                                        decoration: const InputDecoration(
+                                          labelText: "Mahsulot",
+                                          prefixIcon: Icon(Icons.inventory_2_outlined),
+                                        ),
+                                        items: products
+                                            .map(
+                                              (p) => DropdownMenuItem<int>(
+                                                value: asInt(p['id']),
+                                                child: Text(
+                                                  "${asStr(p['name'])} (${formatCompactUzs(asDouble(p['default_sell_price']))}/${asStr(p['unit'], 'kg')})",
+                                                ),
+                                              ),
+                                            )
+                                            .toList(),
+                                        onChanged: (v) => setState(() => _manualLines[i].productId = v),
+                                      ),
+                                    ),
+                                    if (_manualLines.length > 1) ...[
+                                      const SizedBox(width: 6),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline, color: NorinPalette.danger),
+                                        onPressed: () {
+                                          setState(() {
+                                            final removed = _manualLines.removeAt(i);
+                                            removed.dispose();
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ],
                                 ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) => setState(() => _manualProductId = v),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _manualKgCtrl,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: const InputDecoration(
-                                labelText: "Miqdor (kg/dona)",
-                                hintText: "10.5",
-                              ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _manualLines[i].kgCtrl,
+                                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                        onChanged: (_) => setState(() {}),
+                                        decoration: const InputDecoration(
+                                          labelText: "Miqdor (kg/dona)",
+                                          hintText: "10.5",
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _manualLines[i].priceCtrl,
+                                        keyboardType: TextInputType.number,
+                                        onChanged: (_) => setState(() {}),
+                                        decoration: const InputDecoration(
+                                          labelText: "Narx (ixtiyoriy)",
+                                          hintText: "Avto",
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextField(
-                              controller: _manualPriceCtrl,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: "Narx (ixtiyoriy)",
-                                hintText: "Avto",
-                              ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _manualLines.add(
+                                      _ManualLine(
+                                        productId: products.isNotEmpty ? asInt(products.first['id']) : null,
+                                      ),
+                                    );
+                                  });
+                                },
+                          icon: const Icon(Icons.add_circle_outline_rounded),
+                          label: const Text("+ Mahsulot qatori qo'shish"),
+                        ),
+                      ),
+                      if (previewKg > 0) ...[
+                        const SizedBox(height: 6),
+                        Card(
+                          color: NorinPalette.emerald.withValues(alpha: 0.12),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            child: Row(
+                              children: [
+                                Text(
+                                  "Jami: ${formatKg(previewKg)}",
+                                  style: tNumStyle.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  "~ ${formatUzs(previewSum)}",
+                                  style: tNumStyle.copyWith(
+                                    fontWeight: FontWeight.w900,
+                                    color: NorinPalette.emeraldLight,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
                       TextField(
                         controller: _manualNoteCtrl,
                         decoration: const InputDecoration(labelText: "Izoh (ixtiyoriy)"),
@@ -725,6 +844,94 @@ class _SaleReviewSheetState extends ConsumerState<_SaleReviewSheet> {
     }
   }
 
+  Future<void> _quickPayForSale(int clientId) async {
+    final amountCtrl = TextEditingController(text: asDouble(_sale['total_amount']).round().toString());
+    final noteCtrl = TextEditingController(text: "Sotuv #${asInt(_sale['id'])}");
+    String method = 'cash';
+    bool postGroup = _sale['group_chat_id'] != null;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text("Pul olish (${asStr(_sale['client_name'], 'Mijoz')})"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: amountCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: "Summa (so'm) *"),
+                ),
+                const SizedBox(height: 12),
+                SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 'cash', label: Text("Naqd")),
+                    ButtonSegment(value: 'card', label: Text("Karta")),
+                    ButtonSegment(value: 'transfer', label: Text("O'tkazma")),
+                  ],
+                  selected: {method},
+                  onSelectionChanged: (s) => setDlg(() => method = s.first),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: noteCtrl,
+                  decoration: const InputDecoration(labelText: "Izoh (ixtiyoriy)"),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text("Telegram guruhga yuborish"),
+                  value: postGroup,
+                  onChanged: (v) => setDlg(() => postGroup = v),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Saqlash")),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    final amount = double.tryParse(amountCtrl.text.trim().replaceAll(',', '.'));
+    if (amount == null || amount <= 0) {
+      if (mounted) showSnack(context, "Summa 0 dan katta bo'lishi kerak", error: true);
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final res = asMap(
+        await ref.read(apiClientProvider).post(
+          '/payments',
+          data: {
+            'client_id': clientId,
+            'amount': amount,
+            'payment_method': method,
+            'note': noteCtrl.text.trim(),
+            'post_to_group': postGroup,
+          },
+        ),
+      );
+      invalidateOperationalData(ref);
+      if (mounted) {
+        showSnack(
+          context,
+          res['group_posted'] == true
+              ? "To'lov qabul qilindi va guruhga yuborildi"
+              : "To'lov qayd etildi",
+        );
+      }
+    } catch (e) {
+      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _deleteSale() async {
     final yes = await showConfirmDialog(
       context,
@@ -940,6 +1147,17 @@ class _SaleReviewSheetState extends ConsumerState<_SaleReviewSheet> {
                 ),
               ),
             ] else ...[
+              if (clientId != null) ...[
+                FilledButton.icon(
+                  onPressed: _busy ? null : () => _quickPayForSale(clientId),
+                  icon: const Icon(Icons.payments_outlined),
+                  label: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Text("Pulini oldim", style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               Row(
                 children: [
                   Expanded(

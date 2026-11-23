@@ -130,6 +130,7 @@ async def _configure_bot_commands(bot: Bot) -> None:
     settings = get_settings()
     default_cmds = [
         BotCommand(command="start", description="Bosh menyuni ochish"),
+        BotCommand(command="apk", description="Mobil ilova (APK) va kirish kodi"),
         BotCommand(command="myid", description="Telegram ID ni ko'rish"),
         BotCommand(command="cancel", description="Amalni bekor qilish"),
     ]

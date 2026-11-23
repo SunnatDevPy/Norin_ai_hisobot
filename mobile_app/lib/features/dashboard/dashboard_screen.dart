@@ -49,11 +49,15 @@ class DashboardScreen extends ConsumerWidget {
     final summaryAsync = ref.watch(dashboardSummaryProvider);
     final chartsAsync = ref.watch(dashboardChartsProvider);
     final todayAsync = ref.watch(todayProvider);
+    final settingsAsync = ref.watch(settingsProvider);
     final tenantsAsync = auth.isSuperAdmin ? ref.watch(adminTenantsProvider) : null;
     final themeMode = ref.watch(themeModeProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    String activeTenantName = "Filial #${auth.selectedTenantId}";
+    String activeTenantName = asStr(
+      asMap(settingsAsync.valueOrNull?['tenant'])['name'],
+      "Filial #${auth.selectedTenantId}",
+    );
     final tenantsList = tenantsAsync?.valueOrNull ?? <Map<String, dynamic>>[];
     for (final t in tenantsList) {
       if (asInt(t['id']) == auth.selectedTenantId) {

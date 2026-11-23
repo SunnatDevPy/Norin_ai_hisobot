@@ -44,18 +44,28 @@ void main() {
     expect(unavailable.hasUpdate, isFalse);
   });
 
-  testWidgets('LoginScreen renders Telegram ID input and server settings', (tester) async {
+  testWidgets('LoginScreen renders 1-tap Telegram, ID-less code, and expandable ID/Server settings', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
         child: MaterialApp(
-          theme: AppTheme.light(),
+          theme: AppTheme.dark(),
           home: const LoginScreen(),
         ),
       ),
     );
+    await tester.pump();
 
     expect(find.text('Norin AI Hisobot'), findsOneWidget);
     expect(find.text('Tizimga kirish'), findsOneWidget);
+    expect(find.text('Telegram orqali 1-bosishda kirish'), findsOneWidget);
+    expect(find.text('6 xonali /apk kod'), findsOneWidget);
+
+    final advancedTile = find.text('ID orqali kirish & Server manzili');
+    await tester.ensureVisible(advancedTile);
+    await tester.tap(advancedTile);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+
     expect(find.text('Telegram ID'), findsOneWidget);
     expect(find.text('Kod olish'), findsOneWidget);
     expect(find.text('Server manzili'), findsOneWidget);

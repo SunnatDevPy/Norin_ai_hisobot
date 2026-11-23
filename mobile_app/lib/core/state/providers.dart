@@ -52,15 +52,62 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
     try {
       final me = await _api.get('/auth/me') as Map<String, dynamic>;
+      final role = me['role'] as String;
+      final baseTid = (me['tenant_id'] as num).toInt();
+      final effectiveTid =
+          role == 'super_admin' ? (_api.selectedTenantId ?? baseTid) : baseTid;
+      if (role != 'super_admin') {
+        await _api.setSelectedTenant(baseTid);
+      }
       state = AuthState(
         stage: AuthStage.authenticated,
         telegramId: (me['telegram_id'] as num).toInt(),
-        role: me['role'] as String,
-        selectedTenantId: _api.selectedTenantId ?? (me['tenant_id'] as num).toInt(),
+        role: role,
+        selectedTenantId: effectiveTid,
       );
     } catch (_) {
       await _api.clearSession();
       state = const AuthState(stage: AuthStage.unauthenticated);
+    }
+  }
+
+  Future<void> _applyTokenResponse(Map<String, dynamic> res) async {
+    final tid = (res['tenant_id'] as num).toInt();
+    final role = res['role'] as String;
+    final effectiveTid =
+        role == 'super_admin' ? (_api.selectedTenantId ?? tid) : tid;
+    await _api.saveSession(
+      accessToken: res['access_token'] as String,
+      refreshToken: res['refresh_token'] as String,
+      role: role,
+      telegramId: 0,
+      tenantId: effectiveTid,
+    );
+    if (role != 'super_admin') {
+      await _api.setSelectedTenant(tid);
+    }
+    try {
+      final me = await _api.get('/auth/me') as Map<String, dynamic>;
+      final tgId = (me['telegram_id'] as num).toInt();
+      await _api.saveSession(
+        accessToken: res['access_token'] as String,
+        refreshToken: res['refresh_token'] as String,
+        role: role,
+        telegramId: tgId,
+        tenantId: effectiveTid,
+      );
+      state = AuthState(
+        stage: AuthStage.authenticated,
+        telegramId: tgId,
+        role: role,
+        selectedTenantId: effectiveTid,
+      );
+    } catch (_) {
+      state = AuthState(
+        stage: AuthStage.authenticated,
+        role: role,
+        selectedTenantId: effectiveTid,
+      );
     }
   }
 
@@ -71,7 +118,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> verifyOtp({
     required int telegramId,
     required String code,
-    String deviceName = 'Android App',
+    String deviceName = 'Norin AI Android',
   }) async {
     final res = await _api.post(
       '/auth/verify-code',
@@ -82,22 +129,75 @@ class AuthNotifier extends StateNotifier<AuthState> {
       },
     ) as Map<String, dynamic>;
     final tid = (res['tenant_id'] as num).toInt();
+    final role = res['role'] as String;
+    final effectiveTid =
+        role == 'super_admin' ? (_api.selectedTenantId ?? tid) : tid;
     await _api.saveSession(
       accessToken: res['access_token'] as String,
       refreshToken: res['refresh_token'] as String,
-      role: res['role'] as String,
+      role: role,
       telegramId: telegramId,
-      tenantId: tid,
+      tenantId: effectiveTid,
     );
+    if (role != 'super_admin') {
+      await _api.setSelectedTenant(tid);
+    }
     state = AuthState(
       stage: AuthStage.authenticated,
       telegramId: telegramId,
-      role: res['role'] as String,
-      selectedTenantId: _api.selectedTenantId ?? tid,
+      role: role,
+      selectedTenantId: effectiveTid,
     );
   }
 
+  Future<void> loginWithCode({
+    required String code,
+    String deviceName = 'Norin AI Android',
+  }) async {
+    final res = await _api.post(
+      '/auth/login-code',
+      data: {
+        'code': code.trim(),
+        'device_name': deviceName,
+      },
+    ) as Map<String, dynamic>;
+    await _applyTokenResponse(res);
+  }
+
+  Future<Map<String, dynamic>> startTelegramTicket({
+    String deviceName = 'Norin AI Android',
+  }) async {
+    final res = await _api.post(
+      '/auth/telegram-ticket',
+      data: {'device_name': deviceName},
+    ) as Map<String, dynamic>;
+    return res;
+  }
+
+  Future<bool> pollTelegramTicket({
+    required String ticket,
+    String deviceName = 'Norin AI Android',
+  }) async {
+    final res = await _api.post(
+      '/auth/telegram-poll',
+      data: {
+        'ticket': ticket,
+        'device_name': deviceName,
+      },
+    ) as Map<String, dynamic>;
+    final status = res['status']?.toString() ?? 'pending';
+    if (status == 'approved') {
+      await _applyTokenResponse(res);
+      return true;
+    }
+    if (status == 'expired') {
+      throw Exception("Kirish havolasi muddati tugagan. Qaytadan bosing.");
+    }
+    return false;
+  }
+
   Future<void> selectTenant(int tenantId) async {
+    if (!state.isSuperAdmin) return;
     await _api.setSelectedTenant(tenantId);
     state = state.copyWith(selectedTenantId: tenantId);
   }

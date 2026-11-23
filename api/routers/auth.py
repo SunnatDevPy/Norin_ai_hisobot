@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import List
+import secrets
+from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -20,8 +21,8 @@ from api.security import (
     verify_hash,
 )
 from config import get_settings
-from database.crud import now_utc, to_utc_dt
-from database.models import ApiLoginCode, ApiSession, AuditLog
+from database.crud import evaluate_subscription_status, now_utc, to_utc_dt
+from database.models import ApiLoginCode, ApiSession, AuditLog, AuthorizedUser
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -43,12 +44,79 @@ class RefreshIn(BaseModel):
     refresh_token: str
 
 
+class CodeOnlyLoginIn(BaseModel):
+    code: str = Field(min_length=6, max_length=6)
+    device_name: str = Field(default="", max_length=128)
+
+
+class TicketCreateIn(BaseModel):
+    device_name: str = Field(default="", max_length=128)
+
+
+class TicketPollIn(BaseModel):
+    ticket: str = Field(min_length=8, max_length=64)
+    device_name: str = Field(default="", max_length=128)
+
+
 class TokenOut(BaseModel):
     access_token: str
     refresh_token: str
     expires_in: int
     role: str
     tenant_id: int
+
+
+_CACHED_BOT_USERNAME: Optional[str] = None
+
+
+async def _get_bot_username(request: Request) -> str:
+    global _CACHED_BOT_USERNAME
+    if _CACHED_BOT_USERNAME:
+        return _CACHED_BOT_USERNAME
+    bot = getattr(request.app.state, "bot", None)
+    if bot is not None:
+        try:
+            me = await bot.get_me()
+            if me and me.username:
+                _CACHED_BOT_USERNAME = me.username.lstrip("@")
+                return _CACHED_BOT_USERNAME
+        except Exception:
+            pass
+    return "norin_ai_hisobot"
+
+
+async def resolve_apk_user(db: AsyncSession, telegram_id: int) -> Optional[Tuple[str, int]]:
+    """Resolve (role, tenant_id) for an APK user or return None / raise 403 if expired."""
+    settings = get_settings()
+    tid = int(telegram_id)
+    if tid in settings.super_admin_id_list:
+        return ("super_admin", 1)
+
+    au = await db.scalar(
+        select(AuthorizedUser).where(
+            AuthorizedUser.telegram_id == tid,
+            AuthorizedUser.is_active.is_(True),
+        )
+    )
+    if au is not None:
+        sub = await evaluate_subscription_status(db, tenant_id=int(au.tenant_id))
+        if not sub.is_allowed:
+            raise HTTPException(
+                status_code=403,
+                detail="Filial obuna muddati tugagan yoki muzlatilgan",
+            )
+        return (au.role or "owner", int(au.tenant_id))
+
+    if tid in settings.admin_id_list:
+        sub = await evaluate_subscription_status(db, tenant_id=1)
+        if not sub.is_allowed:
+            raise HTTPException(
+                status_code=403,
+                detail="Filial obuna muddati tugagan yoki muzlatilgan",
+            )
+        return ("owner", 1)
+
+    return None
 
 
 def _audit(db: AsyncSession, actor: int, action: str, detail: str, ip: str) -> None:
@@ -59,7 +127,7 @@ def _audit(db: AsyncSession, actor: int, action: str, detail: str, ip: str) -> N
 async def request_code(
     body: RequestCodeIn, request: Request, db: AsyncSession = Depends(get_db)
 ) -> dict:
-    """Send a 6-digit login code to the Super Admin's Telegram (same reply for any ID)."""
+    """Send a 6-digit login code to any authorized APK user's Telegram (same reply for any ID)."""
     ip = client_ip(request)
     if not rate_limiter.check(f"rc-ip:{ip}", 10, 600) or not rate_limiter.check(
         f"rc-id:{body.telegram_id}", 3, 600
@@ -67,7 +135,11 @@ async def request_code(
         raise HTTPException(status_code=429, detail="Juda ko'p urinish. Keyinroq qayta urinib ko'ring.")
 
     reply = {"ok": True, "detail": "Agar ID ruxsat etilgan bo'lsa, kod Telegramga yuborildi."}
-    if body.telegram_id not in get_settings().super_admin_id_list:
+    try:
+        resolved = await resolve_apk_user(db, body.telegram_id)
+    except HTTPException:
+        resolved = None
+    if resolved is None:
         return reply
 
     code = make_otp()
@@ -129,8 +201,10 @@ async def verify_code(
         raise HTTPException(status_code=429, detail="Juda ko'p urinish. Keyinroq qayta urinib ko'ring.")
 
     bad = HTTPException(status_code=400, detail="Kod noto'g'ri yoki eskirgan")
-    if body.telegram_id not in get_settings().super_admin_id_list:
+    resolved = await resolve_apk_user(db, body.telegram_id)
+    if resolved is None:
         raise bad
+    role, tid = resolved
     row = await db.scalar(
         select(ApiLoginCode)
         .where(ApiLoginCode.telegram_id == body.telegram_id, ApiLoginCode.used.is_(False))
@@ -150,7 +224,103 @@ async def verify_code(
     row.used = True
     _audit(db, body.telegram_id, "login", body.device_name, ip)
     await db.commit()
-    return await _issue_tokens(db, body.telegram_id, "super_admin", 1, body.device_name)
+    return await _issue_tokens(db, body.telegram_id, role, tid, body.device_name)
+
+
+@router.post("/login-code", response_model=TokenOut)
+async def login_with_code_only(
+    body: CodeOnlyLoginIn, request: Request, db: AsyncSession = Depends(get_db)
+) -> TokenOut:
+    """Authenticate using only a 6-digit Telegram OTP code (without typing Telegram ID)."""
+    ip = client_ip(request)
+    if not rate_limiter.check(f"vc-ip:{ip}", 10, 600):
+        raise HTTPException(status_code=429, detail="Juda ko'p urinish. Keyinroq qayta urinib ko'ring.")
+
+    code = body.code.strip()
+    bad = HTTPException(status_code=400, detail="Kod noto'g'ri yoki muddati tugagan")
+    if not code.isdigit() or len(code) != 6:
+        raise bad
+
+    row = await db.scalar(
+        select(ApiLoginCode)
+        .where(
+            ApiLoginCode.code_hash == hash_secret(code),
+            ApiLoginCode.telegram_id > 0,
+            ApiLoginCode.used.is_(False),
+        )
+        .order_by(desc(ApiLoginCode.id))
+        .limit(1)
+    )
+    if row is None or to_utc_dt(row.expires_at) < now_utc():
+        raise bad
+
+    resolved = await resolve_apk_user(db, int(row.telegram_id))
+    if resolved is None:
+        raise bad
+    role, tid = resolved
+    row.used = True
+    _audit(db, int(row.telegram_id), "login_code", body.device_name, ip)
+    await db.commit()
+    return await _issue_tokens(db, int(row.telegram_id), role, tid, body.device_name)
+
+
+@router.post("/telegram-ticket")
+async def create_telegram_ticket(
+    body: TicketCreateIn, request: Request, db: AsyncSession = Depends(get_db)
+) -> dict:
+    """Issue a short-lived deep-link login ticket so users can approve login in Telegram with 1 tap."""
+    ip = client_ip(request)
+    if not rate_limiter.check(f"tkt-ip:{ip}", 15, 600):
+        raise HTTPException(status_code=429, detail="Juda ko'p urinish. Keyinroq qayta urinib ko'ring.")
+
+    ticket = secrets.token_urlsafe(12)
+    ttl_sec = max(60, get_settings().API_OTP_TTL_MIN * 60)
+    db.add(
+        ApiLoginCode(
+            telegram_id=0,
+            code_hash=hash_secret(f"tkt:{ticket}"),
+            expires_at=now_utc() + timedelta(seconds=ttl_sec),
+        )
+    )
+    await db.commit()
+    bot_user = await _get_bot_username(request)
+    return {
+        "ticket": ticket,
+        "bot_url": f"https://t.me/{bot_user}?start=apk_{ticket}",
+        "tg_uri": f"tg://resolve?domain={bot_user}&start=apk_{ticket}",
+        "expires_in": ttl_sec,
+    }
+
+
+@router.post("/telegram-poll")
+async def poll_telegram_ticket(
+    body: TicketPollIn, request: Request, db: AsyncSession = Depends(get_db)
+) -> dict:
+    """Poll whether the deep-link ticket has been approved by the user in Telegram bot."""
+    ip = client_ip(request)
+    row = await db.scalar(
+        select(ApiLoginCode)
+        .where(ApiLoginCode.code_hash == hash_secret(f"tkt:{body.ticket.strip()}"))
+        .order_by(desc(ApiLoginCode.id))
+        .limit(1)
+    )
+    if row is None or row.used or to_utc_dt(row.expires_at) < now_utc():
+        return {"status": "expired"}
+    if int(row.telegram_id) <= 0:
+        return {"status": "pending"}
+
+    resolved = await resolve_apk_user(db, int(row.telegram_id))
+    if resolved is None:
+        row.used = True
+        await db.commit()
+        return {"status": "expired"}
+
+    role, tid = resolved
+    row.used = True
+    _audit(db, int(row.telegram_id), "login_telegram_1tap", body.device_name, ip)
+    await db.commit()
+    tokens = await _issue_tokens(db, int(row.telegram_id), role, tid, body.device_name)
+    return {"status": "approved", **tokens.model_dump()}
 
 
 @router.post("/refresh", response_model=TokenOut)
@@ -160,6 +330,12 @@ async def refresh(body: RefreshIn, db: AsyncSession = Depends(get_db)) -> TokenO
     )
     if sess is None or sess.is_revoked or to_utc_dt(sess.expires_at) < now_utc():
         raise HTTPException(status_code=401, detail="Sessiya tugagan, qaytadan kiring")
+    resolved = await resolve_apk_user(db, int(sess.telegram_id))
+    if resolved is None:
+        sess.is_revoked = True
+        await db.commit()
+        raise HTTPException(status_code=401, detail="Ruxsat bekor qilingan")
+    sess.role, sess.tenant_id = resolved
     new_refresh = make_refresh_token()
     sess.refresh_hash = hash_secret(new_refresh)
     sess.last_used_at = now_utc()

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/api_client.dart';
+import '../../core/security/biometric_lock.dart';
 import '../../core/state/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/update/app_updater.dart';
@@ -131,10 +133,56 @@ class SettingsScreen extends ConsumerWidget {
     }
   }
 
+  Future<void> _pinDialog(BuildContext context, WidgetRef ref, BiometricLockState bioLock) async {
+    final pinCtrl = TextEditingController();
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("4 xonali PIN-kod"),
+        content: TextField(
+          controller: pinCtrl,
+          keyboardType: TextInputType.number,
+          maxLength: 4,
+          obscureText: true,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(
+            labelText: "Yangi 4 xonali PIN",
+            hintText: "••••",
+            counterText: "",
+          ),
+        ),
+        actions: [
+          if (bioLock.hasPin)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'clear'),
+              child: const Text("O'chirish", style: TextStyle(color: NorinPalette.danger)),
+            ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Bekor")),
+          FilledButton(onPressed: () => Navigator.pop(ctx, 'save'), child: const Text("Saqlash")),
+        ],
+      ),
+    );
+    if (action == 'clear') {
+      await ref.read(biometricLockProvider.notifier).setPinCode(null);
+      if (context.mounted) showSnack(context, "PIN-kod o'chirildi");
+      return;
+    }
+    if (action == 'save') {
+      final p = pinCtrl.text.trim();
+      if (p.length != 4) {
+        if (context.mounted) showSnack(context, "4 ta raqam kiriting", error: true);
+        return;
+      }
+      await ref.read(biometricLockProvider.notifier).setPinCode(p);
+      if (context.mounted) showSnack(context, "PIN-kod saqlandi");
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settingsAsync = ref.watch(settingsProvider);
     final productsAsync = ref.watch(productsProvider);
+    final bioLock = ref.watch(biometricLockProvider);
     final themeMode = ref.watch(themeModeProvider);
     final api = ref.read(apiClientProvider);
 
@@ -357,6 +405,44 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ),
                 const Divider(),
+                SwitchListTile(
+                  secondary: const Icon(Icons.fingerprint_rounded, color: NorinPalette.emeraldLight),
+                  title: const Text("Otpechatka (Barmoq izi)"),
+                  subtitle: Text(
+                    bioLock.enabled
+                        ? "Yoqilgan — ilova barmoq izi bilan himoyalangan"
+                        : (bioLock.biometricAvailable
+                            ? "Yoqib qo'ysangiz kirishda barmoq izi so'raladi"
+                            : "Telefonda barmoq izi sozlanmagan"),
+                  ),
+                  value: bioLock.enabled,
+                  onChanged: (v) async {
+                    final ok = await ref
+                        .read(biometricLockProvider.notifier)
+                        .setBiometricEnabled(v);
+                    if (!context.mounted) return;
+                    if (v) {
+                      showSnack(
+                        context,
+                        ok
+                            ? "Otpechatka himoyasi yoqildi"
+                            : "Barmoq izi tasdiqlanmadi yoki telefonda yoqilmagan",
+                        error: !ok,
+                      );
+                    } else {
+                      showSnack(context, "Otpechatka o'chirildi");
+                    }
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.pin_outlined),
+                  title: const Text("4 xonali PIN-kod"),
+                  subtitle: Text(bioLock.hasPin ? "O'rnatilgan (••••)" : "O'rnatilmagan"),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _pinDialog(context, ref, bioLock),
+                ),
+                const Divider(),
                 ListTile(
                   leading: const Icon(Icons.system_update_rounded, color: NorinPalette.emerald),
                   title: const Text("Yangilanishni tekshirish"),
@@ -387,7 +473,10 @@ class SettingsScreen extends ConsumerWidget {
                       confirmLabel: "Chiqish",
                       destructive: true,
                     );
-                    if (yes) await ref.read(authProvider.notifier).logout();
+                    if (yes) {
+                      ref.read(biometricLockProvider.notifier).resetSessionLock();
+                      await ref.read(authProvider.notifier).logout();
+                    }
                   },
                 ),
               ],

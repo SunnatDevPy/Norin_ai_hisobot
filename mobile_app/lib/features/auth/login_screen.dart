@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/api_client.dart';
+import '../../core/security/biometric_lock.dart';
 import '../../core/state/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/version.dart';
@@ -18,36 +19,53 @@ class LoginScreen extends ConsumerStatefulWidget {
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends ConsumerState<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen> with WidgetsBindingObserver {
+  final _quickCodeCtrl = TextEditingController();
   final _tgCtrl = TextEditingController();
   final _otpCtrl = TextEditingController();
   late final TextEditingController _urlCtrl;
 
+  String? _activeTicket;
+  String? _activeBotUrl;
+  Timer? _pollTimer;
+  bool _pollingInFlight = false;
+
   bool _codeSent = false;
   bool _busy = false;
-  bool _showServerSettings = false;
+  bool _showAdvanced = false;
   int _resendSeconds = 0;
-  Timer? _timer;
+  Timer? _resendTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _urlCtrl = TextEditingController(text: ref.read(apiClientProvider).baseUrl);
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _pollTimer?.cancel();
+    _resendTimer?.cancel();
+    _quickCodeCtrl.dispose();
     _tgCtrl.dispose();
     _otpCtrl.dispose();
     _urlCtrl.dispose();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _activeTicket != null) {
+      _pollTicketOnce();
+    }
+  }
+
   void _startCooldown([int seconds = 60]) {
-    _timer?.cancel();
+    _resendTimer?.cancel();
     setState(() => _resendSeconds = seconds);
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) {
         t.cancel();
         return;
@@ -65,6 +83,98 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final url = _urlCtrl.text.trim();
     if (url.isNotEmpty) {
       await ref.read(apiClientProvider).setBaseUrl(url);
+    }
+  }
+
+  Future<void> _startOneTapTelegram() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await _applyServerUrlIfEdited();
+      final res = await ref.read(authProvider.notifier).startTelegramTicket();
+      final ticket = asStr(res['ticket']);
+      final tgUri = asStr(res['tg_uri']);
+      final botUrl = asStr(res['bot_url']);
+      if (ticket.isEmpty) throw Exception("Ticket yaratilmadi");
+
+      setState(() {
+        _activeTicket = ticket;
+        _activeBotUrl = botUrl;
+      });
+      _startPollingLoop();
+
+      var opened = false;
+      if (tgUri.isNotEmpty) {
+        opened = await NativeBridge.openExternalUrl(tgUri);
+      }
+      if (!opened && botUrl.isNotEmpty) {
+        opened = await NativeBridge.openExternalUrl(botUrl);
+      }
+      if (!opened && mounted) {
+        showSnack(
+          context,
+          "Telegram avtomatik ochilmadi. Botda /apk yozib 6 xonali kod oling.",
+          error: true,
+        );
+      }
+    } catch (e) {
+      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _startPollingLoop() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _pollTicketOnce());
+  }
+
+  void _cancelTicketPolling() {
+    _pollTimer?.cancel();
+    setState(() {
+      _activeTicket = null;
+      _activeBotUrl = null;
+    });
+  }
+
+  Future<void> _pollTicketOnce() async {
+    final ticket = _activeTicket;
+    if (ticket == null || _pollingInFlight || !mounted) return;
+    _pollingInFlight = true;
+    try {
+      final approved = await ref.read(authProvider.notifier).pollTelegramTicket(ticket: ticket);
+      if (approved) {
+        _pollTimer?.cancel();
+        if (mounted) setState(() => _activeTicket = null);
+      }
+    } catch (e) {
+      _pollTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          _activeTicket = null;
+          _activeBotUrl = null;
+        });
+        showSnack(context, ApiClient.extractError(e), error: true);
+      }
+    } finally {
+      _pollingInFlight = false;
+    }
+  }
+
+  Future<void> _loginWithCodeOnly() async {
+    final code = _quickCodeCtrl.text.trim();
+    if (code.length < 6) {
+      showSnack(context, "Botdagi 6 xonali kirish kodini kiriting", error: true);
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await _applyServerUrlIfEdited();
+      await ref.read(authProvider.notifier).loginWithCode(code: code);
+    } catch (e) {
+      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -114,22 +224,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final waitingTg = _activeTicket != null;
 
     return Scaffold(
       body: CosmicBackground(
         showBottomHorizonGlow: true,
         child: SafeArea(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 440),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Center(child: GlowingSquircleEmblem(size: 108)),
-                    const SizedBox(height: 6),
+                    const Center(child: GlowingSquircleEmblem(size: 102)),
+                    const SizedBox(height: 4),
                     Text(
                       "Norin AI Hisobot",
                       textAlign: TextAlign.center,
@@ -138,17 +248,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         letterSpacing: -0.5,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 5),
                     Text(
-                      _codeSent
-                          ? "Telegram botga kelgan 6 xonali kodni kiriting"
-                          : "Savdo, kassa, AI chek va SaaS boshqaruvi • v$kAppVersion",
+                      "Savdo, kassa, AI chek va SaaS boshqaruvi • v$kAppVersion",
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
                     SpotlightHeroCard(
                       padding: const EdgeInsets.all(20),
                       glowColor: NorinPalette.emeraldLight,
@@ -168,82 +276,132 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                _codeSent ? "Tasdiqlash kodini kiriting" : "Tizimga kirish",
+                                "Tizimga kirish",
                                 style: theme.textTheme.titleMedium?.copyWith(
                                   fontWeight: FontWeight.w800,
-                                  color: isDark ? Colors.white : Colors.white,
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: _tgCtrl,
-                            enabled: !_busy && !_codeSent,
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                            style: isDark ? null : const TextStyle(color: Color(0xFF13111C)),
-                            decoration: const InputDecoration(
-                              labelText: "Telegram ID",
-                              hintText: "Masalan: 5649321700",
-                              prefixIcon: Icon(Icons.badge_outlined),
-                            ),
-                          ),
-                          if (_codeSent) ...[
-                            const SizedBox(height: 14),
-                            TextField(
-                              controller: _otpCtrl,
-                              enabled: !_busy,
-                              keyboardType: TextInputType.number,
-                              maxLength: 6,
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 7,
-                              ),
-                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                              decoration: const InputDecoration(
-                                labelText: "6 xonali OTP kod",
-                                hintText: "000000",
-                                counterText: "",
-                                prefixIcon: Icon(Icons.lock_outline_rounded),
-                              ),
-                              onSubmitted: (_) => _verifyCode(),
-                            ),
-                          ],
-                          const SizedBox(height: 18),
-                          NeonPillButton(
-                            onPressed: _busy ? null : (_codeSent ? _verifyCode : _requestCode),
-                            busy: _busy,
-                            icon: _codeSent ? Icons.login_rounded : Icons.auto_awesome_rounded,
-                            label: _codeSent ? "Kirish" : "Kod olish",
-                          ),
-                          if (_codeSent) ...[
-                            const SizedBox(height: 10),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                TextButton.icon(
-                                  onPressed: _busy
-                                      ? null
-                                      : () => setState(() {
-                                            _codeSent = false;
-                                            _otpCtrl.clear();
-                                          }),
-                                  icon: const Icon(Icons.arrow_back_rounded, size: 17),
-                                  label: const Text("ID ni o'zgartirish"),
+                          const SizedBox(height: 14),
+                          if (waitingTg) ...[
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: NorinPalette.emerald.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: NorinPalette.emeraldLight.withValues(alpha: 0.5),
                                 ),
-                                TextButton(
-                                  onPressed: (_busy || _resendSeconds > 0) ? null : _requestCode,
-                                  child: Text(
-                                    _resendSeconds > 0
-                                        ? "Qayta ($_resendSeconds s)"
-                                        : "Qayta kod olish",
+                              ),
+                              child: Column(
+                                children: [
+                                  const Row(
+                                    children: [
+                                      SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.2,
+                                          color: NorinPalette.emeraldLight,
+                                        ),
+                                      ),
+                                      SizedBox(width: 12),
+                                      Expanded(
+                                        child: Text(
+                                          "Telegram botda START tugmasini bosing — ilova avtomatik ulanadi...",
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700,
+                                            height: 1.35,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      if (_activeBotUrl != null)
+                                        TextButton.icon(
+                                          onPressed: () => NativeBridge.openExternalUrl(_activeBotUrl!),
+                                          icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                                          label: const Text("Telegramni ochish"),
+                                        ),
+                                      TextButton(
+                                        onPressed: _cancelTicketPolling,
+                                        child: const Text("Bekor qilish"),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ] else
+                            NeonPillButton(
+                              onPressed: _busy ? null : _startOneTapTelegram,
+                              busy: _busy,
+                              icon: Icons.telegram_rounded,
+                              label: "Telegram orqali 1-bosishda kirish",
+                            ),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              const Expanded(child: Divider()),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                child: Text(
+                                  "yoki botdagi kod bilan",
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: theme.colorScheme.onSurfaceVariant,
                                   ),
                                 ),
-                              ],
-                            ),
-                          ],
+                              ),
+                              const Expanded(child: Divider()),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _quickCodeCtrl,
+                                  enabled: !_busy,
+                                  keyboardType: TextInputType.number,
+                                  maxLength: 6,
+                                  textAlign: TextAlign.center,
+                                  style: tNumStyle.copyWith(
+                                    fontSize: 19,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 5,
+                                  ),
+                                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                                  decoration: const InputDecoration(
+                                    labelText: "6 xonali /apk kod",
+                                    hintText: "••••••",
+                                    counterText: "",
+                                    prefixIcon: Icon(Icons.key_rounded),
+                                  ),
+                                  onChanged: (v) {
+                                    if (v.trim().length == 6 && !_busy) {
+                                      _loginWithCodeOnly();
+                                    }
+                                  },
+                                  onSubmitted: (_) => _loginWithCodeOnly(),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              SizedBox(
+                                height: 52,
+                                child: FilledButton.tonal(
+                                  onPressed: _busy ? null : _loginWithCodeOnly,
+                                  child: const Text("Kirish", style: TextStyle(fontWeight: FontWeight.w800)),
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
@@ -252,9 +410,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       child: Column(
                         children: [
                           ListTile(
-                            leading: const Icon(Icons.dns_outlined, color: NorinPalette.emeraldLight),
+                            leading: const Icon(Icons.tune_rounded, color: NorinPalette.emeraldLight),
                             title: const Text(
-                              "Server manzili",
+                              "ID orqali kirish & Server manzili",
                               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
                             ),
                             subtitle: Text(
@@ -264,16 +422,70 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               style: const TextStyle(fontSize: 11.5),
                             ),
                             trailing: Icon(
-                              _showServerSettings ? Icons.expand_less : Icons.expand_more,
+                              _showAdvanced ? Icons.expand_less : Icons.expand_more,
                             ),
-                            onTap: () => setState(() => _showServerSettings = !_showServerSettings),
+                            onTap: () => setState(() => _showAdvanced = !_showAdvanced),
                           ),
-                          if (_showServerSettings)
+                          if (_showAdvanced)
                             Padding(
                               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
+                                  const Divider(),
+                                  const SizedBox(height: 12),
+                                  TextField(
+                                    controller: _tgCtrl,
+                                    enabled: !_busy && !_codeSent,
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                                    decoration: const InputDecoration(
+                                      labelText: "Telegram ID",
+                                      hintText: "Masalan: 5649321700",
+                                      prefixIcon: Icon(Icons.badge_outlined),
+                                    ),
+                                  ),
+                                  if (_codeSent) ...[
+                                    const SizedBox(height: 10),
+                                    TextField(
+                                      controller: _otpCtrl,
+                                      enabled: !_busy,
+                                      keyboardType: TextInputType.number,
+                                      maxLength: 6,
+                                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                                      decoration: const InputDecoration(
+                                        labelText: "6 xonali OTP kod",
+                                        counterText: "",
+                                        prefixIcon: Icon(Icons.lock_outline_rounded),
+                                      ),
+                                      onSubmitted: (_) => _verifyCode(),
+                                    ),
+                                  ],
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: FilledButton.tonal(
+                                          onPressed:
+                                              _busy ? null : (_codeSent ? _verifyCode : _requestCode),
+                                          child: Text(_codeSent ? "Kirish" : "Kod olish"),
+                                        ),
+                                      ),
+                                      if (_codeSent) ...[
+                                        const SizedBox(width: 8),
+                                        TextButton(
+                                          onPressed: (_busy || _resendSeconds > 0) ? null : _requestCode,
+                                          child: Text(_resendSeconds > 0 ? "$_resendSeconds s" : "Qayta"),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                  const SizedBox(height: 14),
+                                  const Text(
+                                    "Server manzili",
+                                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                                  ),
+                                  const SizedBox(height: 8),
                                   TextField(
                                     controller: _urlCtrl,
                                     keyboardType: TextInputType.url,
@@ -319,9 +531,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 12),
                     Text(
-                      "Telegram @norin_ai_hisobot botidagi /apk orqali ham kirish kodini olishingiz mumkin.",
+                      "Telegram @norin_ai_hisobot botida /apk yozib ham 6 xonali kod olishingiz mumkin.",
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodySmall?.copyWith(
                         fontSize: 11.5,

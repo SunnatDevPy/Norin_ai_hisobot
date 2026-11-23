@@ -1,4 +1,4 @@
-"""Telegram bot /apk panel for downloading the Android APK, getting OTP codes, and managing devices."""
+"""Telegram bot /apk panel and 1-tap deep-link login handler for Norin AI Android app."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from datetime import timedelta
 from typing import List, Optional, Tuple
 
 from aiogram import F, Router
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import desc, select
@@ -18,7 +18,16 @@ from api.security import hash_secret, make_otp
 from bot.ui_helpers import fast_edit, send_inline_panel
 from config import get_settings
 from database import session as db_session
-from database.crud import format_local_dt, get_raw_app_setting, now_utc, set_raw_app_setting
+from database.crud import (
+    evaluate_subscription_status,
+    format_local_dt,
+    get_raw_app_setting,
+    is_user_authorized,
+    now_utc,
+    resolve_user_tenant_id,
+    set_raw_app_setting,
+    to_utc_dt,
+)
 from database.models import ApiLoginCode, ApiSession
 
 router = Router(name="apk_link")
@@ -27,6 +36,26 @@ logger = logging.getLogger("norin_bot.apk_link")
 
 def _is_super_admin(user_id: Optional[int]) -> bool:
     return bool(user_id and user_id in get_settings().super_admin_id_list)
+
+
+async def _authorize_apk_bot_user(user_id: Optional[int]) -> Tuple[bool, str, str]:
+    """Return (allowed, tenant_name, denial_message) for any bot user."""
+    if not user_id:
+        return False, "", "🔒 Foydalanuvchi aniqlanmadi."
+    uid = int(user_id)
+    async with db_session.async_session_maker() as db:
+        tid = await resolve_user_tenant_id(db, user_id=uid, chat_type="private")
+        auth_ok = await is_user_authorized(db, uid, allow_group_anon=False, tenant_id=tid)
+        if not auth_ok:
+            return (
+                False,
+                "",
+                f"🔒 Sizga Norin AI tizimiga ruxsat berilmagan.\n🆔 Telegram ID: <code>{uid}</code>",
+            )
+        sub = await evaluate_subscription_status(db, tenant_id=tid)
+        if not sub.is_allowed and not _is_super_admin(uid):
+            return False, sub.state.tenant_name, "🔒 Filial obuna muddati tugagan yoki muzlatilgan."
+        return True, sub.state.tenant_name, ""
 
 
 async def _issue_bot_otp(telegram_id: int) -> str:
@@ -61,7 +90,7 @@ async def _list_active_sessions(telegram_id: int) -> List[ApiSession]:
         return list(res.scalars().all())
 
 
-def _apk_panel_kb(device_count: int) -> InlineKeyboardMarkup:
+def _apk_panel_kb(device_count: int, is_sa: bool = False) -> InlineKeyboardMarkup:
     pub_url = (get_settings().API_PUBLIC_URL or "").strip().rstrip("/")
     rows: List[List[InlineKeyboardButton]] = [
         [
@@ -90,7 +119,11 @@ def _apk_panel_kb(device_count: int) -> InlineKeyboardMarkup:
                 )
             ],
             [
-                InlineKeyboardButton(text="👑 Bosh panel", callback_data="sa:menu"),
+                *(
+                    [InlineKeyboardButton(text="👑 Bosh panel", callback_data="sa:menu")]
+                    if is_sa
+                    else []
+                ),
                 InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
             ],
         ]
@@ -98,7 +131,11 @@ def _apk_panel_kb(device_count: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _render_apk_home(user_id: int, code: Optional[str] = None) -> Tuple[str, InlineKeyboardMarkup]:
+async def _render_apk_home(
+    user_id: int,
+    tenant_name: str = "",
+    code: Optional[str] = None,
+) -> Tuple[str, InlineKeyboardMarkup]:
     settings = get_settings()
     if code is None:
         code = await _issue_bot_otp(user_id)
@@ -113,53 +150,114 @@ async def _render_apk_home(user_id: int, code: Optional[str] = None) -> Tuple[st
     )
     pub_url = (settings.API_PUBLIC_URL or "").strip().rstrip("/")
     url_line = f"\n🌐 Server: <code>{html.escape(pub_url)}</code>" if pub_url else ""
+    branch_line = f"\n🏢 Filial: <b>{html.escape(tenant_name)}</b>" if tenant_name else ""
     ttl = max(1, settings.API_OTP_TTL_MIN)
 
     text = (
         "📱 <b>Norin AI — Android APK & Kirish</b>\n"
-        "===============================\n"
+        "==============================="
+        f"{branch_line}\n"
         f"🆕 Versiya: <b>{html.escape(ver_label)}</b>\n"
         f"{size_line}\n"
-        f"🔑 Bir martalik kirish kodi ({ttl} daqiqa):\n\n"
+        f"🔑 Kirish kodi ({ttl} daqiqa — ID kiritish shart emas):\n\n"
         f"👉  <code>{code}</code>\n"
         f"{url_line}\n"
         "===============================\n"
         f"📲 Faol qurilmalar: <b>{len(sessions)} ta</b>\n\n"
-        "<i>Ilovani bir marta o'rnating — keyingi barcha yangilanishlar to'g'ridan-to'g'ri ilovaning o'zida avtomatik yuklab olinadi!</i>"
+        "<i>Ilovada «Telegram orqali 1-bosishda kirish» ni bosing yoki yuqoridagi 6 xonali kodni tering.</i>"
     )
-    return text, _apk_panel_kb(len(sessions))
+    return text, _apk_panel_kb(len(sessions), is_sa=_is_super_admin(user_id))
+
+
+@router.message(
+    StateFilter("*"),
+    CommandStart(deep_link=True),
+    F.chat.type == "private",
+    F.text.startswith("/start apk_"),
+)
+async def cmd_start_apk_ticket(message: Message, state: FSMContext) -> None:
+    """Approve a 1-tap APK deep-link login ticket when the user opens /start apk_<ticket>."""
+    uid = message.from_user.id if message.from_user else None
+    allowed, tenant_name, err_msg = await _authorize_apk_bot_user(uid)
+    if not allowed:
+        await message.answer(err_msg, parse_mode="HTML")
+        return
+    await state.clear()
+
+    raw_text = (message.text or "").strip()
+    ticket = raw_text.split("apk_", 1)[1].strip().split()[0]
+    approved = False
+    async with db_session.async_session_maker() as db:
+        row = await db.scalar(
+            select(ApiLoginCode)
+            .where(ApiLoginCode.code_hash == hash_secret(f"tkt:{ticket}"))
+            .order_by(desc(ApiLoginCode.id))
+            .limit(1)
+        )
+        if row is not None and not row.used and to_utc_dt(row.expires_at) >= now_utc():
+            if int(row.telegram_id) in (0, int(uid)):
+                row.telegram_id = int(uid)
+                await db.commit()
+                approved = True
+
+    backup_code = await _issue_bot_otp(int(uid))
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📱 APK & Qurilmalar", callback_data="apk:home")]
+        ]
+    )
+    if approved:
+        await message.answer(
+            "✅ <b>Norin AI ilovasiga kirish tasdiqlandi!</b>\n"
+            f"🏢 Filial: <b>{html.escape(tenant_name)}</b>\n\n"
+            "📲 <b>Endi Norin AI ilovasiga qayting</b> — ilova avtomatik ravishda tizimga kiradi.\n\n"
+            f"<i>Agar avtomatik kirmasa, ushbu kodni kiriting:</i> <code>{backup_code}</code>",
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
+    else:
+        await message.answer(
+            "⏳ <b>Kirish havolasi eskirgan yoki ishlatilgan.</b>\n\n"
+            "Ilovada <b>«Telegram orqali 1-bosishda kirish»</b> tugmasini qayta bosing "
+            f"yoki ushbu kodni tering: <code>{backup_code}</code>",
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
 
 
 @router.message(StateFilter("*"), Command("apk"), F.chat.type == "private")
 async def cmd_apk(message: Message, state: FSMContext) -> None:
-    """Super Admin /apk entry point showing APK download and OTP code."""
+    """Authorized /apk entry point showing APK download and OTP code."""
     uid = message.from_user.id if message.from_user else None
-    if not _is_super_admin(uid):
-        await message.answer("🔒 Mobil ilova (APK) hozircha faqat Super Admin uchun ochiq.")
+    allowed, tenant_name, err_msg = await _authorize_apk_bot_user(uid)
+    if not allowed:
+        await message.answer(err_msg, parse_mode="HTML")
         return
     await state.clear()
-    text, kb = await _render_apk_home(int(uid))
+    text, kb = await _render_apk_home(int(uid), tenant_name=tenant_name)
     await send_inline_panel(message, text, kb, delete_prev=False, force_hide_kb=True)
 
 
 @router.callback_query(F.data == "apk:home")
 async def cb_apk_home(cb: CallbackQuery) -> None:
     uid = cb.from_user.id if cb.from_user else None
-    if not _is_super_admin(uid):
-        await cb.answer("🔒 Faqat Super Admin uchun", show_alert=True)
+    allowed, tenant_name, err_msg = await _authorize_apk_bot_user(uid)
+    if not allowed:
+        await cb.answer(err_msg.replace("<b>", "").replace("</b>", ""), show_alert=True)
         return
-    text, kb = await _render_apk_home(int(uid))
+    text, kb = await _render_apk_home(int(uid), tenant_name=tenant_name)
     await fast_edit(cb, text, reply_markup=kb)
 
 
 @router.callback_query(F.data == "apk:new_code")
 async def cb_apk_new_code(cb: CallbackQuery) -> None:
     uid = cb.from_user.id if cb.from_user else None
-    if not _is_super_admin(uid):
-        await cb.answer("🔒 Faqat Super Admin uchun", show_alert=True)
+    allowed, tenant_name, _ = await _authorize_apk_bot_user(uid)
+    if not allowed:
+        await cb.answer("🔒 Ruxsat yo'q", show_alert=True)
         return
     code = await _issue_bot_otp(int(uid))
-    text, kb = await _render_apk_home(int(uid), code=code)
+    text, kb = await _render_apk_home(int(uid), tenant_name=tenant_name, code=code)
     await fast_edit(cb, text, reply_markup=kb, alert_text=f"🔑 Yangi kod: {code}")
 
 
@@ -167,8 +265,9 @@ async def cb_apk_new_code(cb: CallbackQuery) -> None:
 async def cb_apk_download_file(cb: CallbackQuery) -> None:
     """Send norin_ai.apk directly in Telegram chat using cached file_id when unchanged."""
     uid = cb.from_user.id if cb.from_user else None
-    if not _is_super_admin(uid):
-        await cb.answer("🔒 Faqat Super Admin uchun", show_alert=True)
+    allowed, _, _ = await _authorize_apk_bot_user(uid)
+    if not allowed:
+        await cb.answer("🔒 Ruxsat yo'q", show_alert=True)
         return
     settings = get_settings()
     pub_url = (settings.API_PUBLIC_URL or "").strip().rstrip("/")
@@ -198,9 +297,8 @@ async def cb_apk_download_file(cb: CallbackQuery) -> None:
     caption = (
         f"📱 <b>Norin AI Android — {html.escape(ver_label)}</b>\n\n"
         f"{url_line}"
-        f"👤 Telegram ID: <code>{uid}</code>\n"
         f"🔑 Kirish kodi (5 daqiqa): <code>{code}</code>\n\n"
-        "<i>APK ni telefoningizga o'rnatib, ID va kodni kiriting.</i>"
+        "<i>APK ni o'rnatib, «Telegram orqali 1-bosishda kirish» ni bosing yoki yuqoridagi kodni kiriting.</i>"
     )
 
     if not cb.message:
@@ -249,8 +347,9 @@ async def cb_apk_download_file(cb: CallbackQuery) -> None:
 @router.callback_query(F.data == "apk:devices")
 async def cb_apk_devices(cb: CallbackQuery, alert_text: Optional[str] = None) -> None:
     uid = cb.from_user.id if cb.from_user else None
-    if not _is_super_admin(uid):
-        await cb.answer("🔒 Faqat Super Admin uchun", show_alert=True)
+    allowed, _, _ = await _authorize_apk_bot_user(uid)
+    if not allowed:
+        await cb.answer("🔒 Ruxsat yo'q", show_alert=True)
         return
     sessions = await _list_active_sessions(int(uid))
     lines = ["📱 <b>Ulangan APK qurilmalari</b>\n"]
@@ -282,8 +381,9 @@ async def cb_apk_devices(cb: CallbackQuery, alert_text: Optional[str] = None) ->
 @router.callback_query(F.data.startswith("apk:revoke:"))
 async def cb_apk_revoke(cb: CallbackQuery) -> None:
     uid = cb.from_user.id if cb.from_user else None
-    if not _is_super_admin(uid):
-        await cb.answer("🔒 Faqat Super Admin uchun", show_alert=True)
+    allowed, _, _ = await _authorize_apk_bot_user(uid)
+    if not allowed:
+        await cb.answer("🔒 Ruxsat yo'q", show_alert=True)
         return
     raw_id = (cb.data or "").split(":")[-1]
     if not raw_id.isdigit():

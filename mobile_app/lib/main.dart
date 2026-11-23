@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/security/biometric_lock.dart';
 import 'core/state/providers.dart';
 import 'core/theme/app_theme.dart';
 import 'core/widgets/metric_cards.dart';
@@ -19,17 +20,49 @@ class NorinAiApp extends ConsumerStatefulWidget {
   ConsumerState<NorinAiApp> createState() => _NorinAiAppState();
 }
 
-class _NorinAiAppState extends ConsumerState<NorinAiApp> {
+class _NorinAiAppState extends ConsumerState<NorinAiApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(authProvider.notifier).bootstrap());
+    WidgetsBinding.instance.addObserver(this);
+    Future.microtask(() async {
+      await ref.read(biometricLockProvider.notifier).init();
+      await ref.read(authProvider.notifier).bootstrap();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final notifier = ref.read(biometricLockProvider.notifier);
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      notifier.onAppPaused();
+    } else if (state == AppLifecycleState.resumed) {
+      notifier.onAppResumed();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
+    final bioLock = ref.watch(biometricLockProvider);
     final themeMode = ref.watch(themeModeProvider);
+
+    Widget home;
+    if (auth.stage == AuthStage.loading) {
+      home = const _SplashView();
+    } else if (auth.stage == AuthStage.unauthenticated) {
+      home = const LoginScreen();
+    } else if (bioLock.locked) {
+      home = const BiometricLockScreen();
+    } else {
+      home = const MainShell();
+    }
 
     return MaterialApp(
       title: 'Norin AI Hisobot',
@@ -37,11 +70,7 @@ class _NorinAiAppState extends ConsumerState<NorinAiApp> {
       themeMode: themeMode,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
-      home: switch (auth.stage) {
-        AuthStage.loading => const _SplashView(),
-        AuthStage.unauthenticated => const LoginScreen(),
-        AuthStage.authenticated => const MainShell(),
-      },
+      home: home,
     );
   }
 }

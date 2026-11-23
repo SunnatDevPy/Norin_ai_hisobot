@@ -479,3 +479,86 @@ def test_apk_version_download_and_bot_apk_otp(tmp_path: Path, monkeypatch):
         assert ok.status_code == 200 and ok.json()["role"] == "super_admin"
 
     asyncio.run(_with_api(tmp_path, monkeypatch, _logic))
+
+
+def test_multitenant_idless_code_and_telegram_ticket_isolation(tmp_path: Path, monkeypatch):
+    from sqlalchemy import select
+    from api.security import hash_secret
+    from bot.handlers import apk_link
+    from database.crud import add_authorized_user, create_client, create_tenant
+    from database.models import ApiLoginCode
+
+    OWNER_TG = 888999111
+
+    async def _logic(client, sent, maker):
+        sa_h = auth(await login(client, sent))
+
+        # Super Admin creates Tenant #2 + adds Tenant #2 client + assigns OWNER_TG
+        async with maker() as db:
+            t2 = await create_tenant(db, "Samarqand Filiali", monthly_price=300_000, trial_days=15)
+            await add_authorized_user(
+                db, telegram_id=OWNER_TG, full_name="Samarqand Egasi", role="owner", tenant_id=t2.id
+            )
+            c2 = await create_client(db, "Samarqand Mijoz", opening_debt=250_000, tenant_id=t2.id)
+
+        # 1. ID-less 6-digit code login works for regular tenant user (without entering Telegram ID)
+        code = await apk_link._issue_bot_otp(OWNER_TG)
+        res = await client.post(
+            f"{PFX}/auth/login-code", json={"code": code, "device_name": "Tenant2 Phone"}
+        )
+        assert res.status_code == 200, res.text
+        t2_tokens = res.json()
+        assert t2_tokens["role"] == "owner" and t2_tokens["tenant_id"] == t2.id
+
+        # Same code cannot be reused
+        assert (
+            await client.post(f"{PFX}/auth/login-code", json={"code": code})
+        ).status_code == 400
+
+        # 2. Tenant isolation + Admin panel strictly blocked (403)
+        h2 = auth(t2_tokens)
+        assert (await client.get(f"{PFX}/admin/analytics", headers=h2)).status_code == 403
+        assert (await client.get(f"{PFX}/admin/tenants", headers=h2)).status_code == 403
+
+        # Even passing X-Tenant-Id: 1 is ignored for non-super-admin; sees ONLY Tenant #2 client
+        cl = (await client.get(f"{PFX}/clients", headers={**h2, "X-Tenant-Id": "1"})).json()
+        assert len(cl) == 1 and cl[0]["id"] == c2.id and cl[0]["name"] == "Samarqand Mijoz"
+
+        # Super Admin CAN still see Tenant #1 cleanly
+        cl1 = (await client.get(f"{PFX}/clients", headers=sa_h)).json()
+        assert all(x["name"] != "Samarqand Mijoz" for x in cl1)
+
+        # 3. 1-Click Telegram Deep-Link Ticket + Poll flow
+        tkt_resp = await client.post(f"{PFX}/auth/telegram-ticket", json={"device_name": "1Tap"})
+        assert tkt_resp.status_code == 200
+        tkt_data = tkt_resp.json()
+        ticket = tkt_data["ticket"]
+        assert f"start=apk_{ticket}" in tkt_data["bot_url"]
+
+        # Pending before user taps START in bot
+        p0 = (await client.post(f"{PFX}/auth/telegram-poll", json={"ticket": ticket})).json()
+        assert p0["status"] == "pending"
+
+        # Simulate bot /start apk_<ticket> approval by OWNER_TG
+        async with maker() as db:
+            row = await db.scalar(
+                select(ApiLoginCode).where(ApiLoginCode.code_hash == hash_secret(f"tkt:{ticket}"))
+            )
+            assert row is not None and row.telegram_id == 0
+            row.telegram_id = OWNER_TG
+            await db.commit()
+
+        p1 = (
+            await client.post(
+                f"{PFX}/auth/telegram-poll", json={"ticket": ticket, "device_name": "1Tap"}
+            )
+        ).json()
+        assert p1["status"] == "approved"
+        assert p1["role"] == "owner" and p1["tenant_id"] == t2.id
+        assert (await client.get(f"{PFX}/auth/me", headers=auth(p1))).json()["telegram_id"] == OWNER_TG
+
+        # Poll after consumption returns expired
+        p2 = (await client.post(f"{PFX}/auth/telegram-poll", json={"ticket": ticket})).json()
+        assert p2["status"] == "expired"
+
+    asyncio.run(_with_api(tmp_path, monkeypatch, _logic))

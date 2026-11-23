@@ -823,6 +823,7 @@ def settings_menu_kb(is_super_admin: bool = False) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="💎 Obuna holati", callback_data="sub:status"),
+            InlineKeyboardButton(text="📱 Mobil ilova (APK)", callback_data="apk:home"),
         ],
     ]
     if is_super_admin:

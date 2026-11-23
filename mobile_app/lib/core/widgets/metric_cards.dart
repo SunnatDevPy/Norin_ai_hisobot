@@ -448,13 +448,19 @@ class NeonPillButton extends StatelessWidget {
                   else if (icon != null)
                     Icon(icon, size: 19, color: const Color(0xFF1A0B2E)),
                   if (busy || icon != null) const SizedBox(width: 8),
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      color: Color(0xFF1A0B2E),
-                      fontSize: 15.5,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.1,
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        style: const TextStyle(
+                          color: Color(0xFF1A0B2E),
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.1,
+                        ),
+                      ),
                     ),
                   ),
                 ],
