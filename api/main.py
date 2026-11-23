@@ -9,8 +9,10 @@ from typing import AsyncIterator
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
 
+from api import apk_meta
 from api.routers import admin as admin_router
 from api.routers import auth as auth_router
 from api.routers import read as read_router
@@ -62,7 +64,42 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        return {"status": "ok"}
+        meta = apk_meta.get_apk_version_metadata()
+        return {
+            "status": "ok",
+            "service": "norin-api",
+            "apk_version": meta["version"],
+            "apk_build": meta["build"],
+        }
+
+    @app.get("/apk/version")
+    @app.get("/api/v1/apk/version")
+    async def get_apk_version() -> JSONResponse:
+        meta = apk_meta.get_apk_version_metadata()
+        return JSONResponse(
+            content={
+                **meta,
+                "download_path": "/download/norin_ai.apk",
+                "api_download_path": "/api/v1/download/norin_ai.apk",
+            },
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+
+    @app.get("/download/norin_ai.apk")
+    @app.get("/api/v1/download/norin_ai.apk")
+    async def download_apk_binary() -> FileResponse:
+        if not apk_meta.APK_BINARY_PATH.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail="APK fayli serverda topilmadi (data/norin_ai.apk)",
+            )
+        meta = apk_meta.get_apk_version_metadata()
+        return FileResponse(
+            apk_meta.APK_BINARY_PATH,
+            media_type="application/vnd.android.package-archive",
+            filename=f"Norin_AI_v{meta['version']}.apk",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     prefix = "/api/v1"
     app.include_router(auth_router.router, prefix=prefix)

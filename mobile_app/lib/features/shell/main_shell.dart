@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/state/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/update/app_updater.dart';
 import '../admin/admin_screen.dart';
 import '../cash/cash_screen.dart';
 import '../clients/clients_screen.dart';
@@ -12,11 +13,28 @@ import '../settings/settings_screen.dart';
 
 final shellTabIndexProvider = StateProvider<int>((ref) => 0);
 
-class MainShell extends ConsumerWidget {
+class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends ConsumerState<MainShell> {
+  bool _checkedUpdate = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_checkedUpdate || !mounted) return;
+      _checkedUpdate = true;
+      checkAndPromptUpdate(context, ref.read(apiClientProvider), silentIfLatest: true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
     final isAdmin = auth.isSuperAdmin;
     final rawIdx = ref.watch(shellTabIndexProvider);

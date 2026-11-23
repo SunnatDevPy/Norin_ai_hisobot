@@ -67,6 +67,7 @@ Norin ishlab chiqaruvchi sexlar va ulgurji go‘sht/oziq-ovqat yetkazib beruvchi
 | `/cancel` | Barcha foydalanuvchilar | Faol kiritish jarayonini (FSM) bekor qilish |
 | `/menu` | **Faqat Super Admin** | Filiallar, foydalanuvchilar, obuna va hisobot uchun tezkor boshqaruv menyusi |
 | `/superadmin` | **Faqat Super Admin** | Multi-Tenant SaaS boshqaruv paneli (`/supaeradmin` ham ishlaydi) |
+| `/apk` | **Faqat Super Admin** | Android APK faylini yuklab olish, 6 xonali OTP kod & qurilmalar boshqaruvi |
 | `/clear` | **Faqat Super Admin** | Tanlangan filial savdolarini yoki bazasini 0 dan tozalash |
 
 ---
@@ -159,15 +160,16 @@ docker compose logs -f norin-bot
 
 > Zaxira fayllari avtomatik ravishda `./data/backups/norin_YYYY-MM-DD_HHMM.sql.gz` ko‘rinishida saqlanadi va 14 kundan eskisi tozalanadi.
 
-### 3-usul: Android APK (`mobile_app/`) Yig‘ish
+### 3-usul: Android APK (`mobile_app/`) Yig‘ish va Avto-Yangilash
 
-```bash
-cd mobile_app
-flutter pub get
-flutter test
-flutter build apk --release
-# Tayyor fayl: mobile_app/build/app/outputs/flutter-apk/app-release.apk
+```powershell
+# Avto-versiya oshirish (1.0.1+2), analyze, test, release APK va VPS ga yuklash:
+.\build_apk.ps1 -Deploy
+# Yoki faqat lokal yig'ish:
+.\build_apk.ps1
 ```
+
+> Tayyor fayl `dist/norin_ai.apk` va `dist/apk_version.json` ko‘rinishida yig‘iladi. Serverga yuklangach, o‘rnatilgan ilova har ochilganda (`/apk/version`) yangilanishni avtomatik tekshirib, ilovaning o‘zida yuklab o‘rnatadi, hamda Telegram botdagi `/apk` orqali bir bosishda yuklab olish mumkin.
 
 ---
 
@@ -194,7 +196,7 @@ flutter build apk --release
 
 ## 🧪 Avtomatik Testlar
 
-Loyihada backend (28 ta Pytest testi: bot, DB, Excel, Super Admin va `norin-api`) hamda `mobile_app` Flutter widget testlari mavjud:
+Loyihada backend (29 ta Pytest testi: bot, DB, Excel, Super Admin va `norin-api`) hamda `mobile_app` Flutter widget testlari mavjud:
 
 ```bash
 # Backend + API testlari

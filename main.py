@@ -136,6 +136,7 @@ async def _configure_bot_commands(bot: Bot) -> None:
     super_cmds = [
         BotCommand(command="menu", description="Super Admin tezkor menyusi"),
         BotCommand(command="superadmin", description="Filiallar & Obuna boshqaruvi"),
+        BotCommand(command="apk", description="Android APK yuklab olish va kod"),
         BotCommand(command="clear", description="Tanlangan filial bazasini tozalash"),
         BotCommand(command="start", description="Asosiy menyu"),
         BotCommand(command="myid", description="Telegram ID"),

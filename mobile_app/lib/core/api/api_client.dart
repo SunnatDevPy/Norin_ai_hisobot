@@ -210,6 +210,19 @@ class ApiClient {
     return resp.data;
   }
 
+  Future<void> downloadWithProgress(
+    String path,
+    String savePath, {
+    void Function(int received, int total)? onReceiveProgress,
+  }) async {
+    await _dio.download(
+      path,
+      savePath,
+      onReceiveProgress: onReceiveProgress,
+      options: Options(receiveTimeout: const Duration(minutes: 5)),
+    );
+  }
+
   Future<File> downloadExcelFile(String path, String filename, {Map<String, dynamic>? query}) async {
     final dir = await getTemporaryDirectory();
     final safeName = filename.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');

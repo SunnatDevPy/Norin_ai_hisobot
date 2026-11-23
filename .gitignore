@@ -5,6 +5,7 @@
 
 # Databases & Runtime Data
 data/
+dist/
 *.db
 *.db-wal
 *.db-shm

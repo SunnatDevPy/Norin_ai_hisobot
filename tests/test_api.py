@@ -68,7 +68,8 @@ def auth(tokens: dict) -> dict:
 
 def test_auth_otp_flow_refresh_devices_and_logout(tmp_path: Path, monkeypatch):
     async def _logic(client, sent, maker):
-        assert (await client.get("/health")).json() == {"status": "ok"}
+        health = (await client.get("/health")).json()
+        assert health["status"] == "ok" and health["service"] == "norin-api"
 
         # Non-admin ID: same reply, but NO code is sent
         r = await client.post(f"{PFX}/auth/request-code", json={"telegram_id": 111})
@@ -428,5 +429,53 @@ def test_auth_brute_force_limits(tmp_path: Path, monkeypatch):
         await client.post(f"{PFX}/auth/request-code", json={"telegram_id": ADMIN_ID})
         r = await client.post(f"{PFX}/auth/request-code", json={"telegram_id": ADMIN_ID})
         assert r.status_code == 429
+
+    asyncio.run(_with_api(tmp_path, monkeypatch, _logic))
+
+
+def test_apk_version_download_and_bot_apk_otp(tmp_path: Path, monkeypatch):
+    import json
+    from api import apk_meta
+    from bot.handlers import apk_link
+
+    fake_apk = tmp_path / "norin_ai.apk"
+    fake_ver = tmp_path / "apk_version.json"
+    monkeypatch.setattr(apk_meta, "APK_BINARY_PATH", fake_apk)
+    monkeypatch.setattr(apk_meta, "APK_VERSION_PATH", fake_ver)
+
+    async def _logic(client, sent, maker):
+        # Missing binary -> apk_available=False, /download -> 404
+        v0 = await client.get("/apk/version")
+        assert v0.status_code == 200 and v0.json()["apk_available"] is False
+        assert (await client.get("/download/norin_ai.apk")).status_code == 404
+
+        # Present binary + metadata
+        payload = b"PK\x03\x04dummy-apk-binary"
+        fake_apk.write_bytes(payload)
+        fake_ver.write_text(
+            json.dumps({"version": "1.2.3", "build": 7, "full": "1.2.3+7", "built_at": "2026-11-23"}),
+            encoding="utf-8",
+        )
+        for vp in ("/apk/version", f"{PFX}/apk/version"):
+            vr = await client.get(vp)
+            assert vr.status_code == 200
+            body = vr.json()
+            assert body["apk_available"] is True
+            assert body["version"] == "1.2.3" and body["build"] == 7
+            assert body["size_bytes"] == len(payload)
+
+        for dp in ("/download/norin_ai.apk", f"{PFX}/download/norin_ai.apk"):
+            dr = await client.get(dp)
+            assert dr.status_code == 200 and dr.content == payload
+            assert "Norin_AI_v1.2.3.apk" in dr.headers["content-disposition"]
+
+        # Bot /apk OTP works end-to-end with /api/v1/auth/verify-code
+        bot_code = await apk_link._issue_bot_otp(ADMIN_ID)
+        assert len(bot_code) == 6 and bot_code.isdigit()
+        ok = await client.post(
+            f"{PFX}/auth/verify-code",
+            json={"telegram_id": ADMIN_ID, "code": bot_code, "device_name": "Bot APK"},
+        )
+        assert ok.status_code == 200 and ok.json()["role"] == "super_admin"
 
     asyncio.run(_with_api(tmp_path, monkeypatch, _logic))

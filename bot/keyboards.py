@@ -1278,6 +1278,9 @@ def superadmin_quick_menu_kb(tenant_id: int, tenant_count: int) -> InlineKeyboar
             ],
             [
                 InlineKeyboardButton(text="🧹 Baza tozalash", callback_data="sa:clear_menu"),
+                InlineKeyboardButton(text="📱 Android APK", callback_data="apk:home"),
+            ],
+            [
                 InlineKeyboardButton(text="🏠 Bosh menyu", callback_data="menu:home"),
             ],
         ]

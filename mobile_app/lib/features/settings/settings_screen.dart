@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/api_client.dart';
 import '../../core/state/providers.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/update/app_updater.dart';
 import '../../core/utils/formatters.dart';
+import '../../core/version.dart';
 import '../../core/widgets/metric_cards.dart';
 import '../../core/widgets/norin_widgets.dart';
 
@@ -353,6 +355,14 @@ class SettingsScreen extends ConsumerWidget {
                       if (m != null) ref.read(themeModeProvider.notifier).state = m;
                     },
                   ),
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.system_update_rounded, color: NorinPalette.emerald),
+                  title: const Text("Yangilanishni tekshirish"),
+                  subtitle: Text("Joriy versiya: v$kAppVersion (build #$kAppBuildNumber)"),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => checkAndPromptUpdate(context, api, silentIfLatest: false),
                 ),
                 const Divider(),
                 ListTile(

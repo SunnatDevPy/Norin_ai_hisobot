@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:norin_ai_app/core/theme/app_theme.dart';
+import 'package:norin_ai_app/core/update/app_updater.dart';
 import 'package:norin_ai_app/core/utils/formatters.dart';
+import 'package:norin_ai_app/core/version.dart';
 import 'package:norin_ai_app/features/auth/login_screen.dart';
 
 void main() {
@@ -14,6 +16,32 @@ void main() {
     expect(formatCompactUzs(450000), "450k");
     expect(formatKg(10.0), "10 kg");
     expect(formatKg(2.55, unit: 'dona'), "2.55 dona");
+  });
+
+  test('AppUpdateInfo compares build numbers cleanly', () {
+    final newer = AppUpdateInfo.fromJson({
+      'version': '9.9.9',
+      'build': kAppBuildNumber + 1,
+      'full': '9.9.9+${kAppBuildNumber + 1}',
+      'built_at': '2026-11-23',
+      'size_bytes': 50000000,
+      'apk_available': true,
+    });
+    expect(newer.hasUpdate, isTrue);
+
+    final same = AppUpdateInfo.fromJson({
+      'version': kAppVersion,
+      'build': kAppBuildNumber,
+      'apk_available': true,
+    });
+    expect(same.hasUpdate, isFalse);
+
+    final unavailable = AppUpdateInfo.fromJson({
+      'version': '9.9.9',
+      'build': kAppBuildNumber + 5,
+      'apk_available': false,
+    });
+    expect(unavailable.hasUpdate, isFalse);
   });
 
   testWidgets('LoginScreen renders Telegram ID input and server settings', (tester) async {

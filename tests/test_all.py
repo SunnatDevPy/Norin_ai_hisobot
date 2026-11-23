@@ -669,7 +669,7 @@ def test_app_imports_and_router_assembly():
     from bot.middlewares import SubscriptionMiddleware
 
     router = get_main_router()
-    assert len(router.sub_routers) == 4
+    assert len(router.sub_routers) == 5
     assert hasattr(main, "run_bot")
     assert hasattr(main, "subscription_watcher")
     assert SubscriptionMiddleware is not None
