@@ -456,9 +456,12 @@ class NeonPillButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = onPressed != null && !busy;
-    return Opacity(
-      opacity: enabled ? 1.0 : 0.65,
-      child: Container(
+    return PressableScale(
+      enabled: enabled,
+      scaleFactor: 0.96,
+      child: Opacity(
+        opacity: enabled ? 1.0 : 0.65,
+        child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(999),
           gradient: NorinPalette.neonPurpleGradient,
@@ -509,6 +512,7 @@ class NeonPillButton extends StatelessWidget {
                   ),
                 ],
               ),
+              ),
             ),
           ),
         ),
@@ -543,8 +547,11 @@ class KpiCardTile extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final useSpotlight = highlight || color == NorinPalette.emerald;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
+    return PressableScale(
+      enabled: onTap != null,
+      scaleFactor: 0.97,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
       child: Material(
         color: isDark
             ? (useSpotlight ? const Color(0xFF171324) : NorinPalette.darkCard)
@@ -660,6 +667,7 @@ class KpiCardTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }

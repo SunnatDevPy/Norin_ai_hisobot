@@ -155,4 +155,36 @@ void main() {
     expect(dockNoBar, 108);
     expect(screenNoBar, 24);
   });
+
+  testWidgets('PressableScale animates on press/release and fires callback', (tester) async {
+    bool tapped = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: PressableScale(
+              scaleFactor: 0.90,
+              onTap: () => tapped = true,
+              child: const SizedBox(
+                width: 120,
+                height: 48,
+                child: Center(child: Text('Bosish')),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final gesture = await tester.startGesture(tester.getCenter(find.text('Bosish')));
+    await tester.pump(const Duration(milliseconds: 120));
+    final animatedDown = tester.widget<AnimatedScale>(find.byType(AnimatedScale));
+    expect(animatedDown.scale, 0.90);
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+    final animatedUp = tester.widget<AnimatedScale>(find.byType(AnimatedScale));
+    expect(animatedUp.scale, 1.0);
+    expect(tapped, isTrue);
+  });
 }

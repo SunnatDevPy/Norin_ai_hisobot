@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/state/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/update/app_updater.dart';
 import '../../core/widgets/metric_cards.dart';
+import '../../core/widgets/norin_widgets.dart';
 import '../cash/cash_screen.dart';
 import '../clients/clients_screen.dart';
 import '../dashboard/dashboard_screen.dart';
@@ -61,7 +63,14 @@ class _MainShellState extends ConsumerState<MainShell> {
       extendBody: true,
       backgroundColor: Colors.transparent,
       body: CosmicBackground(
-        child: IndexedStack(index: idx, children: pages),
+        child: TweenAnimationBuilder<double>(
+          key: ValueKey('tab_$idx'),
+          tween: Tween(begin: 0.94, end: 1.0),
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          builder: (_, v, child) => Opacity(opacity: v, child: child),
+          child: IndexedStack(index: idx, children: pages),
+        ),
       ),
       bottomNavigationBar: _FloatingGlassDock(
         items: navItems,
@@ -160,36 +169,71 @@ class _FloatingGlassDock extends StatelessWidget {
   }
 }
 
-class _CenterCircularAiButton extends StatelessWidget {
+class _CenterCircularAiButton extends StatefulWidget {
   const _CenterCircularAiButton({required this.onTap});
 
   final VoidCallback onTap;
 
   @override
+  State<_CenterCircularAiButton> createState() => _CenterCircularAiButtonState();
+}
+
+class _CenterCircularAiButtonState extends State<_CenterCircularAiButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _glowCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _glowCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _glowCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 62,
-        height: 62,
-        padding: const EdgeInsets.all(3.5),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: isDark ? const Color(0xFF151421) : Colors.white,
-          border: Border.all(
-            color: NorinPalette.magenta.withValues(alpha: 0.55),
-            width: 1.4,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: NorinPalette.emerald.withValues(alpha: 0.55),
-              blurRadius: 20,
-              spreadRadius: 1,
-              offset: const Offset(0, 5),
+    return PressableScale(
+      scaleFactor: 0.90,
+      haptic: false,
+      onTap: () {
+        HapticFeedback.mediumImpact();
+        widget.onTap();
+      },
+      child: AnimatedBuilder(
+        animation: _glowCtrl,
+        builder: (context, child) {
+          final t = Curves.easeInOut.transform(_glowCtrl.value);
+          return Container(
+            width: 62,
+            height: 62,
+            padding: const EdgeInsets.all(3.5),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isDark ? const Color(0xFF151421) : Colors.white,
+              border: Border.all(
+                color: NorinPalette.magenta.withValues(alpha: 0.45 + t * 0.25),
+                width: 1.4,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: NorinPalette.emerald.withValues(alpha: 0.42 + t * 0.26),
+                  blurRadius: 16 + t * 10,
+                  spreadRadius: t * 1.5,
+                  offset: const Offset(0, 5),
+                ),
+              ],
             ),
-          ],
-        ),
+            child: child,
+          );
+        },
         child: Container(
           decoration: const BoxDecoration(
             shape: BoxShape.circle,
@@ -242,52 +286,64 @@ class _DockButton extends StatelessWidget {
     final activeCol = isDark ? NorinPalette.emeraldLight : NorinPalette.emeraldDark;
     final mutedCol = isDark ? NorinPalette.darkMuted : NorinPalette.lightMuted;
 
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          gradient: selected
-              ? LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    NorinPalette.emerald.withValues(alpha: isDark ? 0.28 : 0.16),
-                    NorinPalette.indigo.withValues(alpha: isDark ? 0.10 : 0.05),
-                  ],
-                )
-              : null,
-          border: selected
-              ? Border.all(color: activeCol.withValues(alpha: 0.45), width: 1)
-              : null,
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              selected ? activeIcon : icon,
-              size: 20,
-              color: selected ? activeCol : mutedCol,
-            ),
-            const SizedBox(height: 2),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                label,
-                maxLines: 1,
-                softWrap: false,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  color: selected ? (isDark ? Colors.white : activeCol) : mutedCol,
+    return PressableScale(
+      scaleFactor: 0.94,
+      haptic: false,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        borderRadius: BorderRadius.circular(18),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: selected
+                ? LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      NorinPalette.emerald.withValues(alpha: isDark ? 0.28 : 0.16),
+                      NorinPalette.indigo.withValues(alpha: isDark ? 0.10 : 0.05),
+                    ],
+                  )
+                : null,
+            border: selected
+                ? Border.all(color: activeCol.withValues(alpha: 0.45), width: 1)
+                : null,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AnimatedScale(
+                scale: selected ? 1.12 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutBack,
+                child: Icon(
+                  selected ? activeIcon : icon,
+                  size: 20,
+                  color: selected ? activeCol : mutedCol,
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 2),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: selected ? (isDark ? Colors.white : activeCol) : mutedCol,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

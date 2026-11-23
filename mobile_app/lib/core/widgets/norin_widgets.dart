@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api/api_client.dart';
 import '../theme/app_theme.dart';
@@ -9,11 +10,37 @@ import '../theme/app_theme.dart';
 const tNumStyle = TextStyle(fontFeatures: [FontFeature.tabularFigures()]);
 
 void showSnack(BuildContext context, String msg, {bool error = false}) {
+  if (error) {
+    HapticFeedback.mediumImpact();
+  } else {
+    HapticFeedback.lightImpact();
+  }
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(
       SnackBar(
-        content: Text(msg),
+        content: Row(
+          children: [
+            TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0.4, end: 1.0),
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.elasticOut,
+              builder: (_, v, child) => Transform.scale(scale: v, child: child),
+              child: Icon(
+                error ? Icons.error_outline_rounded : Icons.check_circle_rounded,
+                color: Colors.white,
+                size: 19,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                msg,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
         behavior: SnackBarBehavior.floating,
         backgroundColor: error ? NorinPalette.danger : NorinPalette.emeraldDark,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -216,4 +243,63 @@ double dockBottomClearance(BuildContext context) {
 /// Dynamic bottom padding for standalone screens & modal bottom sheets.
 double screenBottomClearance(BuildContext context, {double extra = 24}) {
   return extra + MediaQuery.viewPaddingOf(context).bottom;
+}
+
+class PressableScale extends StatefulWidget {
+  const PressableScale({
+    super.key,
+    required this.child,
+    this.scaleFactor = 0.95,
+    this.enabled = true,
+    this.haptic = true,
+    this.onTap,
+  });
+
+  final Widget child;
+  final double scaleFactor;
+  final bool enabled;
+  final bool haptic;
+  final VoidCallback? onTap;
+
+  @override
+  State<PressableScale> createState() => _PressableScaleState();
+}
+
+class _PressableScaleState extends State<PressableScale> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed != value && mounted) {
+      setState(() => _pressed = value);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: widget.enabled
+          ? (_) {
+              if (widget.haptic) HapticFeedback.lightImpact();
+              _setPressed(true);
+            }
+          : null,
+      onPointerUp: (_) => _setPressed(false),
+      onPointerCancel: (_) => _setPressed(false),
+      child: AnimatedScale(
+        scale: (widget.enabled && _pressed) ? widget.scaleFactor : 1.0,
+        duration: const Duration(milliseconds: 110),
+        curve: Curves.easeOutCubic,
+        child: widget.child,
+      ),
+    );
+    if (widget.onTap != null && widget.enabled) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: content,
+      );
+    }
+    return content;
+  }
 }

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/state/providers.dart';
@@ -119,6 +120,7 @@ class DashboardScreen extends ConsumerWidget {
             tooltip: "Mavzu (Oq/Qora)",
             icon: isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
             onPressed: () {
+              HapticFeedback.selectionClick();
               final next = isDark ? ThemeMode.light : ThemeMode.dark;
               ref.read(themeModeProvider.notifier).state = next;
             },
@@ -196,7 +198,10 @@ class DashboardScreen extends ConsumerWidget {
                         final (key, label) = _periods[i];
                         final selected = key == period;
                         return InkWell(
-                          onTap: () => ref.read(selectedPeriodProvider.notifier).state = key,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            ref.read(selectedPeriodProvider.notifier).state = key;
+                          },
                           borderRadius: BorderRadius.circular(12),
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 160),
@@ -581,20 +586,30 @@ class _GlassCircleAction extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Tooltip(
       message: tooltip,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(999),
-        child: Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: isDark ? NorinPalette.darkCardElevated : NorinPalette.lightCard,
-            border: Border.all(
-              color: isDark ? NorinPalette.darkBorder : NorinPalette.lightBorder,
+      child: PressableScale(
+        scaleFactor: 0.90,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isDark ? NorinPalette.darkCardElevated : NorinPalette.lightCard,
+              border: Border.all(
+                color: isDark ? NorinPalette.darkBorder : NorinPalette.lightBorder,
+              ),
+            ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 280),
+              transitionBuilder: (child, anim) => RotationTransition(
+                turns: Tween(begin: 0.75, end: 1.0).animate(anim),
+                child: ScaleTransition(scale: anim, child: child),
+              ),
+              child: Icon(icon, key: ValueKey(icon), size: 19),
             ),
           ),
-          child: Icon(icon, size: 19),
         ),
       ),
     );

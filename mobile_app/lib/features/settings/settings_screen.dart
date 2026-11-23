@@ -296,14 +296,20 @@ class SettingsScreen extends ConsumerWidget {
                           title: const Text("Avto-tasdiq", style: TextStyle(fontWeight: FontWeight.w600)),
                           subtitle: const Text("Chekni darhol saqlash"),
                           value: se['auto_confirm'] == true,
-                          onChanged: (v) => _patchSetting(context, ref, {'auto_confirm': v}),
+                          onChanged: (v) {
+                            HapticFeedback.selectionClick();
+                            _patchSetting(context, ref, {'auto_confirm': v});
+                          },
                         ),
                         const Divider(),
                         SwitchListTile(
                           title: const Text("Guruh avto-hisob", style: TextStyle(fontWeight: FontWeight.w600)),
                           subtitle: const Text("Guruh rasmlarini hisoblash"),
                           value: se['group_auto_calc'] == true,
-                          onChanged: (v) => _patchSetting(context, ref, {'group_auto_calc': v}),
+                          onChanged: (v) {
+                            HapticFeedback.selectionClick();
+                            _patchSetting(context, ref, {'group_auto_calc': v});
+                          },
                         ),
                         const Divider(),
                         Padding(
@@ -430,6 +436,7 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   value: bioLock.enabled,
                   onChanged: (v) async {
+                    HapticFeedback.selectionClick();
                     final ok = await ref
                         .read(biometricLockProvider.notifier)
                         .setBiometricEnabled(v);

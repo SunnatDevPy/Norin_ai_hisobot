@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -195,6 +196,7 @@ class BiometricLockScreen extends ConsumerStatefulWidget {
 class _BiometricLockScreenState extends ConsumerState<BiometricLockScreen> {
   String _pin = '';
   bool _authenticating = false;
+  int _shakeNonce = 0;
 
   @override
   void initState() {
@@ -218,7 +220,10 @@ class _BiometricLockScreenState extends ConsumerState<BiometricLockScreen> {
       if (!ok) {
         HapticFeedback.heavyImpact();
         showSnack(context, "PIN-kod noto'g'ri", error: true);
-        setState(() => _pin = '');
+        setState(() {
+          _pin = '';
+          _shakeNonce++;
+        });
       }
     }
   }
@@ -261,38 +266,55 @@ class _BiometricLockScreenState extends ConsumerState<BiometricLockScreen> {
                       Builder(
                         builder: (context) {
                           final isDark = Theme.of(context).brightness == Brightness.dark;
-                          return Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: List.generate(4, (i) {
-                              final filled = i < _pin.length;
-                              return Container(
-                                width: 16,
-                                height: 16,
-                                margin: const EdgeInsets.symmetric(horizontal: 10),
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: filled
-                                      ? (isDark ? NorinPalette.emeraldLight : NorinPalette.emeraldDark)
-                                      : Colors.transparent,
-                                  border: Border.all(
-                                    color: filled
-                                        ? NorinPalette.magenta
-                                        : (isDark
-                                            ? NorinPalette.darkBorderGlow
-                                            : NorinPalette.emeraldDark.withValues(alpha: 0.45)),
-                                    width: 1.8,
+                          return TweenAnimationBuilder<double>(
+                            key: ValueKey('pin_shake_$_shakeNonce'),
+                            tween: Tween(begin: 0, end: _shakeNonce == 0 ? 0 : 1),
+                            duration: const Duration(milliseconds: 360),
+                            builder: (context, v, child) => Transform.translate(
+                              offset: Offset(math.sin(v * math.pi * 4) * (1 - v) * 12, 0),
+                              child: child,
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: List.generate(4, (i) {
+                                final filled = i < _pin.length;
+                                return AnimatedScale(
+                                  scale: filled ? 1.15 : 1.0,
+                                  duration: const Duration(milliseconds: 140),
+                                  curve: Curves.easeOutBack,
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 150),
+                                    width: 16,
+                                    height: 16,
+                                    margin: const EdgeInsets.symmetric(horizontal: 10),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: filled
+                                          ? (isDark
+                                              ? NorinPalette.emeraldLight
+                                              : NorinPalette.emeraldDark)
+                                          : Colors.transparent,
+                                      border: Border.all(
+                                        color: filled
+                                            ? NorinPalette.magenta
+                                            : (isDark
+                                                ? NorinPalette.darkBorderGlow
+                                                : NorinPalette.emeraldDark.withValues(alpha: 0.45)),
+                                        width: 1.8,
+                                      ),
+                                      boxShadow: filled
+                                          ? [
+                                              BoxShadow(
+                                                color: NorinPalette.emerald.withValues(alpha: 0.6),
+                                                blurRadius: 10,
+                                              ),
+                                            ]
+                                          : null,
+                                    ),
                                   ),
-                                  boxShadow: filled
-                                      ? [
-                                          BoxShadow(
-                                            color: NorinPalette.emerald.withValues(alpha: 0.6),
-                                            blurRadius: 10,
-                                          ),
-                                        ]
-                                      : null,
-                                ),
-                              );
-                            }),
+                                );
+                              }),
+                            ),
                           );
                         },
                       ),

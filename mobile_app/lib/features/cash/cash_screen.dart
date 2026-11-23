@@ -358,37 +358,52 @@ class _CashScreenState extends ConsumerState<CashScreen> {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    FilledButton.tonalIcon(
-                      onPressed: () => _addCashTxDialog('expense'),
-                      icon: const Icon(Icons.remove_circle_outline, color: NorinPalette.danger),
-                      label: const Text("Xarajat"),
+                    PressableScale(
+                      scaleFactor: 0.94,
+                      child: FilledButton.tonalIcon(
+                        onPressed: () => _addCashTxDialog('expense'),
+                        icon: const Icon(Icons.remove_circle_outline, color: NorinPalette.danger),
+                        label: const Text("Xarajat"),
+                      ),
                     ),
-                    FilledButton.tonalIcon(
-                      onPressed: () => _addCashTxDialog('main_in'),
-                      icon: const Icon(Icons.add_circle_outline, color: NorinPalette.profit),
-                      label: const Text("Kirim"),
+                    PressableScale(
+                      scaleFactor: 0.94,
+                      child: FilledButton.tonalIcon(
+                        onPressed: () => _addCashTxDialog('main_in'),
+                        icon: const Icon(Icons.add_circle_outline, color: NorinPalette.profit),
+                        label: const Text("Kirim"),
+                      ),
                     ),
-                    OutlinedButton.icon(
-                      onPressed: () => _addCashTxDialog('kassa_debt'),
-                      icon: const Icon(Icons.account_balance_outlined),
-                      label: const Text("Kassa qarz"),
+                    PressableScale(
+                      scaleFactor: 0.94,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _addCashTxDialog('kassa_debt'),
+                        icon: const Icon(Icons.account_balance_outlined),
+                        label: const Text("Kassa qarz"),
+                      ),
                     ),
-                    OutlinedButton.icon(
-                      onPressed: () => _addCashTxDialog('kassa_repay'),
-                      icon: const Icon(Icons.keyboard_return_rounded),
-                      label: const Text("Qaytarish"),
+                    PressableScale(
+                      scaleFactor: 0.94,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _addCashTxDialog('kassa_repay'),
+                        icon: const Icon(Icons.keyboard_return_rounded),
+                        label: const Text("Qaytarish"),
+                      ),
                     ),
                     if (!isClosed)
-                      FilledButton.icon(
-                        onPressed: () => openCloseDayDialog(
-                          context,
-                          ref,
-                          sessionId: asInt(session['id']),
-                          reportDate: asStr(session['report_date']),
-                          expectedCash: expected,
+                      PressableScale(
+                        scaleFactor: 0.94,
+                        child: FilledButton.icon(
+                          onPressed: () => openCloseDayDialog(
+                            context,
+                            ref,
+                            sessionId: asInt(session['id']),
+                            reportDate: asStr(session['report_date']),
+                            expectedCash: expected,
+                          ),
+                          icon: const Icon(Icons.lock_clock_outlined),
+                          label: const Text("Kunni yakunlash"),
                         ),
-                        icon: const Icon(Icons.lock_clock_outlined),
-                        label: const Text("Kunni yakunlash"),
                       )
                     else
                       OutlinedButton.icon(
@@ -437,14 +452,19 @@ class _CashScreenState extends ConsumerState<CashScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (_segment == 0)
-                  _buildSalesList(sales)
-                else if (_segment == 1)
-                  _buildPaymentsList(payments)
-                else if (_segment == 2)
-                  _buildReturnsList(returns)
-                else
-                  _buildTxList(txs),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: KeyedSubtree(
+                    key: ValueKey(_segment),
+                    child: _segment == 0
+                        ? _buildSalesList(sales)
+                        : _segment == 1
+                            ? _buildPaymentsList(payments)
+                            : _segment == 2
+                                ? _buildReturnsList(returns)
+                                : _buildTxList(txs),
+                  ),
+                ),
               ],
             );
           },
