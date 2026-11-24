@@ -150,12 +150,10 @@ class SubscriptionMiddleware(BaseMiddleware):
                 else f"⏰ Muddati tugagan ({exp_str})"
             )
             msg_text = (
-                "🔒 <b>Bot obunasi faol emas!</b>\n\n"
-                f"🏢 Sex: <b>{html.escape(sub.tenant_name)}</b> (#{sub.id})\n"
-                f"📦 Tarif: <b>{html.escape(sub.plan_name)}</b>\n"
-                f"💳 Oylik to'lov: <b>{format_uzs(sub.monthly_price)} so'm</b>\n"
+                "🔒 <b>Obuna faol emas!</b>\n\n"
+                f"🏪 Do'kon: <b>{html.escape(sub.tenant_name)}</b>\n"
+                f"📦 Tarif: <b>{html.escape(sub.plan_name)}</b> ({format_uzs(sub.monthly_price)} so'm/oy)\n"
                 f"📌 Holat: {status_label}\n\n"
-                f"Davom ettirish uchun to'lovni amalga oshiring va quyidagi tugmani bosing.\n"
                 f"📞 Aloqa: <b>{html.escape(sub.owner_contact)}</b>"
             )
 

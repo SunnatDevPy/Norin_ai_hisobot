@@ -62,28 +62,41 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
   Future<void> _createTenantDialog() async {
     final nameCtrl = TextEditingController();
     final priceCtrl = TextEditingController(text: '300000');
-    final daysCtrl = TextEditingController(text: '14');
+    final daysCtrl = TextEditingController(text: '30');
+    final ownerTgCtrl = TextEditingController();
+    final ownerNameCtrl = TextEditingController();
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Yangi Filial / Tenant"),
+        title: const Text("Yangi do'kon"),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Filial nomi *")),
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Do'kon nomi *")),
               const SizedBox(height: 10),
               TextField(
                 controller: priceCtrl,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Oylik narxi (so'm)"),
+                decoration: const InputDecoration(labelText: "Oylik narx (so'm)"),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: daysCtrl,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Sinov (trial) kunlari"),
+                decoration: const InputDecoration(labelText: "Sinov kunlari"),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: ownerTgCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: "Egasi Telegram ID (ixtiyoriy)"),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: ownerNameCtrl,
+                decoration: const InputDecoration(labelText: "Egasi ismi (ixtiyoriy)"),
               ),
             ],
           ),
@@ -97,21 +110,37 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
     if (ok != true) return;
     final name = nameCtrl.text.trim();
     if (name.isEmpty) {
-      if (mounted) showSnack(context, "Filial nomini kiriting", error: true);
+      if (mounted) showSnack(context, "Do'kon nomini kiriting", error: true);
       return;
     }
     try {
-      await ref.read(apiClientProvider).post(
-        '/admin/tenants',
-        data: {
-          'tenant_name': name,
-          'monthly_price': double.tryParse(priceCtrl.text.trim()) ?? 300000,
-          'trial_days': int.tryParse(daysCtrl.text.trim()) ?? 14,
-        },
+      final api = ref.read(apiClientProvider);
+      final created = asMap(
+        await api.post(
+          '/admin/tenants',
+          data: {
+            'tenant_name': name,
+            'monthly_price': double.tryParse(priceCtrl.text.trim()) ?? 300000,
+            'trial_days': int.tryParse(daysCtrl.text.trim()) ?? 30,
+          },
+        ),
       );
+      final newTid = asInt(created['id']);
+      final ownerTg = int.tryParse(ownerTgCtrl.text.trim());
+      if (newTid > 0 && ownerTg != null && ownerTg > 0) {
+        await api.post(
+          '/admin/users',
+          data: {
+            'telegram_id': ownerTg,
+            'full_name': ownerNameCtrl.text.trim(),
+            'role': 'owner',
+            'tenant_id': newTid,
+          },
+        );
+      }
       ref.invalidate(adminTenantsProvider);
       ref.invalidate(adminAnalyticsProvider);
-      if (mounted) showSnack(context, "Filial \"$name\" yaratildi");
+      if (mounted) showSnack(context, "Do'kon \"$name\" yaratildi");
     } catch (e) {
       if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
     }
@@ -125,8 +154,8 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
     }
     final yes = await showConfirmDialog(
       context,
-      title: "Barchaga xabar yuborish",
-      message: "Bu xabar barcha faol Telegram foydalanuvchilariga yuborilsinmi?",
+      title: "Barchaga e'lon",
+      message: "Xabar barcha faol foydalanuvchilarga yuborilsinmi?",
       confirmLabel: "Yuborish",
     );
     if (!yes) return;
@@ -140,7 +169,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
       if (mounted) {
         showSnack(
           context,
-          "Yuborildi: ${asInt(res['sent'])} ta • Xato: ${asInt(res['failed'])} ta",
+          "Yuborildi: ${asInt(res['sent'])} / ${asInt(res['total'])} ta",
         );
       }
     } catch (e) {
@@ -205,14 +234,16 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
               data: (an) {
                 final mrr = asDouble(an['paying_mrr']);
                 final totalTenants = asInt(an['total_tenants']);
-                final activeT = asInt(an['active_tenants']);
-                final trialT = asInt(an['trial_tenants']);
-                final expT = asInt(an['expired_tenants']);
-                final suspT = asInt(an['suspended_tenants']);
-                final col30 = asDouble(an['collected_30d'] ?? an['revenue_30d']);
-                final colAll = asDouble(an['collected_all'] ?? an['total_collected']);
-                final aiCalls = asInt(an['ai_calls_30d']);
-                final aiTokens = asInt(an['ai_tokens_30d']);
+                final payingT = asInt(an['paying_tenants']);
+                final sc = asMap(an['status_counts']);
+                final aiG = asMap(an['ai_global']);
+                final activeT = asInt(sc['active']) + asInt(sc['expiring']) + asInt(sc['grace']);
+                final expT = asInt(sc['expired']);
+                final suspT = asInt(sc['suspended']);
+                final col30 = asDouble(an['collected_30d']);
+                final colAll = asDouble(an['collected_all']);
+                final aiCalls = asInt(aiG['total_calls']);
+                final aiTokens = asInt(aiG['total_tokens']);
 
                 return ListView(
                   padding: EdgeInsets.fromLTRB(
@@ -231,17 +262,18 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            "OYLIK MRR (FAOL OBUNALAR)",
+                            "OYLIK MRR ($payingT PULLIK DO'KON)",
                             style: TextStyle(
                               color: Theme.of(context).colorScheme.onSurfaceVariant,
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              letterSpacing: 0.7,
+                              letterSpacing: 0.6,
                             ),
                           ),
                           const SizedBox(height: 6),
-                          Text(
-                            formatUzs(mrr),
+                          AnimatedCountText(
+                            value: mrr,
+                            formatter: formatUzs,
                             style: tNumStyle.copyWith(
                               fontSize: 28,
                               fontWeight: FontWeight.w900,
@@ -249,7 +281,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                           ),
                           const SizedBox(height: 10),
                           Text(
-                            "Jami filiallar: $totalTenants  •  Faol: $activeT  •  Sinov: $trialT  •  Muddati tugagan: $expT  •  Muzlatilgan: $suspT",
+                            "Jami: $totalTenants • Faol: $activeT • Tugagan: $expT • Blok: $suspT",
                             style: TextStyle(
                               color: Theme.of(context).colorScheme.onSurfaceVariant,
                               fontSize: 12,
@@ -270,6 +302,8 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                         KpiCardTile(
                           title: "30 kunlik yig'im",
                           value: formatCompactUzs(col30),
+                          numericValue: col30,
+                          valueFormatter: formatCompactUzs,
                           subtitle: formatUzs(col30),
                           icon: Icons.payments_outlined,
                           color: NorinPalette.profit,
@@ -277,6 +311,8 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                         KpiCardTile(
                           title: "Jami SaaS tushumi",
                           value: formatCompactUzs(colAll),
+                          numericValue: colAll,
+                          valueFormatter: formatCompactUzs,
                           subtitle: formatUzs(colAll),
                           icon: Icons.account_balance_rounded,
                           color: NorinPalette.indigo,
@@ -284,13 +320,13 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                         KpiCardTile(
                           title: "AI so'rovlar (30k)",
                           value: "$aiCalls ta",
-                          subtitle: "Barcha filiallar",
+                          subtitle: "Jami: ${asInt(an['total_sales'])} sotuv",
                           icon: Icons.auto_awesome_rounded,
                           color: NorinPalette.emerald,
                         ),
                         KpiCardTile(
                           title: "AI Tokenlar (30k)",
-                          value: formatCompactUzs(aiTokens).replaceAll(' ', ''),
+                          value: formatCompactUzs(aiTokens.toDouble()).replaceAll(' ', ''),
                           subtitle: "$aiTokens token",
                           icon: Icons.memory_rounded,
                           color: NorinPalette.amber,
@@ -328,7 +364,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                     icon: const Icon(Icons.add_business_rounded),
                     label: const Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text("Yangi filial yaratish"),
+                      child: Text("Yangi do'kon qo'shish"),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -341,7 +377,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                         invalidateOperationalData(ref);
                         ref.read(shellTabIndexProvider.notifier).state = 0;
                         if (context.mounted) {
-                          showSnack(context, "Faol filial: ${asStr(t['tenant_name'] ?? t['name'])}");
+                          showSnack(context, "Tanlandi: ${asStr(t['tenant_name'] ?? t['name'])}");
                           if (Navigator.canPop(context)) {
                             Navigator.pop(context);
                           }
@@ -434,13 +470,20 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
                         ListTile(
                           dense: true,
                           title: Text(
-                            "${asStr(_auditLogs![i]['action'])} (Filial #${_auditLogs![i]['target_tenant_id'] ?? '-'})",
+                            asStr(_auditLogs![i]['action']),
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           subtitle: Text(
-                            "${asStr(_auditLogs![i]['detail'])}\n${formatLocalDateTime(asStr(_auditLogs![i]['created_at']))}",
+                            [
+                              if (asStr(_auditLogs![i]['detail']).isNotEmpty)
+                                asStr(_auditLogs![i]['detail']),
+                              formatLocalDateTime(asStr(_auditLogs![i]['created_at'])),
+                            ].join(" • "),
                           ),
-                          trailing: Text("#${_auditLogs![i]['actor_telegram_id']}", style: const TextStyle(fontSize: 11)),
+                          trailing: Text(
+                            "#${_auditLogs![i]['actor_id'] ?? _auditLogs![i]['actor_telegram_id'] ?? '-'}",
+                            style: const TextStyle(fontSize: 11),
+                          ),
                         ),
                       ],
                     ],
@@ -471,13 +514,15 @@ class _TenantAdminCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final id = asInt(tenant['id']);
-    final name = asStr(tenant['tenant_name'] ?? tenant['name'], 'Filial #$id');
+    final name = asStr(tenant['tenant_name'] ?? tenant['name'], "Do'kon #$id");
     final status = asStr(tenant['status']);
     final isSuspended = tenant['is_suspended'] == true || status == 'suspended';
     final statusColor = isSuspended
         ? NorinPalette.danger
         : (status == 'active' ? NorinPalette.profit : NorinPalette.amber);
-    final usersCount = asInt(tenant['users_count'] ?? tenant['active_users_count']);
+    final stats = asMap(tenant['stats']);
+    final usersCount = asInt(tenant['users_count'] ?? stats['users']);
+    final clientsCount = asInt(stats['clients']);
     final daysLeft = asInt(tenant['days_left']);
 
     return Card(
@@ -525,7 +570,7 @@ class _TenantAdminCard extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              "Muddati: $daysLeft kun qoldi • Xodimlar: $usersCount ta • AI limit: ${asInt(tenant['ai_daily_limit']) == 0 ? 'Cheksiz' : tenant['ai_daily_limit']}",
+              "$daysLeft kun • Xodim: $usersCount • Mijoz: $clientsCount • AI: ${asInt(tenant['ai_daily_limit']) == 0 ? 'Cheksiz' : tenant['ai_daily_limit']}",
               style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 10),
@@ -535,10 +580,10 @@ class _TenantAdminCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: onSwitch,
                     icon: Icon(
-                      isActiveSelected ? Icons.check_circle_rounded : Icons.login_rounded,
+                      isActiveSelected ? Icons.check_circle_rounded : Icons.visibility_outlined,
                       size: 18,
                     ),
-                    label: Text(isActiveSelected ? "Faol filial" : "Kirish"),
+                    label: Text(isActiveSelected ? "Tanlangan" : "Ko'rish"),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -639,7 +684,7 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
           },
         ),
       );
-      setState(() => _t = updated);
+      setState(() => _t = {..._t, ...updated});
       widget.onChanged();
       await _loadExtras();
       if (mounted) showSnack(context, "+$days kun qo'shildi");
@@ -659,14 +704,14 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Filial sozlamalari"),
+        title: const Text("Do'kon sozlamalari"),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Nomi")),
               const SizedBox(height: 10),
-              TextField(controller: planCtrl, decoration: const InputDecoration(labelText: "Tarif (plan)")),
+              TextField(controller: planCtrl, decoration: const InputDecoration(labelText: "Tarif")),
               const SizedBox(height: 10),
               TextField(
                 controller: priceCtrl,
@@ -689,6 +734,7 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
       ),
     );
     if (ok != true) return;
+    setState(() => _busy = true);
     try {
       final updated = asMap(
         await ref.read(apiClientProvider).patch(
@@ -701,11 +747,13 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
           },
         ),
       );
-      setState(() => _t = updated);
+      setState(() => _t = {..._t, ...updated});
       widget.onChanged();
-      if (mounted) showSnack(context, "Filial yangilandi");
+      if (mounted) showSnack(context, "Sozlamalar saqlandi");
     } catch (e) {
       if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -718,7 +766,7 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDlg) => AlertDialog(
-          title: const Text("Xodim qo'shish"),
+          title: const Text("Foydalanuvchi qo'shish"),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -728,15 +776,15 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
                 decoration: const InputDecoration(labelText: "Telegram ID *"),
               ),
               const SizedBox(height: 10),
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "F.I.Sh")),
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Ism")),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
                 key: ValueKey('role_$role'),
                 initialValue: role,
                 decoration: const InputDecoration(labelText: "Roli"),
                 items: const [
-                  DropdownMenuItem(value: 'owner', child: Text("Owner (Direktor)")),
-                  DropdownMenuItem(value: 'worker', child: Text("Worker (Ishchi)")),
+                  DropdownMenuItem(value: 'owner', child: Text("Egasi (Owner)")),
+                  DropdownMenuItem(value: 'staff', child: Text("Xodim (Staff)")),
                 ],
                 onChanged: (v) => setDlg(() => role = v ?? 'owner'),
               ),
@@ -755,6 +803,7 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
       if (mounted) showSnack(context, "Telegram ID to'g'ri kiriting", error: true);
       return;
     }
+    setState(() => _busy = true);
     try {
       await ref.read(apiClientProvider).post(
         '/admin/users',
@@ -767,9 +816,11 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
       );
       widget.onChanged();
       await _loadExtras();
-      if (mounted) showSnack(context, "Xodim qo'shildi");
+      if (mounted) showSnack(context, "Foydalanuvchi qo'shildi");
     } catch (e) {
       if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -783,7 +834,7 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
       maxChildSize: 0.95,
       builder: (ctx, sc) => ListView(
         controller: sc,
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
+        padding: EdgeInsets.fromLTRB(20, 4, 20, screenBottomClearance(ctx, extra: 24)),
         children: [
           Row(
             children: [
@@ -793,11 +844,11 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
                   style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
                 ),
               ),
-              IconButton(onPressed: _editMetaDialog, icon: const Icon(Icons.edit_outlined)),
+              IconButton(onPressed: _busy ? null : _editMetaDialog, icon: const Icon(Icons.edit_outlined)),
             ],
           ),
           Text(
-            "Tarif: ${asStr(_t['plan_name'])} • Holat: ${asStr(_t['status'])} • ${asInt(_t['days_left'])} kun qoldi",
+            "${asStr(_t['plan_name'])} • ${asStr(_t['status'])} • ${asInt(_t['days_left'])} kun qoldi",
             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 14),
@@ -823,14 +874,27 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
                 onPressed: _busy
                     ? null
                     : () async {
-                        final res = asMap(
-                          await ref.read(apiClientProvider).post(
-                            '/admin/tenants/$_tid/suspend',
-                            data: {'is_suspended': !isSuspended},
-                          ),
-                        );
-                        setState(() => _t = res);
-                        widget.onChanged();
+                        setState(() => _busy = true);
+                        try {
+                          final res = asMap(
+                            await ref.read(apiClientProvider).post(
+                              '/admin/tenants/$_tid/suspend',
+                              data: {'is_suspended': !isSuspended},
+                            ),
+                          );
+                          setState(() => _t = {..._t, ...res});
+                          widget.onChanged();
+                          if (context.mounted) {
+                            showSnack(
+                              context,
+                              !isSuspended ? "Do'kon muzlatildi" : "Do'kon faollashtirildi",
+                            );
+                          }
+                        } catch (e) {
+                          if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+                        } finally {
+                          if (mounted) setState(() => _busy = false);
+                        }
                       },
                 icon: Icon(isSuspended ? Icons.play_arrow_rounded : Icons.pause_rounded),
                 label: Text(isSuspended ? "Faollashtirish" : "Muzlatish"),
@@ -839,9 +903,9 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
           ),
           const SizedBox(height: 16),
           SectionHeader(
-            title: "Xodimlar (${_users?.length ?? 0})",
+            title: "Foydalanuvchilar (${_users?.length ?? 0})",
             trailing: TextButton.icon(
-              onPressed: _addUserDialog,
+              onPressed: _busy ? null : _addUserDialog,
               icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
               label: const Text("Qo'shish"),
             ),
@@ -850,7 +914,7 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
           if (_users == null)
             const LinearProgressIndicator()
           else if (_users!.isEmpty)
-            const Text("Xodimlar yo'q")
+            const Text("Foydalanuvchilar yo'q")
           else
             Card(
               child: Column(
@@ -860,19 +924,66 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
                     ListTile(
                       dense: true,
                       title: Text(
-                        asStr(_users![i]['full_name'], "User ${_users![i]['telegram_id']}"),
+                        asStr(_users![i]['full_name']).trim().isNotEmpty
+                            ? asStr(_users![i]['full_name'])
+                            : "ID ${_users![i]['telegram_id']}",
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                       subtitle: Text("ID: ${_users![i]['telegram_id']} • ${asStr(_users![i]['role'])}"),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline, color: NorinPalette.danger, size: 20),
-                        onPressed: () async {
-                          await ref
-                              .read(apiClientProvider)
-                              .delete('/admin/users/${asInt(_users![i]['telegram_id'])}');
-                          widget.onChanged();
-                          await _loadExtras();
-                        },
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: "Rolni almashtirish",
+                            icon: const Icon(Icons.swap_horiz_rounded, size: 20),
+                            onPressed: _busy
+                                ? null
+                                : () async {
+                                    final curRole = asStr(_users![i]['role'], 'staff');
+                                    final nextRole = curRole == 'owner' ? 'staff' : 'owner';
+                                    try {
+                                      await ref.read(apiClientProvider).patch(
+                                        '/admin/users/${asInt(_users![i]['telegram_id'])}',
+                                        data: {'role': nextRole},
+                                      );
+                                      widget.onChanged();
+                                      await _loadExtras();
+                                      if (context.mounted) showSnack(context, "Roli: $nextRole");
+                                    } catch (e) {
+                                      if (context.mounted) {
+                                        showSnack(context, ApiClient.extractError(e), error: true);
+                                      }
+                                    }
+                                  },
+                          ),
+                          IconButton(
+                            tooltip: "O'chirish",
+                            icon: const Icon(Icons.delete_outline, color: NorinPalette.danger, size: 20),
+                            onPressed: _busy
+                                ? null
+                                : () async {
+                                    final tgId = asInt(_users![i]['telegram_id']);
+                                    final yes = await showConfirmDialog(
+                                      context,
+                                      title: "Foydalanuvchini uzish",
+                                      message: "ID $tgId ruxsati bekor qilinsinmi?",
+                                      confirmLabel: "O'chirish",
+                                      destructive: true,
+                                    );
+                                    if (!yes) return;
+                                    try {
+                                      await ref.read(apiClientProvider).delete('/admin/users/$tgId');
+                                      widget.onChanged();
+                                      await _loadExtras();
+                                      if (context.mounted) showSnack(context, "Foydalanuvchi o'chirildi");
+                                    } catch (e) {
+                                      if (context.mounted) {
+                                        showSnack(context, ApiClient.extractError(e), error: true);
+                                      }
+                                    }
+                                  },
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -880,7 +991,7 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
               ),
             ),
           const SizedBox(height: 16),
-          Text("Obuna to'lovlari (${_payments?.length ?? 0})", style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text("To'lovlar tarixi (${_payments?.length ?? 0})", style: const TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 6),
           if (_payments != null && _payments!.isNotEmpty)
             Card(
@@ -891,8 +1002,10 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
                     ListTile(
                       dense: true,
                       title: Text(formatUzs(asDouble(_payments![i]['amount'])), style: const TextStyle(fontWeight: FontWeight.w700)),
-                      subtitle: Text("${asInt(_payments![i]['days_added'])} kun • ${asStr(_payments![i]['note'])}"),
-                      trailing: Text(formatShortDate(asStr(_payments![i]['created_at']))),
+                      subtitle: Text("+${asInt(_payments![i]['days_added'])} kun • ${asStr(_payments![i]['note'])}"),
+                      trailing: Text(
+                        formatShortDate(asStr(_payments![i]['paid_at'] ?? _payments![i]['created_at'])),
+                      ),
                     ),
                   ],
                 ],
@@ -907,22 +1020,34 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () async {
-                    final yes = await showConfirmDialog(
-                      context,
-                      title: "Operatsiyalarni tozalash",
-                      message: "Filial #$_tid dagi barcha sotuv va kassa yozuvlari o'chirilsinmi?",
-                      confirmLabel: "Tozalash",
-                      destructive: true,
-                    );
-                    if (!yes) return;
-                    await ref
-                        .read(apiClientProvider)
-                        .post('/admin/tenants/$_tid/clear', data: {'mode': 'tx_only'});
-                    widget.onChanged();
-                    if (context.mounted) showSnack(context, "Operatsiyalar tozalandi");
-                  },
-                  child: const Text("Tranzaksiyalar tozalash"),
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          final yes = await showConfirmDialog(
+                            context,
+                            title: "Savdolarni tozalash",
+                            message: "Do'kon #$_tid dagi barcha sotuv va kassa yozuvlari o'chirilsinmi?",
+                            confirmLabel: "Tozalash",
+                            destructive: true,
+                          );
+                          if (!yes) return;
+                          setState(() => _busy = true);
+                          try {
+                            await ref
+                                .read(apiClientProvider)
+                                .post('/admin/tenants/$_tid/clear', data: {'mode': 'tx'});
+                            widget.onChanged();
+                            if (ref.read(authProvider).selectedTenantId == _tid) {
+                              invalidateOperationalData(ref);
+                            }
+                            if (context.mounted) showSnack(context, "Savdolar tozalandi");
+                          } catch (e) {
+                            if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+                          } finally {
+                            if (mounted) setState(() => _busy = false);
+                          }
+                        },
+                  child: const Text("Savdolarni tozalash"),
                 ),
               ),
               if (_tid > 1) ...[
@@ -930,21 +1055,34 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
                 Expanded(
                   child: FilledButton(
                     style: FilledButton.styleFrom(backgroundColor: NorinPalette.danger),
-                    onPressed: () async {
-                      final yes = await showConfirmDialog(
-                        context,
-                        title: "Filialni o'chirish",
-                        message: "Filial #$_tid butunlay o'chirilsinmi?",
-                        confirmLabel: "O'chirish",
-                        destructive: true,
-                      );
-                      if (!yes) return;
-                      await ref.read(apiClientProvider).delete('/admin/tenants/$_tid');
-                      widget.onChanged();
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (context.mounted) showSnack(context, "Filial o'chirildi");
-                    },
-                    child: const Text("Filialni o'chirish"),
+                    onPressed: _busy
+                        ? null
+                        : () async {
+                            final yes = await showConfirmDialog(
+                              context,
+                              title: "Do'konni o'chirish",
+                              message: "Do'kon #$_tid butunlay o'chirilsinmi?",
+                              confirmLabel: "O'chirish",
+                              destructive: true,
+                            );
+                            if (!yes) return;
+                            setState(() => _busy = true);
+                            try {
+                              if (ref.read(authProvider).selectedTenantId == _tid) {
+                                await ref.read(authProvider.notifier).selectTenant(1);
+                                invalidateOperationalData(ref);
+                              }
+                              await ref.read(apiClientProvider).delete('/admin/tenants/$_tid');
+                              widget.onChanged();
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (context.mounted) showSnack(context, "Do'kon o'chirildi");
+                            } catch (e) {
+                              if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+                            } finally {
+                              if (mounted) setState(() => _busy = false);
+                            }
+                          },
+                    child: const Text("Do'konni o'chirish"),
                   ),
                 ),
               ],

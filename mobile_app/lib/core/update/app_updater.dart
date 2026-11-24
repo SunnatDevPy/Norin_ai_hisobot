@@ -112,28 +112,23 @@ Future<void> showUpdateAvailableDialog(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            "Joriy versiya: v$kAppVersion (build #$kAppBuildNumber)",
-            style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant, fontSize: 13),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            "Yangi versiya: v${info.version} (build #${info.build})",
+            "v$kAppVersion (#$kAppBuildNumber) → v${info.version} (#${info.build})",
             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
           ),
           if (sizeMb.isNotEmpty || info.builtAt.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               [
-                if (sizeMb.isNotEmpty) "Hajmi: $sizeMb",
-                if (info.builtAt.isNotEmpty) "Sana: ${info.builtAt}",
+                if (sizeMb.isNotEmpty) sizeMb,
+                if (info.builtAt.isNotEmpty) info.builtAt,
               ].join(" • "),
-              style: const TextStyle(fontSize: 12.5),
+              style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant, fontSize: 12.5),
             ),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           const Text(
-            "Ilova ichida avtomatik yuklab olinib o'rnatiladi. Ma'lumotlar va kirish sessiyangiz saqlanib qoladi.",
-            style: TextStyle(fontSize: 12.5, height: 1.4),
+            "Ma'lumotlar va kirish sessiyangiz saqlanib qoladi.",
+            style: TextStyle(fontSize: 12.5),
           ),
         ],
       ),

@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api import serializers as ser
@@ -36,7 +36,7 @@ from database.crud import (
     set_app_setting,
     update_subscription_settings,
 )
-from database.models import AuditLog, SubscriptionState
+from database.models import ApiSession, AuditLog, SubscriptionState
 
 
 router = APIRouter(
@@ -113,38 +113,38 @@ async def admin_analytics(db: AsyncSession = Depends(get_db)) -> dict:
     return await get_global_saas_analytics(db, days=30)
 
 
+async def _serialize_admin_tenant(db: AsyncSession, t: SubscriptionState) -> dict:
+    st = await evaluate_subscription_status(db, tenant_id=t.id)
+    stats = await get_tenant_overview_stats(db, t.id)
+    ai_30 = await get_ai_usage_summary(db, days=30, tenant_id=t.id)
+    _, ai_used_today, ai_limit = await check_tenant_ai_quota(db, tenant_id=t.id)
+    return {
+        "id": t.id,
+        "tenant_name": t.tenant_name,
+        "plan_name": t.plan_name,
+        "monthly_price": ser.r2(t.monthly_price),
+        "grace_days": t.grace_days,
+        "owner_contact": t.owner_contact,
+        "is_suspended": bool(t.is_suspended),
+        "status": st.status,
+        "days_left": st.days_left,
+        "grace_days_left": st.grace_days_left,
+        "expires_at": ser.iso(t.expires_at),
+        "stats": stats,
+        "users_count": stats.get("users", 0),
+        "ai_30d": ai_30,
+        "ai_used_today": ai_used_today,
+        "ai_daily_limit": ai_limit,
+        "auto_confirm": (await get_app_setting(db, "auto_confirm", "on", tenant_id=t.id)) == "on",
+        "group_auto_calc": (await get_app_setting(db, "group_auto_calc", "on", tenant_id=t.id)) == "on",
+        "round_mode": await get_app_setting(db, "round_mode", "none", tenant_id=t.id),
+    }
+
+
 @router.get("/tenants")
 async def admin_tenants(db: AsyncSession = Depends(get_db)) -> List[dict]:
     tenants = await list_tenants(db)
-    result: List[dict] = []
-    for t in tenants:
-        st = await evaluate_subscription_status(db, tenant_id=t.id)
-        stats = await get_tenant_overview_stats(db, t.id)
-        ai_30 = await get_ai_usage_summary(db, days=30, tenant_id=t.id)
-        _, ai_used_today, ai_limit = await check_tenant_ai_quota(db, tenant_id=t.id)
-        result.append(
-            {
-                "id": t.id,
-                "tenant_name": t.tenant_name,
-                "plan_name": t.plan_name,
-                "monthly_price": ser.r2(t.monthly_price),
-                "grace_days": t.grace_days,
-                "owner_contact": t.owner_contact,
-                "is_suspended": bool(t.is_suspended),
-                "status": st.status,
-                "days_left": st.days_left,
-                "grace_days_left": st.grace_days_left,
-                "expires_at": ser.iso(t.expires_at),
-                "stats": stats,
-                "ai_30d": ai_30,
-                "ai_used_today": ai_used_today,
-                "ai_daily_limit": ai_limit,
-                "auto_confirm": (await get_app_setting(db, "auto_confirm", "on", tenant_id=t.id)) == "on",
-                "group_auto_calc": (await get_app_setting(db, "group_auto_calc", "on", tenant_id=t.id)) == "on",
-                "round_mode": await get_app_setting(db, "round_mode", "none", tenant_id=t.id),
-            }
-        )
-    return result
+    return [await _serialize_admin_tenant(db, t) for t in tenants]
 
 
 @router.post("/tenants")
@@ -197,7 +197,8 @@ async def admin_patch_tenant(
         await set_app_setting(db, "ai_daily_limit", str(body.ai_daily_limit), tenant_id=tenant_id)
     _audit(db, p, request, "patch_tenant", f"#{tenant_id}")
     await db.commit()
-    return {"ok": True}
+    sub_obj = await db.get(SubscriptionState, tenant_id)
+    return {"ok": True, **(await _serialize_admin_tenant(db, sub_obj))}
 
 
 @router.post("/tenants/{tenant_id}/extend")
@@ -210,7 +211,7 @@ async def admin_extend_tenant(
 ) -> dict:
     sub_obj = await db.get(SubscriptionState, tenant_id)
     if sub_obj is None:
-        raise HTTPException(status_code=404, detail="Filial topilmadi")
+        raise HTTPException(status_code=404, detail="Do'kon topilmadi")
     amt = (
         body.amount
         if body.amount is not None
@@ -226,7 +227,7 @@ async def admin_extend_tenant(
     )
     _audit(db, p, request, "extend_tenant", f"#{tenant_id} +{body.days}d ({amt})")
     await db.commit()
-    return {"expires_at": ser.iso(updated.expires_at)}
+    return await _serialize_admin_tenant(db, updated)
 
 
 @router.post("/tenants/{tenant_id}/suspend")
@@ -238,11 +239,12 @@ async def admin_suspend_tenant(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     if await db.get(SubscriptionState, tenant_id) is None:
-        raise HTTPException(status_code=404, detail="Filial topilmadi")
+        raise HTTPException(status_code=404, detail="Do'kon topilmadi")
     await update_subscription_settings(db, is_suspended=body.is_suspended, tenant_id=tenant_id)
     _audit(db, p, request, "suspend_tenant", f"#{tenant_id} -> {body.is_suspended}")
     await db.commit()
-    return {"ok": True, "is_suspended": body.is_suspended}
+    sub_obj = await db.get(SubscriptionState, tenant_id)
+    return {"ok": True, **(await _serialize_admin_tenant(db, sub_obj))}
 
 
 @router.delete("/tenants/{tenant_id}")
@@ -270,14 +272,15 @@ async def admin_clear_tenant(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     if await db.get(SubscriptionState, tenant_id) is None:
-        raise HTTPException(status_code=404, detail="Filial topilmadi")
-    if body.mode == "full":
+        raise HTTPException(status_code=404, detail="Do'kon topilmadi")
+    mode = "tx" if body.mode in ("tx", "tx_only") else body.mode
+    if mode == "full":
         stats = await reset_full_database(db, tenant_id=tenant_id)
-    elif body.mode == "tx":
+    elif mode == "tx":
         stats = await reset_test_transactions(db, tenant_id=tenant_id)
     else:
         raise HTTPException(status_code=422, detail="mode: tx yoki full")
-    _audit(db, p, request, "clear_tenant", f"#{tenant_id} mode={body.mode}")
+    _audit(db, p, request, "clear_tenant", f"#{tenant_id} mode={mode}")
     await db.commit()
     return {"ok": True, "stats": stats}
 
@@ -324,13 +327,14 @@ async def admin_add_user(
     p: Principal = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    if body.role not in ("owner", "staff"):
+    role = "staff" if body.role == "worker" else body.role
+    if role not in ("owner", "staff"):
         raise HTTPException(status_code=422, detail="role: owner yoki staff")
     u = await add_authorized_user(
         db,
         telegram_id=body.telegram_id,
         full_name=body.full_name,
-        role=body.role,
+        role=role,
         tenant_id=body.tenant_id,
         create_new_tenant=body.create_new_tenant,
         new_tenant_name=body.new_tenant_name,
@@ -357,11 +361,12 @@ async def admin_patch_user(
     if existing is None:
         raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
     new_tid = body.tenant_id if body.tenant_id is not None else existing.tenant_id
-    if body.role is not None and body.role not in ("owner", "staff"):
+    role = "staff" if body.role == "worker" else body.role
+    if role is not None and role not in ("owner", "staff"):
         raise HTTPException(status_code=422, detail="role: owner yoki staff")
-    updated = await reassign_authorized_user(db, telegram_id, new_tid, role=body.role)
+    updated = await reassign_authorized_user(db, telegram_id, new_tid, role=role)
     if updated is None:
-        raise HTTPException(status_code=404, detail="Filial topilmadi")
+        raise HTTPException(status_code=404, detail="Do'kon topilmadi")
     _audit(db, p, request, "patch_user", f"tg={telegram_id} tid={new_tid}")
     await db.commit()
     return {
@@ -381,6 +386,11 @@ async def admin_delete_user(
 ) -> dict:
     if not await remove_authorized_user(db, telegram_id):
         raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
+    await db.execute(
+        update(ApiSession)
+        .where(ApiSession.telegram_id == telegram_id)
+        .values(is_revoked=True)
+    )
     _audit(db, p, request, "delete_user", f"tg={telegram_id}")
     await db.commit()
     return {"ok": True}

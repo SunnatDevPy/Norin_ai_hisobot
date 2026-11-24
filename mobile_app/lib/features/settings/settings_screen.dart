@@ -217,14 +217,20 @@ class SettingsScreen extends ConsumerWidget {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: NorinPalette.emerald.withValues(alpha: 0.16),
+                                color: ((status == 'expired' || status == 'suspended')
+                                        ? NorinPalette.danger
+                                        : NorinPalette.emerald)
+                                    .withValues(alpha: 0.16),
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
                                 "${asStr(sub['plan'], 'Standard')} • $status",
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
+                                  color: (status == 'expired' || status == 'suspended')
+                                      ? NorinPalette.danger
+                                      : null,
                                 ),
                               ),
                             ),

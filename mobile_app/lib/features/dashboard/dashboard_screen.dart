@@ -57,7 +57,7 @@ class DashboardScreen extends ConsumerWidget {
 
     String activeTenantName = asStr(
       asMap(settingsAsync.valueOrNull?['tenant'])['name'],
-      "Filial #${auth.selectedTenantId}",
+      "Do'kon #${auth.selectedTenantId}",
     );
     final tenantsList = tenantsAsync?.valueOrNull ?? <Map<String, dynamic>>[];
     for (final t in tenantsList) {

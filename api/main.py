@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Norin AI API",
+        title="Sotuv AI API",
         version="1.0.0",
         docs_url=None,
         redoc_url=None,
@@ -100,7 +100,7 @@ def create_app() -> FastAPI:
         return FileResponse(
             apk_meta.APK_BINARY_PATH,
             media_type="application/vnd.android.package-archive",
-            filename=f"Norin_AI_v{meta['version']}.apk",
+            filename=f"Sotuv_AI_v{meta['version']}.apk",
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
 

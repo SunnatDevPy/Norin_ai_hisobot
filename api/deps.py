@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.security import decode_access_token
 from config import get_settings
 from database import session as db_session
-from database.crud import now_utc, tenant_scope, to_utc_dt
+from database.crud import evaluate_subscription_status, now_utc, tenant_scope, to_utc_dt
 from database.models import ApiSession, SubscriptionState
 
 
@@ -83,6 +83,7 @@ async def require_super_admin(p: Principal = Depends(get_principal)) -> Principa
 
 
 async def tenant_ctx(
+    request: Request,
     p: Principal = Depends(get_principal),
     db: AsyncSession = Depends(get_db),
     x_tenant_id: Optional[int] = Header(default=None),
@@ -91,7 +92,19 @@ async def tenant_ctx(
     tid = p.tenant_id
     if x_tenant_id is not None and p.is_super_admin:
         if await db.get(SubscriptionState, int(x_tenant_id)) is None:
-            raise HTTPException(status_code=404, detail="Filial topilmadi")
+            raise HTTPException(status_code=404, detail="Do'kon topilmadi")
         tid = int(x_tenant_id)
+    elif not p.is_super_admin:
+        sub = await evaluate_subscription_status(db, tenant_id=tid)
+        if not sub.is_allowed:
+            path = request.url.path
+            allow_readonly = request.method == "GET" and (
+                path.endswith("/settings") or "/export/" in path
+            )
+            if not allow_readonly:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Obuna muddati tugagan yoki do'kon vaqtincha to'xtatilgan",
+                )
     with tenant_scope(tid):
         yield tid

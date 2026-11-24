@@ -103,7 +103,7 @@ async def resolve_apk_user(db: AsyncSession, telegram_id: int) -> Optional[Tuple
         if not sub.is_allowed:
             raise HTTPException(
                 status_code=403,
-                detail="Filial obuna muddati tugagan yoki muzlatilgan",
+                detail="Obuna muddati tugagan yoki do'kon vaqtincha to'xtatilgan",
             )
         return (au.role or "owner", int(au.tenant_id))
 
@@ -112,7 +112,7 @@ async def resolve_apk_user(db: AsyncSession, telegram_id: int) -> Optional[Tuple
         if not sub.is_allowed:
             raise HTTPException(
                 status_code=403,
-                detail="Filial obuna muddati tugagan yoki muzlatilgan",
+                detail="Obuna muddati tugagan yoki do'kon vaqtincha to'xtatilgan",
             )
         return ("owner", 1)
 
@@ -154,7 +154,7 @@ async def request_code(
     await db.commit()
     ttl = get_settings().API_OTP_TTL_MIN
     text = (
-        "🔐 <b>Norin AI — kirish kodi</b>\n\n"
+        "🔐 <b>Sotuv AI — kirish kodi</b>\n\n"
         f"Kod: <code>{code}</code>\n"
         f"⏳ {ttl} daqiqa amal qiladi. Hech kimga bermang!"
     )

@@ -168,7 +168,7 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
         if (mounted) {
           showSnack(
             context,
-            "Sotuv ajratilmadi. Namuna: \"Iftiqor 15 kg\" yoki \"Sardor ot 8.5\"",
+            "Sotuv ajratilmadi. Namuna: \"Anvar 15 kg\" yoki \"Sardor 10 dona\"",
             error: true,
           );
         }
@@ -356,7 +356,7 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
                               Icon(Icons.camera_alt_outlined, size: 38, color: NorinPalette.emerald),
                               SizedBox(height: 8),
                               Text(
-                                "Tarozi cheki yoki nakladnoy rasmini oling",
+                                "Chek yoki nakladnoy rasmini tanlang",
                                 style: TextStyle(fontWeight: FontWeight.w600),
                               ),
                             ],
@@ -387,7 +387,7 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
                         controller: _captionCtrl,
                         decoration: const InputDecoration(
                           labelText: "Mijoz nomi / izoh (ixtiyoriy)",
-                          hintText: "Masalan: Iftiqor",
+                          hintText: "Masalan: Anvar",
                           prefixIcon: Icon(Icons.person_outline),
                         ),
                       ),
@@ -422,7 +422,7 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
                               SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  "0 Gemini token! Klaviatura mikrofonidan gapirib yoki yozib darhol sotuv kiriting.",
+                                  "Ovozda aytib yoki matnda yozib tezkor kiriting",
                                   style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
                                 ),
                               ),
@@ -1017,7 +1017,7 @@ class _SaleReviewSheetState extends ConsumerState<_SaleReviewSheet> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          "Ogohlantirish: Bugun shunga o'xshash Sotuv #${widget.duplicateSaleId} allaqachon tasdiqlangan!",
+                          "Bugun shunga o'xshash Sotuv #${widget.duplicateSaleId} kiritilgan",
                           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5),
                         ),
                       ),
@@ -1144,7 +1144,7 @@ class _SaleReviewSheetState extends ConsumerState<_SaleReviewSheet> {
             if (!isConfirmed) ...[
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text("Telegram guruhga yuborish (rasm bilan)"),
+                title: const Text("Telegram guruhga yuborish"),
                 value: _postToGroup,
                 onChanged: (v) => setState(() => _postToGroup = v),
               ),

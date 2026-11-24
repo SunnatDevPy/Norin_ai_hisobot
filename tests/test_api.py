@@ -392,9 +392,25 @@ def test_admin_api_tenants_users_analytics_broadcast_and_audit(tmp_path: Path, m
         an = (await client.get(f"{PFX}/admin/analytics", headers=h)).json()
         assert an["total_tenants"] == 2 and an["paying_mrr"] == 500_000
 
-        # Suspend & resume
-        assert (await client.post(f"{PFX}/admin/tenants/{tid2}/suspend", headers=h, json={"is_suspended": True})).status_code == 200
-        assert (await client.post(f"{PFX}/admin/tenants/{tid2}/suspend", headers=h, json={"is_suspended": False})).status_code == 200
+        # Suspend & resume return full serialized tenant objects
+        s1 = await client.post(f"{PFX}/admin/tenants/{tid2}/suspend", headers=h, json={"is_suspended": True})
+        assert s1.status_code == 200 and s1.json()["id"] == tid2 and s1.json()["is_suspended"] is True
+        s2 = await client.post(f"{PFX}/admin/tenants/{tid2}/suspend", headers=h, json={"is_suspended": False})
+        assert s2.status_code == 200 and s2.json()["id"] == tid2 and s2.json()["is_suspended"] is False
+
+        # Patch tenant meta returns full object
+        pm = await client.patch(f"{PFX}/admin/tenants/{tid2}", headers=h, json={"plan_name": "Pro"})
+        assert pm.status_code == 200 and pm.json()["id"] == tid2 and pm.json()["plan_name"] == "Pro"
+
+        # Staff & backward-compatible worker role + clear modes ('tx' and 'tx_only')
+        au_staff = await client.post(
+            f"{PFX}/admin/users",
+            headers=h,
+            json={"telegram_id": 777000222, "full_name": "Ishchi 1", "role": "worker", "tenant_id": tid2},
+        )
+        assert au_staff.status_code == 200 and au_staff.json()["role"] == "staff"
+        assert (await client.post(f"{PFX}/admin/tenants/{tid2}/clear", headers=h, json={"mode": "tx"})).status_code == 200
+        assert (await client.post(f"{PFX}/admin/tenants/{tid2}/clear", headers=h, json={"mode": "tx_only"})).status_code == 200
 
         # Tenant #1 cannot be deleted; Tenant #2 deletes cleanly
         assert (await client.delete(f"{PFX}/admin/tenants/1", headers=h)).status_code == 400
@@ -467,7 +483,7 @@ def test_apk_version_download_and_bot_apk_otp(tmp_path: Path, monkeypatch):
         for dp in ("/download/norin_ai.apk", f"{PFX}/download/norin_ai.apk"):
             dr = await client.get(dp)
             assert dr.status_code == 200 and dr.content == payload
-            assert "Norin_AI_v1.2.3.apk" in dr.headers["content-disposition"]
+            assert "Sotuv_AI_v1.2.3.apk" in dr.headers["content-disposition"]
 
         # Bot /apk OTP works end-to-end with /api/v1/auth/verify-code
         bot_code = await apk_link._issue_bot_otp(ADMIN_ID)
@@ -566,5 +582,22 @@ def test_multitenant_idless_code_and_telegram_ticket_isolation(tmp_path: Path, m
         assert open_res.status_code == 200
         assert "sotuvai://auth-done?ticket=abc_123script" in open_res.text
         assert "<script>" not in open_res.text.split("</style>", 1)[0]
+
+        # 5. Real-time SaaS suspension blocks operational calls (403) while keeping /settings & /export open (200)
+        await client.post(f"{PFX}/admin/tenants/{t2.id}/suspend", headers=sa_h, json={"is_suspended": True})
+        assert (await client.get(f"{PFX}/clients", headers=h2)).status_code == 403
+        assert (await client.post(f"{PFX}/clients", headers=h2, json={"name": "Yangi"})).status_code == 403
+        assert (await client.get(f"{PFX}/settings", headers=h2)).status_code == 200
+        assert (await client.get(f"{PFX}/export/period", headers=h2)).status_code == 200
+        assert (await client.get(f"{PFX}/export/client/{c2.id}", headers=h2)).status_code == 200
+
+        # Resume restores operational access immediately
+        await client.post(f"{PFX}/admin/tenants/{t2.id}/suspend", headers=sa_h, json={"is_suspended": False})
+        assert (await client.get(f"{PFX}/clients", headers=h2)).status_code == 200
+
+        # 6. Deleting an authorized user revokes their active mobile sessions immediately
+        await client.delete(f"{PFX}/admin/users/{OWNER_TG}", headers=sa_h)
+        assert (await client.get(f"{PFX}/auth/me", headers=h2)).status_code == 401
+        assert (await client.get(f"{PFX}/clients", headers=h2)).status_code == 401
 
     asyncio.run(_with_api(tmp_path, monkeypatch, _logic))

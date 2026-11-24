@@ -220,20 +220,18 @@ async def _render_client_subscription_text(user_id: Optional[int] = None) -> str
     }
 
     return (
-        "💎 <b>Sotuv AI — Obuna va Filial Statusi</b>\n"
-        "===============================\n"
-        f"🏢 Sex / Filial: <b>{html.escape(sub.tenant_name)}</b> (<code>#{sub.id}</code>)\n"
+        "💎 <b>Sotuv AI — Obuna va Holat</b>\n"
+        "-------------------------------\n"
+        f"🏪 Do'kon: <b>{html.escape(sub.tenant_name)}</b>\n"
         f"📦 Tarif: <b>{html.escape(sub.plan_name)}</b> — <b>{format_uzs(sub.monthly_price)} so'm/oy</b>\n"
-        f"📅 Amal qilish muddati: <b>{exp_str}</b>\n"
-        f"📌 Obuna holati: <b>{status_map.get(sub_status.status, sub_status.status)}</b>\n"
+        f"📅 Muddati: <b>{exp_str}</b>\n"
+        f"📌 Holat: <b>{status_map.get(sub_status.status, sub_status.status)}</b>\n"
         "-------------------------------\n"
-        f"🤖 Kunlik AI kvota: {ai_line}\n"
-        f"🏪 Mijoz guruhlari: <b>{bound_clients} / {len(clients)} ta</b> ulangan\n"
+        f"🤖 Kunlik AI: {ai_line}\n"
+        f"🏪 Mijoz guruhlari: <b>{bound_clients} / {len(clients)} ta</b>\n"
         f"📊 Hisobot guruhi: {rep_status}\n"
-        f"📱 Mobil ilova ({html.escape(ver_lbl)}): <b>{dev_count} ta</b> faol qurilma\n"
+        f"📱 Mobil ilova ({html.escape(ver_lbl)}): <b>{dev_count} ta</b> qurilma\n"
         "-------------------------------\n"
-        f"To'lovni amalga oshirib, <b>«💳 To'lov qildim»</b> tugmasini bosing — "
-        f"administrator darhol muddatni uzaytirib beradi.\n"
         f"📞 Aloqa: <b>{html.escape(sub.owner_contact)}</b>"
     )
 

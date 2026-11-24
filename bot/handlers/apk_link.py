@@ -135,20 +135,20 @@ async def _render_apk_home(
         if meta.get("apk_available") and size_bytes > 0
         else "⚠️ <i>APK fayli hali yuklanmagan</i>"
     )
-    branch_line = f"\n🏢 Filial: <b>{html.escape(tenant_name)}</b>" if tenant_name else ""
+    branch_line = f"\n🏪 Do'kon: <b>{html.escape(tenant_name)}</b>" if tenant_name else ""
     ttl = max(1, settings.API_OTP_TTL_MIN)
 
     text = (
         "📱 <b>Sotuv AI — Android APK & Kirish</b>\n"
-        "==============================="
+        "-------------------------------"
         f"{branch_line}\n"
         f"🆕 Versiya: <b>{html.escape(ver_label)}</b>\n"
         f"{size_line}\n"
-        f"🔑 Kirish kodi ({ttl} daqiqa — ID kiritish shart emas):\n\n"
+        f"🔑 Kirish kodi ({ttl} daqiqa):\n\n"
         f"👉  <code>{code}</code>\n\n"
-        "===============================\n"
+        "-------------------------------\n"
         f"📲 Faol qurilmalar: <b>{len(sessions)} ta</b>\n\n"
-        "<i>Ilovada «Telegram orqali 1-bosishda kirish» ni bosing yoki yuqoridagi 6 xonali kodni tering.</i>"
+        "<i>Ilovada «Telegram orqali kirish» ni bosing yoki 6 xonali kodni tering.</i>"
     )
     return text, _apk_panel_kb(len(sessions), is_sa=_is_super_admin(user_id))
 
@@ -280,7 +280,7 @@ async def cb_apk_download_file(cb: CallbackQuery) -> None:
     caption = (
         f"📱 <b>Sotuv AI Android — {html.escape(ver_label)}</b>\n\n"
         f"🔑 Kirish kodi (5 daqiqa): <code>{code}</code>\n\n"
-        "<i>APK ni o'rnatib, «Telegram orqali 1-bosishda kirish» ni bosing yoki yuqoridagi kodni kiriting.</i>"
+        "<i>APK ni o'rnatib, «Telegram orqali kirish» ni bosing yoki kodni tering.</i>"
     )
 
     if not cb.message:
