@@ -21,107 +21,126 @@ class SettingsScreen extends ConsumerWidget {
     WidgetRef ref, {
     Map<String, dynamic>? existing,
   }) async {
-    final isEdit = existing != null;
-    final nameCtrl = TextEditingController(text: asStr(existing?['name']));
-    final costCtrl = TextEditingController(
-      text: existing != null ? asDouble(existing['cost_price']).round().toString() : '',
-    );
-    final sellCtrl = TextEditingController(
-      text: existing != null ? asDouble(existing['default_sell_price']).round().toString() : '',
-    );
-    final aliasCtrl = TextEditingController(text: asStr(existing?['aliases']));
-    String unit = asStr(existing?['unit'], 'kg');
-    if (!const ['kg', 'dona', 'porsiya', 'litr'].contains(unit)) unit = 'kg';
+    await ActionGuard.run('dlg:product:${existing?['id'] ?? 'new'}', () async {
+      final isEdit = existing != null;
+      final nameCtrl = TextEditingController(text: asStr(existing?['name']));
+      final costCtrl = TextEditingController(
+        text: existing != null ? asDouble(existing['cost_price']).round().toString() : '',
+      );
+      final sellCtrl = TextEditingController(
+        text: existing != null ? asDouble(existing['default_sell_price']).round().toString() : '',
+      );
+      final aliasCtrl = TextEditingController(text: asStr(existing?['aliases']));
+      String unit = asStr(existing?['unit'], 'kg');
+      if (!const ['kg', 'dona', 'porsiya', 'litr'].contains(unit)) unit = 'kg';
+      bool decided = false;
 
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlg) => AlertDialog(
-          title: Text(isEdit ? "Mahsulotni tahrirlash" : "Yangi mahsulot"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Nomi *")),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: costCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: "Tannarxi (so'm) *"),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: sellCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: "Sotuv narxi (so'm) *"),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  key: ValueKey('unit_$unit'),
-                  initialValue: unit,
-                  decoration: const InputDecoration(labelText: "Birlik"),
-                  items: const [
-                    DropdownMenuItem(value: 'kg', child: Text("kg")),
-                    DropdownMenuItem(value: 'dona', child: Text("dona")),
-                    DropdownMenuItem(value: 'porsiya', child: Text("porsiya")),
-                    DropdownMenuItem(value: 'litr', child: Text("litr")),
-                  ],
-                  onChanged: (v) => setDlg(() => unit = v ?? 'kg'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: aliasCtrl,
-                  decoration: const InputDecoration(labelText: "Aliases (vergul bilan)"),
-                ),
-              ],
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDlg) => AlertDialog(
+            title: Text(isEdit ? "Mahsulotni tahrirlash" : "Yangi mahsulot"),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Nomi *")),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: costCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: "Tannarxi (so'm) *"),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: sellCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: "Sotuv narxi (so'm) *"),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('unit_$unit'),
+                    initialValue: unit,
+                    decoration: const InputDecoration(labelText: "Birlik"),
+                    items: const [
+                      DropdownMenuItem(value: 'kg', child: Text("kg")),
+                      DropdownMenuItem(value: 'dona', child: Text("dona")),
+                      DropdownMenuItem(value: 'porsiya', child: Text("porsiya")),
+                      DropdownMenuItem(value: 'litr', child: Text("litr")),
+                    ],
+                    onChanged: (v) => setDlg(() => unit = v ?? 'kg'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: aliasCtrl,
+                    decoration: const InputDecoration(labelText: "Aliases (vergul bilan)"),
+                  ),
+                ],
+              ),
             ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  if (decided) return;
+                  decided = true;
+                  Navigator.pop(ctx, false);
+                },
+                child: const Text("Bekor"),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (decided) return;
+                  decided = true;
+                  Navigator.pop(ctx, true);
+                },
+                child: const Text("Saqlash"),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Saqlash")),
-          ],
         ),
-      ),
-    );
-    if (ok != true) return;
-    final name = nameCtrl.text.trim();
-    final cost = parseNumberInput(costCtrl.text) ?? -1;
-    final sell = parseNumberInput(sellCtrl.text) ?? -1;
-    if (name.isEmpty || cost < 0 || sell <= 0) {
-      if (context.mounted) showSnack(context, "Maydonlarni to'g'ri to'ldiring", error: true);
-      return;
-    }
-    try {
-      final api = ref.read(apiClientProvider);
-      final body = {
-        'name': name,
-        'cost_price': cost,
-        'default_sell_price': sell,
-        'unit': unit,
-        'aliases': aliasCtrl.text.trim(),
-      };
-      if (isEdit) {
-        await api.patch('/products/${asInt(existing['id'])}', data: body);
-      } else {
-        await api.post('/products', data: body);
+      );
+      if (ok != true) return;
+      final name = nameCtrl.text.trim();
+      final cost = parseNumberInput(costCtrl.text) ?? -1;
+      final sell = parseNumberInput(sellCtrl.text) ?? -1;
+      if (name.isEmpty || cost < 0 || sell <= 0) {
+        if (context.mounted) showSnack(context, "Maydonlarni to'g'ri to'ldiring", error: true);
+        return;
       }
-      invalidateOperationalData(ref);
-      if (context.mounted) showSnack(context, isEdit ? "Mahsulot yangilandi" : "Mahsulot qo'shildi");
-    } catch (e) {
-      if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
-    }
+      try {
+        final api = ref.read(apiClientProvider);
+        final body = {
+          'name': name,
+          'cost_price': cost,
+          'default_sell_price': sell,
+          'unit': unit,
+          'aliases': aliasCtrl.text.trim(),
+        };
+        if (isEdit) {
+          await api.patch('/products/${asInt(existing['id'])}', data: body);
+        } else {
+          await api.post('/products', data: body);
+        }
+        invalidateOperationalData(ref);
+        if (context.mounted) showSnack(context, isEdit ? "Mahsulot yangilandi" : "Mahsulot qo'shildi");
+      } catch (e) {
+        if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+      }
+    });
   }
 
   Future<void> _showDevicesSheet(BuildContext context, WidgetRef ref) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: _DevicesSheet(api: ref.read(apiClientProvider)),
-      ),
-    );
+    await ActionGuard.run('sheet:devices', () async {
+      await showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          top: false,
+          child: _DevicesSheet(api: ref.read(apiClientProvider)),
+        ),
+      );
+    });
   }
 
   Future<void> _patchSetting(
@@ -129,13 +148,15 @@ class SettingsScreen extends ConsumerWidget {
     WidgetRef ref,
     Map<String, dynamic> patch,
   ) async {
-    try {
-      await ref.read(apiClientProvider).patch('/settings', data: patch);
-      ref.invalidate(settingsProvider);
-      if (context.mounted) showSnack(context, "Sozlama saqlandi");
-    } catch (e) {
-      if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
-    }
+    await ActionGuard.run('act:patch_setting:${patch.keys.join(',')}', () async {
+      try {
+        await ref.read(apiClientProvider).patch('/settings', data: patch);
+        ref.invalidate(settingsProvider);
+        if (context.mounted) showSnack(context, "Sozlama saqlandi");
+      } catch (e) {
+        if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+      }
+    }, cooldown: const Duration(milliseconds: 350));
   }
 
   @override
@@ -428,11 +449,11 @@ class SettingsScreen extends ConsumerWidget {
                   title: const Text("PIN-kod"),
                   subtitle: Text(bioLock.hasPin ? "O'rnatilgan" : "O'rnatilmagan"),
                   trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () {
-                    Navigator.of(context).push(
+                  onTap: () => ActionGuard.run('nav:pin_setup', () async {
+                    await Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const PinSetupScreen(isEditMode: true)),
                     );
-                  },
+                  }),
                 ),
                 const Divider(),
                 ListTile(
@@ -440,7 +461,10 @@ class SettingsScreen extends ConsumerWidget {
                   title: const Text("Yangilash"),
                   subtitle: Text("v$kAppVersion (#$kAppBuildNumber)"),
                   trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => checkAndPromptUpdate(context, api, silentIfLatest: false),
+                  onTap: () => ActionGuard.run(
+                    'act:check_update',
+                    () => checkAndPromptUpdate(context, api, silentIfLatest: false),
+                  ),
                 ),
                 const Divider(),
                 ListTile(
@@ -632,11 +656,11 @@ class _SuperAdminSettingsCard extends ConsumerWidget {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).push(
+                  onPressed: () => ActionGuard.run('nav:admin_0', () async {
+                    await Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const AdminScreen(initialTab: 0)),
                     );
-                  },
+                  }),
                   icon: const Icon(Icons.insights_rounded, size: 18),
                   label: const Text("Statistika"),
                 ),
@@ -644,11 +668,11 @@ class _SuperAdminSettingsCard extends ConsumerWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: FilledButton.tonalIcon(
-                  onPressed: () {
-                    Navigator.of(context).push(
+                  onPressed: () => ActionGuard.run('nav:admin_1', () async {
+                    await Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const AdminScreen(initialTab: 1)),
                     );
-                  },
+                  }),
                   icon: const Icon(Icons.store_mall_directory_rounded, size: 18),
                   label: const Text("Do'konlar"),
                 ),

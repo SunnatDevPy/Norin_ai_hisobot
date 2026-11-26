@@ -29,70 +29,87 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
   }
 
   Future<void> _showAddClientDialog() async {
-    final nameCtrl = TextEditingController();
-    final phoneCtrl = TextEditingController();
-    final debtCtrl = TextEditingController(text: '0');
-    final aliasCtrl = TextEditingController();
+    await ActionGuard.run('dlg:add_client', () async {
+      final nameCtrl = TextEditingController();
+      final phoneCtrl = TextEditingController();
+      final debtCtrl = TextEditingController(text: '0');
+      final aliasCtrl = TextEditingController();
+      bool decided = false;
 
-    final created = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Yangi mijoz"),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: "Nomi *"),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: phoneCtrl,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: "Telefon (+998...)"),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: debtCtrl,
-                keyboardType: const TextInputType.numberWithOptions(signed: true),
-                decoration: const InputDecoration(labelText: "Boshlang'ich qarz (so'm)"),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: aliasCtrl,
-                decoration: const InputDecoration(labelText: "Qisqa nomlar (aliases)"),
-              ),
-            ],
+      final created = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Yangi mijoz"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: "Nomi *"),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: "Telefon (+998...)"),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: debtCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(signed: true),
+                  decoration: const InputDecoration(labelText: "Boshlang'ich qarz (so'm)"),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: aliasCtrl,
+                  decoration: const InputDecoration(labelText: "Qisqa nomlar (aliases)"),
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                if (decided) return;
+                decided = true;
+                Navigator.pop(ctx, false);
+              },
+              child: const Text("Bekor"),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (decided) return;
+                decided = true;
+                Navigator.pop(ctx, true);
+              },
+              child: const Text("Qo'shish"),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Qo'shish")),
-        ],
-      ),
-    );
-    if (created != true) return;
-    final name = nameCtrl.text.trim();
-    if (name.isEmpty) {
-      if (mounted) showSnack(context, "Mijoz nomini kiriting", error: true);
-      return;
-    }
-    try {
-      await ref.read(apiClientProvider).post(
-        '/clients',
-        data: {
-          'name': name,
-          'phone': phoneCtrl.text.trim(),
-          'opening_debt': parseNumberInput(debtCtrl.text) ?? 0,
-          'aliases': aliasCtrl.text.trim(),
-        },
       );
-      invalidateOperationalData(ref);
-      if (mounted) showSnack(context, "Mijoz \"$name\" qo'shildi");
-    } catch (e) {
-      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
-    }
+      if (created != true) return;
+      final name = nameCtrl.text.trim();
+      if (name.isEmpty) {
+        if (mounted) showSnack(context, "Mijoz nomini kiriting", error: true);
+        return;
+      }
+      try {
+        await ref.read(apiClientProvider).post(
+          '/clients',
+          data: {
+            'name': name,
+            'phone': phoneCtrl.text.trim(),
+            'opening_debt': parseNumberInput(debtCtrl.text) ?? 0,
+            'aliases': aliasCtrl.text.trim(),
+          },
+        );
+        invalidateOperationalData(ref);
+        if (mounted) showSnack(context, "Mijoz \"$name\" qo'shildi");
+      } catch (e) {
+        if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+      }
+    });
   }
 
   @override
@@ -298,7 +315,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                                 initialClientId: asInt(c['id']),
                               )
                           : null,
-                      onTap: () async {
+                      onTap: () => ActionGuard.run('nav:client:${asInt(c['id'])}', () async {
                         await Navigator.of(context).push(
                           MaterialPageRoute(
                             builder: (_) => ClientDetailScreen(
@@ -308,7 +325,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                           ),
                         );
                         invalidateOperationalData(ref);
-                      },
+                      }),
                     ),
                     const SizedBox(height: 10),
                   ],

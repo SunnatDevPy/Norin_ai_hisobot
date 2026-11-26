@@ -590,27 +590,29 @@ class DashboardScreen extends ConsumerWidget {
     WidgetRef ref,
     Map<String, dynamic> top,
   ) async {
-    int cid = asInt(top['id']);
-    final name = asStr(top['name']);
-    if (cid <= 0) {
-      final list = ref.read(clientsProvider).valueOrNull ?? const [];
-      for (final c in list) {
-        if (asStr(c['name']).toLowerCase() == name.toLowerCase()) {
-          cid = asInt(c['id']);
-          break;
+    await ActionGuard.run('nav:top_client', () async {
+      int cid = asInt(top['id']);
+      final name = asStr(top['name']);
+      if (cid <= 0) {
+        final list = ref.read(clientsProvider).valueOrNull ?? const [];
+        for (final c in list) {
+          if (asStr(c['name']).toLowerCase() == name.toLowerCase()) {
+            cid = asInt(c['id']);
+            break;
+          }
         }
       }
-    }
-    if (cid > 0 && context.mounted) {
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ClientDetailScreen(clientId: cid, initialName: name),
-        ),
-      );
-      invalidateOperationalData(ref);
-    } else {
-      ref.read(shellTabIndexProvider.notifier).state = 1;
-    }
+      if (cid > 0 && context.mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ClientDetailScreen(clientId: cid, initialName: name),
+          ),
+        );
+        invalidateOperationalData(ref);
+      } else {
+        ref.read(shellTabIndexProvider.notifier).state = 1;
+      }
+    });
   }
 }
 

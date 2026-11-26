@@ -27,110 +27,127 @@ Future<void> openCloseDayDialog(
   String? reportDate,
   double? expectedCash,
 }) async {
-  final countedCtrl = TextEditingController(
-    text: expectedCash != null ? expectedCash.round().toString() : '',
-  );
-  bool notifyReport = true;
-
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setDlg) {
-        final counted = parseNumberInput(countedCtrl.text) ?? 0;
-        final diff = expectedCash != null ? (counted - expectedCash) : null;
-        return AlertDialog(
-          title: Text(
-            reportDate != null && reportDate.isNotEmpty
-                ? "Kunni yopish ($reportDate)"
-                : "Bugungi kunni yopish",
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (expectedCash != null) ...[
-                  Text(
-                    "Hisob bo'yicha naqd kassa:",
-                    style: TextStyle(fontSize: 12, color: Theme.of(ctx).colorScheme.onSurfaceVariant),
-                  ),
-                  Text(
-                    formatUzs(expectedCash),
-                    style: tNumStyle.copyWith(fontSize: 18, fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                TextField(
-                  controller: countedCtrl,
-                  keyboardType: TextInputType.number,
-                  onChanged: (_) => setDlg(() {}),
-                  decoration: const InputDecoration(
-                    labelText: "Sanalgan naqd pul (so'm) *",
-                    prefixIcon: Icon(Icons.payments_outlined),
-                  ),
-                ),
-                if (diff != null) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: (diff == 0 ? NorinPalette.profit : NorinPalette.amber)
-                          .withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        const Text("Sverka farqi:", style: TextStyle(fontWeight: FontWeight.w600)),
-                        const Spacer(),
-                        Text(
-                          "${diff > 0 ? '+' : ''}${formatUzs(diff)}",
-                          style: tNumStyle.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: diff < 0 ? NorinPalette.danger : NorinPalette.profit,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text("Hisobot guruhiga yuborish"),
-                  value: notifyReport,
-                  onChanged: (v) => setDlg(() => notifyReport = v),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Kunni yopish")),
-          ],
-        );
-      },
-    ),
-  );
-  if (ok != true) return;
-  final counted = parseNumberInput(countedCtrl.text);
-  if (counted == null || counted < 0) {
-    if (context.mounted) showSnack(context, "Sanalgan summani to'g'ri kiriting", error: true);
-    return;
-  }
-  try {
-    await ref.read(apiClientProvider).post(
-      '/cash/close-day',
-      data: {
-        'counted_cash': counted,
-        if (sessionId != null && sessionId > 0) 'session_id': sessionId,
-        'notify_report_group': notifyReport,
-      },
+  await ActionGuard.run('dlg:close_day', () async {
+    final countedCtrl = TextEditingController(
+      text: expectedCash != null ? expectedCash.round().toString() : '',
     );
-    invalidateOperationalData(ref);
-    if (context.mounted) showSnack(context, "Smena muvaffaqiyatli yopildi");
-  } catch (e) {
-    if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
-  }
+    bool notifyReport = true;
+    bool decided = false;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) {
+          final counted = parseNumberInput(countedCtrl.text) ?? 0;
+          final diff = expectedCash != null ? (counted - expectedCash) : null;
+          return AlertDialog(
+            title: Text(
+              reportDate != null && reportDate.isNotEmpty
+                  ? "Kunni yopish ($reportDate)"
+                  : "Bugungi kunni yopish",
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (expectedCash != null) ...[
+                    Text(
+                      "Hisob bo'yicha naqd kassa:",
+                      style: TextStyle(fontSize: 12, color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+                    ),
+                    Text(
+                      formatUzs(expectedCash),
+                      style: tNumStyle.copyWith(fontSize: 18, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  TextField(
+                    controller: countedCtrl,
+                    keyboardType: TextInputType.number,
+                    onChanged: (_) => setDlg(() {}),
+                    decoration: const InputDecoration(
+                      labelText: "Sanalgan naqd pul (so'm) *",
+                      prefixIcon: Icon(Icons.payments_outlined),
+                    ),
+                  ),
+                  if (diff != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: (diff == 0 ? NorinPalette.profit : NorinPalette.amber)
+                            .withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          const Text("Sverka farqi:", style: TextStyle(fontWeight: FontWeight.w600)),
+                          const Spacer(),
+                          Text(
+                            "${diff > 0 ? '+' : ''}${formatUzs(diff)}",
+                            style: tNumStyle.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: diff < 0 ? NorinPalette.danger : NorinPalette.profit,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Hisobot guruhiga yuborish"),
+                    value: notifyReport,
+                    onChanged: (v) => setDlg(() => notifyReport = v),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  if (decided) return;
+                  decided = true;
+                  Navigator.pop(ctx, false);
+                },
+                child: const Text("Bekor"),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (decided) return;
+                  decided = true;
+                  Navigator.pop(ctx, true);
+                },
+                child: const Text("Kunni yopish"),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (ok != true) return;
+    final counted = parseNumberInput(countedCtrl.text);
+    if (counted == null || counted < 0) {
+      if (context.mounted) showSnack(context, "Sanalgan summani to'g'ri kiriting", error: true);
+      return;
+    }
+    try {
+      await ref.read(apiClientProvider).post(
+        '/cash/close-day',
+        data: {
+          'counted_cash': counted,
+          if (sessionId != null && sessionId > 0) 'session_id': sessionId,
+          'notify_report_group': notifyReport,
+        },
+      );
+      invalidateOperationalData(ref);
+      if (context.mounted) showSnack(context, "Smena muvaffaqiyatli yopildi");
+    } catch (e) {
+      if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    }
+  });
 }
 
 Future<void> openQuickCashTxDialog(
@@ -138,102 +155,119 @@ Future<void> openQuickCashTxDialog(
   WidgetRef ref,
   String sourceType,
 ) async {
-  final (String title, bool needCategory) = switch (sourceType) {
-    'expense' => ("Xarajat qo'shish", true),
-    'main_in' => ("Kassaga kirim", false),
-    'kassa_debt' => ("Kassaga qarz olish", false),
-    _ => ("Kassa qarzini qaytarish", false),
-  };
-  final amountCtrl = TextEditingController();
-  final noteCtrl = TextEditingController();
-  String category = kExpenseCategories.first;
+  await ActionGuard.run('dlg:cash_tx:$sourceType', () async {
+    final (String title, bool needCategory) = switch (sourceType) {
+      'expense' => ("Xarajat qo'shish", true),
+      'main_in' => ("Kassaga kirim", false),
+      'kassa_debt' => ("Kassaga qarz olish", false),
+      _ => ("Kassa qarzini qaytarish", false),
+    };
+    final amountCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+    String category = kExpenseCategories.first;
+    bool decided = false;
 
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setDlg) => AlertDialog(
-        title: Text(title),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: amountCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Summa (so'm) *"),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: [
-                  for (final preset in const [50000, 100000, 250000, 500000])
-                    ActionChip(
-                      visualDensity: VisualDensity.compact,
-                      label: Text("+${formatCompactUzs(preset)}"),
-                      onPressed: () {
-                        final cur = parseNumberInput(amountCtrl.text) ?? 0;
-                        amountCtrl.text = (cur + preset).round().toString();
-                        setDlg(() {});
-                      },
-                    ),
-                ],
-              ),
-              if (needCategory) ...[
-                const SizedBox(height: 12),
-                const Text("Kategoriya:", style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 6),
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text(title),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: amountCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: "Summa (so'm) *"),
+                ),
+                const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
-                  runSpacing: 6,
-                  children: kExpenseCategories
-                      .map(
-                        (cat) => ChoiceChip(
-                          label: Text(cat),
-                          selected: category == cat,
-                          onSelected: (_) => setDlg(() => category = cat),
-                        ),
-                      )
-                      .toList(),
+                  runSpacing: 4,
+                  children: [
+                    for (final preset in const [50000, 100000, 250000, 500000])
+                      ActionChip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text("+${formatCompactUzs(preset)}"),
+                        onPressed: () {
+                          final cur = parseNumberInput(amountCtrl.text) ?? 0;
+                          amountCtrl.text = (cur + preset).round().toString();
+                          setDlg(() {});
+                        },
+                      ),
+                  ],
+                ),
+                if (needCategory) ...[
+                  const SizedBox(height: 12),
+                  const Text("Kategoriya:", style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: kExpenseCategories
+                        .map(
+                          (cat) => ChoiceChip(
+                            label: Text(cat),
+                            selected: category == cat,
+                            onSelected: (_) => setDlg(() => category = cat),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                TextField(
+                  controller: noteCtrl,
+                  decoration: const InputDecoration(labelText: "Izoh (ixtiyoriy)"),
                 ),
               ],
-              const SizedBox(height: 12),
-              TextField(
-                controller: noteCtrl,
-                decoration: const InputDecoration(labelText: "Izoh (ixtiyoriy)"),
-              ),
-            ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                if (decided) return;
+                decided = true;
+                Navigator.pop(ctx, false);
+              },
+              child: const Text("Bekor"),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (decided) return;
+                decided = true;
+                Navigator.pop(ctx, true);
+              },
+              child: const Text("Saqlash"),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Saqlash")),
-        ],
       ),
-    ),
-  );
-  if (ok != true) return;
-  final amount = parseNumberInput(amountCtrl.text);
-  if (amount == null || amount <= 0) {
-    if (context.mounted) showSnack(context, "Summa 0 dan katta bo'lishi kerak", error: true);
-    return;
-  }
-  try {
-    await ref.read(apiClientProvider).post(
-      '/cash/transactions',
-      data: {
-        'amount': amount,
-        'source_type': sourceType,
-        if (needCategory) 'category': category,
-        'note': noteCtrl.text.trim(),
-      },
     );
-    invalidateOperationalData(ref);
-    if (context.mounted) showSnack(context, "Kassa amaliyoti saqlandi");
-  } catch (e) {
-    if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
-  }
+    if (ok != true) return;
+    final amount = parseNumberInput(amountCtrl.text);
+    if (amount == null || amount <= 0) {
+      if (context.mounted) showSnack(context, "Summa 0 dan katta bo'lishi kerak", error: true);
+      return;
+    }
+    try {
+      await ref.read(apiClientProvider).post(
+        '/cash/transactions',
+        data: {
+          'amount': amount,
+          'source_type': sourceType,
+          if (needCategory) 'category': category,
+          'note': noteCtrl.text.trim(),
+        },
+      );
+      invalidateOperationalData(ref);
+      if (context.mounted) showSnack(context, "Kassa amaliyoti saqlandi");
+    } catch (e) {
+      if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    }
+  });
 }
 
 Future<void> openQuickPaymentDialog(
@@ -242,146 +276,256 @@ Future<void> openQuickPaymentDialog(
   int? initialClientId,
   VoidCallback? onSuccess,
 }) async {
-  List<Map<String, dynamic>> clients =
-      ref.read(clientsProvider).valueOrNull ?? const <Map<String, dynamic>>[];
-  if (clients.isEmpty) {
-    try {
-      clients = await ref.read(clientsProvider.future);
-    } catch (e) {
-      if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+  await ActionGuard.run('dlg:quick_pay', () async {
+    List<Map<String, dynamic>> clients =
+        ref.read(clientsProvider).valueOrNull ?? const <Map<String, dynamic>>[];
+    if (clients.isEmpty) {
+      try {
+        clients = await ref.read(clientsProvider.future);
+      } catch (e) {
+        if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+        return;
+      }
+    }
+    if (!context.mounted) return;
+    if (clients.isEmpty) {
+      showSnack(context, "Avval mijoz qo'shing", error: true);
       return;
     }
-  }
-  if (!context.mounted) return;
-  if (clients.isEmpty) {
-    showSnack(context, "Avval mijoz qo'shing", error: true);
-    return;
-  }
 
-  Map<String, dynamic> findClient(int? id) {
-    for (final c in clients) {
-      if (asInt(c['id']) == id) return c;
+    Map<String, dynamic> findClient(int? id) {
+      for (final c in clients) {
+        if (asInt(c['id']) == id) return c;
+      }
+      return clients.first;
     }
-    return clients.first;
-  }
 
-  int selectedId = initialClientId ?? asInt(clients.first['id']);
-  if (!clients.any((c) => asInt(c['id']) == selectedId)) {
-    selectedId = asInt(clients.first['id']);
-  }
+    int selectedId = initialClientId ?? asInt(clients.first['id']);
+    if (!clients.any((c) => asInt(c['id']) == selectedId)) {
+      selectedId = asInt(clients.first['id']);
+    }
 
-  final amountCtrl = TextEditingController();
-  final noteCtrl = TextEditingController();
-  String method = 'cash';
-  bool postGroup = findClient(selectedId)['group_chat_id'] != null;
+    final amountCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+    String method = 'cash';
+    bool postGroup = findClient(selectedId)['group_chat_id'] != null;
+    bool decided = false;
 
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setDlg) {
-        final cli = findClient(selectedId);
-        final debt = asDouble(cli['current_debt']);
-        final hasGroup = cli['group_chat_id'] != null;
-        return AlertDialog(
-          title: const Text("Mijozdan pul olish"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                DropdownButtonFormField<int>(
-                  key: ValueKey('pay_cli_$selectedId'),
-                  initialValue: selectedId,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: "Mijoz",
-                    prefixIcon: Icon(Icons.person_outline),
-                  ),
-                  items: clients.map((c) {
-                    final d = asDouble(c['current_debt']);
-                    return DropdownMenuItem<int>(
-                      value: asInt(c['id']),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              asStr(c['name']),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (d != 0)
-                            Text(
-                              formatCompactUzs(d),
-                              style: tNumStyle.copyWith(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: d > 0 ? NorinPalette.danger : NorinPalette.profit,
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) {
+          final cli = findClient(selectedId);
+          final debt = asDouble(cli['current_debt']);
+          final hasGroup = cli['group_chat_id'] != null;
+          return AlertDialog(
+            title: const Text("Mijozdan pul olish"),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  DropdownButtonFormField<int>(
+                    key: ValueKey('pay_cli_$selectedId'),
+                    initialValue: selectedId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: "Mijoz",
+                      prefixIcon: Icon(Icons.person_outline),
+                    ),
+                    items: clients.map((c) {
+                      final d = asDouble(c['current_debt']);
+                      return DropdownMenuItem<int>(
+                        value: asInt(c['id']),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                asStr(c['name']),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (v) {
-                    if (v == null) return;
-                    setDlg(() {
-                      selectedId = v;
-                      postGroup = findClient(v)['group_chat_id'] != null;
-                    });
-                  },
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: amountCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    labelText: "Summa (so'm) *",
-                    helperText: debt > 0 ? "Joriy qarz: ${formatUzs(debt)}" : null,
+                            if (d != 0)
+                              Text(
+                                formatCompactUzs(d),
+                                style: tNumStyle.copyWith(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: d > 0 ? NorinPalette.danger : NorinPalette.profit,
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setDlg(() {
+                        selectedId = v;
+                        postGroup = findClient(v)['group_chat_id'] != null;
+                      });
+                    },
                   ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    if (debt > 0) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: amountCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: "Summa (so'm) *",
+                      helperText: debt > 0 ? "Joriy qarz: ${formatUzs(debt)}" : null,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      if (debt > 0) ...[
+                        ActionChip(
+                          visualDensity: VisualDensity.compact,
+                          label: const Text("To'liq qarz"),
+                          onPressed: () {
+                            amountCtrl.text = debt.round().toString();
+                            setDlg(() {});
+                          },
+                        ),
+                        ActionChip(
+                          visualDensity: VisualDensity.compact,
+                          label: const Text("50%"),
+                          onPressed: () {
+                            amountCtrl.text = (debt / 2).round().toString();
+                            setDlg(() {});
+                          },
+                        ),
+                      ],
                       ActionChip(
                         visualDensity: VisualDensity.compact,
-                        label: const Text("To'liq qarz"),
+                        label: const Text("+100k"),
                         onPressed: () {
-                          amountCtrl.text = debt.round().toString();
+                          final cur = parseNumberInput(amountCtrl.text) ?? 0;
+                          amountCtrl.text = (cur + 100000).round().toString();
                           setDlg(() {});
                         },
                       ),
                       ActionChip(
                         visualDensity: VisualDensity.compact,
-                        label: const Text("50%"),
+                        label: const Text("+500k"),
                         onPressed: () {
-                          amountCtrl.text = (debt / 2).round().toString();
+                          final cur = parseNumberInput(amountCtrl.text) ?? 0;
+                          amountCtrl.text = (cur + 500000).round().toString();
                           setDlg(() {});
                         },
                       ),
                     ],
-                    ActionChip(
-                      visualDensity: VisualDensity.compact,
-                      label: const Text("+100k"),
-                      onPressed: () {
-                        final cur = parseNumberInput(amountCtrl.text) ?? 0;
-                        amountCtrl.text = (cur + 100000).round().toString();
-                        setDlg(() {});
-                      },
+                  ),
+                  const SizedBox(height: 12),
+                  SegmentedButton<String>(
+                    showSelectedIcon: false,
+                    segments: const [
+                      ButtonSegment(value: 'cash', label: Text("Naqd")),
+                      ButtonSegment(value: 'card', label: Text("Karta")),
+                      ButtonSegment(value: 'transfer', label: Text("O'tkazma")),
+                    ],
+                    selected: {method},
+                    onSelectionChanged: (s) => setDlg(() => method = s.first),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: noteCtrl,
+                    decoration: const InputDecoration(labelText: "Izoh (ixtiyoriy)"),
+                  ),
+                  if (hasGroup)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text("Guruhga yuborish"),
+                      value: postGroup,
+                      onChanged: (v) => setDlg(() => postGroup = v),
                     ),
-                    ActionChip(
-                      visualDensity: VisualDensity.compact,
-                      label: const Text("+500k"),
-                      onPressed: () {
-                        final cur = parseNumberInput(amountCtrl.text) ?? 0;
-                        amountCtrl.text = (cur + 500000).round().toString();
-                        setDlg(() {});
-                      },
-                    ),
-                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  if (decided) return;
+                  decided = true;
+                  Navigator.pop(ctx, false);
+                },
+                child: const Text("Bekor"),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (decided) return;
+                  decided = true;
+                  Navigator.pop(ctx, true);
+                },
+                child: const Text("Saqlash"),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (ok != true) return;
+    final amount = parseNumberInput(amountCtrl.text);
+    if (amount == null || amount <= 0) {
+      if (context.mounted) showSnack(context, "Summa 0 dan katta bo'lishi kerak", error: true);
+      return;
+    }
+    try {
+      final res = asMap(
+        await ref.read(apiClientProvider).post(
+          '/payments',
+          data: {
+            'client_id': selectedId,
+            'amount': amount,
+            'payment_method': method,
+            'note': noteCtrl.text.trim(),
+            'post_to_group': postGroup,
+          },
+        ),
+      );
+      invalidateOperationalData(ref);
+      onSuccess?.call();
+      if (context.mounted) {
+        showSnack(
+          context,
+          res['group_posted'] == true ? "To'lov saqlandi va guruhga yuborildi" : "To'lov saqlandi",
+        );
+      }
+    } catch (e) {
+      if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    }
+  });
+}
+
+Future<void> openEditPaymentDialog(
+  BuildContext context,
+  WidgetRef ref,
+  Map<String, dynamic> payment, {
+  VoidCallback? onSuccess,
+}) async {
+  await ActionGuard.run('dlg:edit_pay:${asInt(payment['id'])}', () async {
+    final amountCtrl = TextEditingController(text: asDouble(payment['amount']).round().toString());
+    final noteCtrl = TextEditingController(text: asStr(payment['note']));
+    String method = asStr(payment['payment_method'], 'cash');
+    if (!const ['cash', 'card', 'transfer'].contains(method)) method = 'cash';
+    bool decided = false;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: const Text("To'lovni tahrirlash"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: amountCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: "Summa (so'm) *"),
                 ),
                 const SizedBox(height: 12),
                 SegmentedButton<String>(
@@ -397,130 +541,54 @@ Future<void> openQuickPaymentDialog(
                 const SizedBox(height: 10),
                 TextField(
                   controller: noteCtrl,
-                  decoration: const InputDecoration(labelText: "Izoh (ixtiyoriy)"),
+                  decoration: const InputDecoration(labelText: "Izoh"),
                 ),
-                if (hasGroup)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text("Guruhga yuborish"),
-                    value: postGroup,
-                    onChanged: (v) => setDlg(() => postGroup = v),
-                  ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Saqlash")),
+            TextButton(
+              onPressed: () {
+                if (decided) return;
+                decided = true;
+                Navigator.pop(ctx, false);
+              },
+              child: const Text("Bekor"),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (decided) return;
+                decided = true;
+                Navigator.pop(ctx, true);
+              },
+              child: const Text("Saqlash"),
+            ),
           ],
-        );
-      },
-    ),
-  );
-  if (ok != true) return;
-  final amount = parseNumberInput(amountCtrl.text);
-  if (amount == null || amount <= 0) {
-    if (context.mounted) showSnack(context, "Summa 0 dan katta bo'lishi kerak", error: true);
-    return;
-  }
-  try {
-    final res = asMap(
-      await ref.read(apiClientProvider).post(
-        '/payments',
+        ),
+      ),
+    );
+    if (ok != true) return;
+    final amount = parseNumberInput(amountCtrl.text);
+    if (amount == null || amount <= 0) {
+      if (context.mounted) showSnack(context, "Summa 0 dan katta bo'lishi kerak", error: true);
+      return;
+    }
+    try {
+      await ref.read(apiClientProvider).patch(
+        '/payments/${asInt(payment['id'])}',
         data: {
-          'client_id': selectedId,
           'amount': amount,
           'payment_method': method,
           'note': noteCtrl.text.trim(),
-          'post_to_group': postGroup,
         },
-      ),
-    );
-    invalidateOperationalData(ref);
-    onSuccess?.call();
-    if (context.mounted) {
-      showSnack(
-        context,
-        res['group_posted'] == true ? "To'lov saqlandi va guruhga yuborildi" : "To'lov saqlandi",
       );
+      invalidateOperationalData(ref);
+      onSuccess?.call();
+      if (context.mounted) showSnack(context, "To'lov yangilandi");
+    } catch (e) {
+      if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
     }
-  } catch (e) {
-    if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
-  }
-}
-
-Future<void> openEditPaymentDialog(
-  BuildContext context,
-  WidgetRef ref,
-  Map<String, dynamic> payment, {
-  VoidCallback? onSuccess,
-}) async {
-  final amountCtrl = TextEditingController(text: asDouble(payment['amount']).round().toString());
-  final noteCtrl = TextEditingController(text: asStr(payment['note']));
-  String method = asStr(payment['payment_method'], 'cash');
-  if (!const ['cash', 'card', 'transfer'].contains(method)) method = 'cash';
-
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setDlg) => AlertDialog(
-        title: const Text("To'lovni tahrirlash"),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: amountCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Summa (so'm) *"),
-              ),
-              const SizedBox(height: 12),
-              SegmentedButton<String>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'cash', label: Text("Naqd")),
-                  ButtonSegment(value: 'card', label: Text("Karta")),
-                  ButtonSegment(value: 'transfer', label: Text("O'tkazma")),
-                ],
-                selected: {method},
-                onSelectionChanged: (s) => setDlg(() => method = s.first),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: noteCtrl,
-                decoration: const InputDecoration(labelText: "Izoh"),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Saqlash")),
-        ],
-      ),
-    ),
-  );
-  if (ok != true) return;
-  final amount = parseNumberInput(amountCtrl.text);
-  if (amount == null || amount <= 0) {
-    if (context.mounted) showSnack(context, "Summa 0 dan katta bo'lishi kerak", error: true);
-    return;
-  }
-  try {
-    await ref.read(apiClientProvider).patch(
-      '/payments/${asInt(payment['id'])}',
-      data: {
-        'amount': amount,
-        'payment_method': method,
-        'note': noteCtrl.text.trim(),
-      },
-    );
-    invalidateOperationalData(ref);
-    onSuccess?.call();
-    if (context.mounted) showSnack(context, "To'lov yangilandi");
-  } catch (e) {
-    if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
-  }
+  });
 }
 
 Future<void> openEditCashTxDialog(
@@ -528,50 +596,67 @@ Future<void> openEditCashTxDialog(
   WidgetRef ref,
   Map<String, dynamic> tx,
 ) async {
-  final amountCtrl = TextEditingController(text: asDouble(tx['amount']).round().toString());
-  final noteCtrl = TextEditingController(text: asStr(tx['note']));
+  await ActionGuard.run('dlg:edit_tx:${asInt(tx['id'])}', () async {
+    final amountCtrl = TextEditingController(text: asDouble(tx['amount']).round().toString());
+    final noteCtrl = TextEditingController(text: asStr(tx['note']));
+    bool decided = false;
 
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text("Kassa yozuvini tahrirlash"),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: amountCtrl,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: "Summa (so'm) *"),
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Kassa yozuvini tahrirlash"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: amountCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: "Summa (so'm) *"),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: noteCtrl,
+              decoration: const InputDecoration(labelText: "Izoh"),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              if (decided) return;
+              decided = true;
+              Navigator.pop(ctx, false);
+            },
+            child: const Text("Bekor"),
           ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: noteCtrl,
-            decoration: const InputDecoration(labelText: "Izoh"),
+          FilledButton(
+            onPressed: () {
+              if (decided) return;
+              decided = true;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text("Saqlash"),
           ),
         ],
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
-        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Saqlash")),
-      ],
-    ),
-  );
-  if (ok != true) return;
-  final amount = parseNumberInput(amountCtrl.text);
-  if (amount == null || amount <= 0) {
-    if (context.mounted) showSnack(context, "Summa 0 dan katta bo'lishi kerak", error: true);
-    return;
-  }
-  try {
-    await ref.read(apiClientProvider).patch(
-      '/cash/transactions/${asInt(tx['id'])}',
-      data: {'amount': amount, 'note': noteCtrl.text.trim()},
     );
-    invalidateOperationalData(ref);
-    if (context.mounted) showSnack(context, "Yozuv yangilandi");
-  } catch (e) {
-    if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
-  }
+    if (ok != true) return;
+    final amount = parseNumberInput(amountCtrl.text);
+    if (amount == null || amount <= 0) {
+      if (context.mounted) showSnack(context, "Summa 0 dan katta bo'lishi kerak", error: true);
+      return;
+    }
+    try {
+      await ref.read(apiClientProvider).patch(
+        '/cash/transactions/${asInt(tx['id'])}',
+        data: {'amount': amount, 'note': noteCtrl.text.trim()},
+      );
+      invalidateOperationalData(ref);
+      if (context.mounted) showSnack(context, "Yozuv yangilandi");
+    } catch (e) {
+      if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    }
+  });
 }
 
 class CashScreen extends ConsumerStatefulWidget {
@@ -585,13 +670,15 @@ class _CashScreenState extends ConsumerState<CashScreen> {
   int _segment = 0; // 0: Sotuvlar, 1: To'lovlar, 2: Vozvrat, 3: Xarajat/Kassa
 
   Future<void> _showHistorySheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(top: false, child: _SessionHistorySheet(parentRef: ref)),
-    );
+    await ActionGuard.run('sheet:history', () async {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(top: false, child: _SessionHistorySheet(parentRef: ref)),
+      );
+    });
   }
 
   @override
@@ -1161,20 +1248,22 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
   }
 
   void _openDayDetail(int sid, String reportDate) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: _SessionDetailSheet(
-          api: widget.parentRef.read(apiClientProvider),
-          sessionId: sid,
-          reportDate: reportDate,
+    ActionGuard.run('sheet:day_detail:$sid', () async {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          top: false,
+          child: _SessionDetailSheet(
+            api: widget.parentRef.read(apiClientProvider),
+            sessionId: sid,
+            reportDate: reportDate,
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 
   @override

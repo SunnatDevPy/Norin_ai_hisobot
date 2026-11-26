@@ -9,6 +9,56 @@ import '../theme/app_theme.dart';
 
 const tNumStyle = TextStyle(fontFeatures: [FontFeature.tabularFigures()]);
 
+/// Prevents accidental 2x-3x rapid taps on buttons, dialogs, sheets, and routes.
+class ActionGuard {
+  static final Set<String> _inFlight = <String>{};
+  static final Map<String, DateTime> _lastDone = <String, DateTime>{};
+
+  static bool isBusy(String key) => _inFlight.contains(key);
+
+  /// Synchronous tap throttle for opening dialogs, routes, or triggering instant actions.
+  static bool allowTap(
+    String key, {
+    Duration cooldown = const Duration(milliseconds: 550),
+  }) {
+    if (_inFlight.contains(key)) return false;
+    final now = DateTime.now();
+    final last = _lastDone[key];
+    if (last != null && now.difference(last) < cooldown) {
+      return false;
+    }
+    _lastDone[key] = now;
+    return true;
+  }
+
+  /// Runs [action] exclusively for [key], blocking any 2nd/3rd tap while in-flight
+  /// and for [cooldown] after completion.
+  static Future<T?> run<T>(
+    String key,
+    Future<T> Function() action, {
+    Duration cooldown = const Duration(milliseconds: 600),
+  }) async {
+    if (_inFlight.contains(key)) return null;
+    final now = DateTime.now();
+    final last = _lastDone[key];
+    if (last != null && now.difference(last) < cooldown) {
+      return null;
+    }
+    _inFlight.add(key);
+    try {
+      return await action();
+    } finally {
+      _inFlight.remove(key);
+      _lastDone[key] = DateTime.now();
+    }
+  }
+
+  static void resetForTest() {
+    _inFlight.clear();
+    _lastDone.clear();
+  }
+}
+
 void showSnack(BuildContext context, String msg, {bool error = false}) {
   if (error) {
     HapticFeedback.mediumImpact();
@@ -253,6 +303,7 @@ class PressableScale extends StatefulWidget {
     this.scaleFactor = 0.95,
     this.enabled = true,
     this.haptic = true,
+    this.tapCooldown = const Duration(milliseconds: 450),
     this.onTap,
   });
 
@@ -260,6 +311,7 @@ class PressableScale extends StatefulWidget {
   final double scaleFactor;
   final bool enabled;
   final bool haptic;
+  final Duration tapCooldown;
   final VoidCallback? onTap;
 
   @override
@@ -268,11 +320,23 @@ class PressableScale extends StatefulWidget {
 
 class _PressableScaleState extends State<PressableScale> {
   bool _pressed = false;
+  DateTime? _lastTapAt;
 
   void _setPressed(bool value) {
     if (_pressed != value && mounted) {
       setState(() => _pressed = value);
     }
+  }
+
+  void _handleTap() {
+    if (widget.tapCooldown > Duration.zero) {
+      final now = DateTime.now();
+      if (_lastTapAt != null && now.difference(_lastTapAt!) < widget.tapCooldown) {
+        return;
+      }
+      _lastTapAt = now;
+    }
+    widget.onTap?.call();
   }
 
   @override
@@ -297,7 +361,7 @@ class _PressableScaleState extends State<PressableScale> {
     if (widget.onTap != null && widget.enabled) {
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
+        onTap: _handleTap,
         child: content,
       );
     }

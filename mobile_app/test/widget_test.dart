@@ -284,4 +284,43 @@ void main() {
     expect(find.textContaining('PIN-kodlar mos kelmadi'), findsOneWidget);
     expect(find.text('4 xonali PIN-kod yarating'), findsOneWidget);
   });
+
+  test('ActionGuard blocks rapid 2x-3x taps and concurrent runs', () async {
+    ActionGuard.resetForTest();
+    int runs = 0;
+    final f1 = ActionGuard.run('save_pay', () async {
+      runs++;
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      return 'ok';
+    }, cooldown: const Duration(milliseconds: 200));
+    final f2 = ActionGuard.run('save_pay', () async {
+      runs++;
+      return 'dup';
+    }, cooldown: const Duration(milliseconds: 200));
+    final f3 = ActionGuard.run('save_pay', () async {
+      runs++;
+      return 'dup2';
+    }, cooldown: const Duration(milliseconds: 200));
+
+    final results = await Future.wait([f1, f2, f3]);
+    expect(results, ['ok', null, null]);
+    expect(runs, 1);
+
+    // Still blocked immediately after completion within cooldown
+    final immediate = await ActionGuard.run('save_pay', () async {
+      runs++;
+      return 'too_soon';
+    }, cooldown: const Duration(milliseconds: 200));
+    expect(immediate, isNull);
+    expect(runs, 1);
+
+    // Allowed again after cooldown expires
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    final after = await ActionGuard.run('save_pay', () async {
+      runs++;
+      return 'ok2';
+    }, cooldown: const Duration(milliseconds: 200));
+    expect(after, 'ok2');
+    expect(runs, 2);
+  });
 }

@@ -38,287 +38,351 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
   }
 
   Future<void> _addReturnDialog(Map<String, dynamic> card) async {
-    final products = ref.read(productsProvider).valueOrNull ?? const <Map<String, dynamic>>[];
-    if (products.isEmpty) {
-      showSnack(context, "Mahsulotlar topilmadi", error: true);
-      return;
-    }
-    int pid = asInt(products.first['id']);
-    final kgCtrl = TextEditingController();
-    final reasonCtrl = TextEditingController();
-    bool postGroup = card['group_chat_id'] != null;
+    await ActionGuard.run('dlg:add_return', () async {
+      final products = ref.read(productsProvider).valueOrNull ?? const <Map<String, dynamic>>[];
+      if (products.isEmpty) {
+        showSnack(context, "Mahsulotlar topilmadi", error: true);
+        return;
+      }
+      int pid = asInt(products.first['id']);
+      final kgCtrl = TextEditingController();
+      final reasonCtrl = TextEditingController();
+      bool postGroup = card['group_chat_id'] != null;
+      bool decided = false;
 
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlg) => AlertDialog(
-          title: Text("Vozvrat — ${asStr(card['name'])}"),
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDlg) => AlertDialog(
+            title: Text("Vozvrat — ${asStr(card['name'])}"),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<int>(
+                    key: ValueKey('ret_prod_$pid'),
+                    initialValue: pid,
+                    decoration: const InputDecoration(labelText: "Mahsulot"),
+                    items: products
+                        .map(
+                          (p) => DropdownMenuItem<int>(
+                            value: asInt(p['id']),
+                            child: Text(asStr(p['name'])),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => setDlg(() => pid = v ?? pid),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: kgCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: "Vazn / Miqdor *"),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: reasonCtrl,
+                    decoration: const InputDecoration(labelText: "Sabab (ixtiyoriy)"),
+                  ),
+                  if (card['group_chat_id'] != null)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text("Guruhga yuborish"),
+                      value: postGroup,
+                      onChanged: (v) => setDlg(() => postGroup = v),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  if (decided) return;
+                  decided = true;
+                  Navigator.pop(ctx, false);
+                },
+                child: const Text("Bekor"),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (decided) return;
+                  decided = true;
+                  Navigator.pop(ctx, true);
+                },
+                child: const Text("Saqlash"),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (ok != true) return;
+      final kg = parseNumberInput(kgCtrl.text);
+      if (kg == null || kg <= 0) {
+        if (mounted) showSnack(context, "Vaznni to'g'ri kiriting", error: true);
+        return;
+      }
+      try {
+        await ref.read(apiClientProvider).post(
+          '/returns',
+          data: {
+            'client_id': widget.clientId,
+            'product_id': pid,
+            'weight_kg': kg,
+            'reason': reasonCtrl.text.trim(),
+            'post_to_group': postGroup,
+          },
+        );
+        _refresh();
+        if (mounted) showSnack(context, "Vozvrat qayd etildi");
+      } catch (e) {
+        if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+      }
+    });
+  }
+
+  Future<void> _customPricesDialog(Map<String, dynamic> card) async {
+    await ActionGuard.run('sheet:custom_prices', () async {
+      final products = ref.read(productsProvider).valueOrNull ?? const <Map<String, dynamic>>[];
+      final customPrices = asMap(card['custom_prices']);
+
+      await showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          top: false,
+          child: ListView.separated(
+            shrinkWrap: true,
+            padding: EdgeInsets.fromLTRB(20, 4, 20, screenBottomClearance(ctx, extra: 36)),
+            itemCount: products.length + 1,
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            itemBuilder: (ctx, i) {
+              if (i == 0) {
+                return Text(
+                  "Shaxsiy narxlar — ${asStr(card['name'])}",
+                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                );
+              }
+              final p = products[i - 1];
+              final pid = asInt(p['id']);
+              final customVal = customPrices['$pid'];
+              final defVal = asDouble(p['default_sell_price']);
+              return ListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                tileColor: Theme.of(ctx).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                title: Text(asStr(p['name']), style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(
+                  customVal != null
+                      ? "Shaxsiy: ${formatUzs(asDouble(customVal))} (Standart: ${formatUzs(defVal)})"
+                      : "Standart: ${formatUzs(defVal)}",
+                ),
+                trailing: const Icon(Icons.edit_outlined),
+                onTap: () => ActionGuard.run('dlg:price:$pid', () async {
+                  final ctrl = TextEditingController(
+                    text: customVal != null ? asDouble(customVal).round().toString() : '',
+                  );
+                  bool decided = false;
+                  final act = await showDialog<String>(
+                    context: ctx,
+                    builder: (dCtx) => AlertDialog(
+                      title: Text("${asStr(p['name'])} narxi"),
+                      content: TextField(
+                        controller: ctrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: "Shaxsiy sotuv narxi",
+                          hintText: defVal.round().toString(),
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () {
+                            if (decided) return;
+                            decided = true;
+                            Navigator.pop(dCtx, 'reset');
+                          },
+                          child: const Text("Standartga"),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            if (decided) return;
+                            decided = true;
+                            Navigator.pop(dCtx);
+                          },
+                          child: const Text("Bekor"),
+                        ),
+                        FilledButton(
+                          onPressed: () {
+                            if (decided) return;
+                            decided = true;
+                            Navigator.pop(dCtx, 'save');
+                          },
+                          child: const Text("Saqlash"),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (act == null) return;
+                  try {
+                    final val = act == 'reset' ? null : parseNumberInput(ctrl.text);
+                    await ref.read(apiClientProvider).put(
+                      '/clients/${widget.clientId}/prices/$pid',
+                      data: {'sell_price': val},
+                    );
+                    _refresh();
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (mounted) showSnack(context, "Narx yangilandi");
+                  } catch (e) {
+                    if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+                  }
+                }),
+              );
+            },
+          ),
+        ),
+      );
+    });
+  }
+
+  Future<void> _editClientDialog(Map<String, dynamic> card) async {
+    await ActionGuard.run('dlg:edit_client', () async {
+      final nameCtrl = TextEditingController(text: asStr(card['name']));
+      final phoneCtrl = TextEditingController(text: asStr(card['phone']));
+      final debtCtrl = TextEditingController(text: asDouble(card['opening_debt']).round().toString());
+      final aliasCtrl = TextEditingController(text: asStr(card['aliases']));
+      bool decided = false;
+
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Mijozni tahrirlash"),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                DropdownButtonFormField<int>(
-                  key: ValueKey('ret_prod_$pid'),
-                  initialValue: pid,
-                  decoration: const InputDecoration(labelText: "Mahsulot"),
-                  items: products
-                      .map(
-                        (p) => DropdownMenuItem<int>(
-                          value: asInt(p['id']),
-                          child: Text(asStr(p['name'])),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (v) => setDlg(() => pid = v ?? pid),
-                ),
+                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Nomi")),
+                const SizedBox(height: 10),
+                TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: "Telefon")),
                 const SizedBox(height: 10),
                 TextField(
-                  controller: kgCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: "Vazn / Miqdor *"),
+                  controller: debtCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(signed: true),
+                  decoration: const InputDecoration(labelText: "Boshlang'ich qarz"),
                 ),
                 const SizedBox(height: 10),
-                TextField(
-                  controller: reasonCtrl,
-                  decoration: const InputDecoration(labelText: "Sabab (ixtiyoriy)"),
-                ),
-                if (card['group_chat_id'] != null)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text("Guruhga yuborish"),
-                    value: postGroup,
-                    onChanged: (v) => setDlg(() => postGroup = v),
-                  ),
+                TextField(controller: aliasCtrl, decoration: const InputDecoration(labelText: "Aliases")),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Saqlash")),
+            TextButton(
+              onPressed: () {
+                if (decided) return;
+                decided = true;
+                Navigator.pop(ctx, false);
+              },
+              child: const Text("Bekor"),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (decided) return;
+                decided = true;
+                Navigator.pop(ctx, true);
+              },
+              child: const Text("Saqlash"),
+            ),
           ],
         ),
-      ),
-    );
-    if (ok != true) return;
-    final kg = parseNumberInput(kgCtrl.text);
-    if (kg == null || kg <= 0) {
-      if (mounted) showSnack(context, "Vaznni to'g'ri kiriting", error: true);
-      return;
-    }
-    try {
-      await ref.read(apiClientProvider).post(
-        '/returns',
-        data: {
-          'client_id': widget.clientId,
-          'product_id': pid,
-          'weight_kg': kg,
-          'reason': reasonCtrl.text.trim(),
-          'post_to_group': postGroup,
-        },
       );
-      _refresh();
-      if (mounted) showSnack(context, "Vozvrat qayd etildi");
-    } catch (e) {
-      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
-    }
-  }
-
-  Future<void> _customPricesDialog(Map<String, dynamic> card) async {
-    final products = ref.read(productsProvider).valueOrNull ?? const <Map<String, dynamic>>[];
-    final customPrices = asMap(card['custom_prices']);
-
-    await showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        top: false,
-        child: ListView.separated(
-          shrinkWrap: true,
-          padding: EdgeInsets.fromLTRB(20, 4, 20, screenBottomClearance(ctx, extra: 36)),
-          itemCount: products.length + 1,
-          separatorBuilder: (_, _) => const SizedBox(height: 8),
-          itemBuilder: (ctx, i) {
-            if (i == 0) {
-              return Text(
-                "Shaxsiy narxlar — ${asStr(card['name'])}",
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-              );
-            }
-            final p = products[i - 1];
-            final pid = asInt(p['id']);
-            final customVal = customPrices['$pid'];
-            final defVal = asDouble(p['default_sell_price']);
-            return ListTile(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              tileColor: Theme.of(ctx).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-              title: Text(asStr(p['name']), style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(
-                customVal != null
-                    ? "Shaxsiy: ${formatUzs(asDouble(customVal))} (Standart: ${formatUzs(defVal)})"
-                    : "Standart: ${formatUzs(defVal)}",
-              ),
-              trailing: const Icon(Icons.edit_outlined),
-              onTap: () async {
-                final ctrl = TextEditingController(
-                  text: customVal != null ? asDouble(customVal).round().toString() : '',
-                );
-                final act = await showDialog<String>(
-                  context: ctx,
-                  builder: (dCtx) => AlertDialog(
-                    title: Text("${asStr(p['name'])} narxi"),
-                    content: TextField(
-                      controller: ctrl,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: "Shaxsiy sotuv narxi",
-                        hintText: defVal.round().toString(),
-                      ),
-                    ),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(dCtx, 'reset'), child: const Text("Standartga")),
-                      TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text("Bekor")),
-                      FilledButton(onPressed: () => Navigator.pop(dCtx, 'save'), child: const Text("Saqlash")),
-                    ],
-                  ),
-                );
-                if (act == null) return;
-                try {
-                  final val = act == 'reset' ? null : parseNumberInput(ctrl.text);
-                  await ref.read(apiClientProvider).put(
-                    '/clients/${widget.clientId}/prices/$pid',
-                    data: {'sell_price': val},
-                  );
-                  _refresh();
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  if (mounted) showSnack(context, "Narx yangilandi");
-                } catch (e) {
-                  if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
-                }
-              },
-            );
+      if (ok != true) return;
+      try {
+        await ref.read(apiClientProvider).patch(
+          '/clients/${widget.clientId}',
+          data: {
+            'name': nameCtrl.text.trim(),
+            'phone': phoneCtrl.text.trim(),
+            'opening_debt': parseNumberInput(debtCtrl.text) ?? 0,
+            'aliases': aliasCtrl.text.trim(),
           },
-        ),
-      ),
-    );
-  }
-
-  Future<void> _editClientDialog(Map<String, dynamic> card) async {
-    final nameCtrl = TextEditingController(text: asStr(card['name']));
-    final phoneCtrl = TextEditingController(text: asStr(card['phone']));
-    final debtCtrl = TextEditingController(text: asDouble(card['opening_debt']).round().toString());
-    final aliasCtrl = TextEditingController(text: asStr(card['aliases']));
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Mijozni tahrirlash"),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Nomi")),
-              const SizedBox(height: 10),
-              TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: "Telefon")),
-              const SizedBox(height: 10),
-              TextField(
-                controller: debtCtrl,
-                keyboardType: const TextInputType.numberWithOptions(signed: true),
-                decoration: const InputDecoration(labelText: "Boshlang'ich qarz"),
-              ),
-              const SizedBox(height: 10),
-              TextField(controller: aliasCtrl, decoration: const InputDecoration(labelText: "Aliases")),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Saqlash")),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await ref.read(apiClientProvider).patch(
-        '/clients/${widget.clientId}',
-        data: {
-          'name': nameCtrl.text.trim(),
-          'phone': phoneCtrl.text.trim(),
-          'opening_debt': parseNumberInput(debtCtrl.text) ?? 0,
-          'aliases': aliasCtrl.text.trim(),
-        },
-      );
-      _refresh();
-      if (mounted) showSnack(context, "Mijoz ma'lumoti yangilandi");
-    } catch (e) {
-      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
-    }
+        );
+        _refresh();
+        if (mounted) showSnack(context, "Mijoz ma'lumoti yangilandi");
+      } catch (e) {
+        if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+      }
+    });
   }
 
   Future<void> _deleteClient(String name) async {
-    final yes = await showConfirmDialog(
-      context,
-      title: "Mijozni o'chirish",
-      message: "\"$name\" mijozini arxivga o'tkazasizmi?",
-      confirmLabel: "O'chirish",
-      destructive: true,
-    );
-    if (!yes) return;
-    try {
-      await ref.read(apiClientProvider).delete('/clients/${widget.clientId}');
-      invalidateOperationalData(ref);
-      if (mounted) {
-        Navigator.pop(context);
-        showSnack(context, "Mijoz o'chirildi");
+    await ActionGuard.run('act:del_client:${widget.clientId}', () async {
+      final yes = await showConfirmDialog(
+        context,
+        title: "Mijozni o'chirish",
+        message: "\"$name\" mijozini arxivga o'tkazasizmi?",
+        confirmLabel: "O'chirish",
+        destructive: true,
+      );
+      if (!yes) return;
+      try {
+        await ref.read(apiClientProvider).delete('/clients/${widget.clientId}');
+        invalidateOperationalData(ref);
+        if (mounted) {
+          Navigator.pop(context);
+          showSnack(context, "Mijoz o'chirildi");
+        }
+      } catch (e) {
+        if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
       }
-    } catch (e) {
-      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
-    }
+    });
   }
 
   Future<void> _shareStatementText(Map<String, dynamic> card, List<Map<String, dynamic>> events) async {
-    final name = asStr(card['name'], widget.initialName);
-    final debt = asDouble(card['current_debt']);
-    final statusLine = debt > 0
-        ? "Joriy qarz: ${formatUzs(debt)}"
-        : (debt < 0 ? "Avans (haqi): ${formatUzs(debt.abs())}" : "Balans: 0 so'm (toza)");
-    final buf = StringBuffer()
-      ..writeln("📄 Sotuv AI — Akt Sverka")
-      ..writeln("Mijoz: $name")
-      ..writeln(statusLine)
-      ..writeln("Jami savdo: ${formatUzs(asDouble(card['total_sales']))}")
-      ..writeln("Jami to'lov: ${formatUzs(asDouble(card['total_payments']))}");
-    if (asDouble(card['total_returns']) > 0) {
-      buf.writeln("Vozvrat: ${formatUzs(asDouble(card['total_returns']))}");
-    }
-    if (events.isNotEmpty) {
-      buf.writeln("\nSo'nggi harakatlar:");
-      final recent = events.length > 6 ? events.sublist(events.length - 6) : events;
-      for (final ev in recent.reversed) {
-        final debit = asDouble(ev['debit']);
-        final credit = asDouble(ev['credit']);
-        final amt = debit > 0 ? "+${formatUzs(debit)}" : "-${formatUzs(credit)}";
-        buf.writeln("• ${formatShortDate(asStr(ev['at']))} | ${asStr(ev['doc'])} | $amt");
+    await ActionGuard.run('act:share_sverka', () async {
+      final name = asStr(card['name'], widget.initialName);
+      final debt = asDouble(card['current_debt']);
+      final statusLine = debt > 0
+          ? "Joriy qarz: ${formatUzs(debt)}"
+          : (debt < 0 ? "Avans (haqi): ${formatUzs(debt.abs())}" : "Balans: 0 so'm (toza)");
+      final buf = StringBuffer()
+        ..writeln("📄 Sotuv AI — Akt Sverka")
+        ..writeln("Mijoz: $name")
+        ..writeln(statusLine)
+        ..writeln("Jami savdo: ${formatUzs(asDouble(card['total_sales']))}")
+        ..writeln("Jami to'lov: ${formatUzs(asDouble(card['total_payments']))}");
+      if (asDouble(card['total_returns']) > 0) {
+        buf.writeln("Vozvrat: ${formatUzs(asDouble(card['total_returns']))}");
       }
-    }
-    await Share.share(buf.toString().trim());
+      if (events.isNotEmpty) {
+        buf.writeln("\nSo'nggi harakatlar:");
+        final recent = events.length > 6 ? events.sublist(events.length - 6) : events;
+        for (final ev in recent.reversed) {
+          final debit = asDouble(ev['debit']);
+          final credit = asDouble(ev['credit']);
+          final amt = debit > 0 ? "+${formatUzs(debit)}" : "-${formatUzs(credit)}";
+          buf.writeln("• ${formatShortDate(asStr(ev['at']))} | ${asStr(ev['doc'])} | $amt");
+        }
+      }
+      await Share.share(buf.toString().trim());
+    });
   }
 
   Future<void> _sendSverkaGroup() async {
-    try {
-      final res = asMap(
-        await ref.read(apiClientProvider).post('/clients/${widget.clientId}/send-sverka'),
-      );
-      if (mounted) {
-        showSnack(
-          context,
-          asStr(res['message'], res['posted'] == true ? "Sverka guruhga yuborildi" : "Yuborilmadi"),
-          error: res['posted'] != true,
+    await ActionGuard.run('act:send_sverka_grp:${widget.clientId}', () async {
+      try {
+        final res = asMap(
+          await ref.read(apiClientProvider).post('/clients/${widget.clientId}/send-sverka'),
         );
+        if (mounted) {
+          showSnack(
+            context,
+            asStr(res['message'], res['posted'] == true ? "Sverka guruhga yuborildi" : "Yuborilmadi"),
+            error: res['posted'] != true,
+          );
+        }
+      } catch (e) {
+        if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
       }
-    } catch (e) {
-      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
-    }
+    });
   }
 
   @override

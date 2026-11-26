@@ -752,14 +752,16 @@ Future<void> runExcelAction(
   Map<String, dynamic>? query,
   required bool share,
 }) async {
-  showSnack(context, "Excel tayyorlanmoqda...");
-  try {
-    await api.openOrShareExcel(path, filename, query: query, share: share);
-  } catch (e) {
-    if (context.mounted) {
-      showSnack(context, ApiClient.extractError(e), error: true);
+  await ActionGuard.run('excel_run:$path:$share', () async {
+    showSnack(context, "Excel tayyorlanmoqda...");
+    try {
+      await api.openOrShareExcel(path, filename, query: query, share: share);
+    } catch (e) {
+      if (context.mounted) {
+        showSnack(context, ApiClient.extractError(e), error: true);
+      }
     }
-  }
+  });
 }
 
 Future<void> showExcelActionPicker(
@@ -770,52 +772,59 @@ Future<void> showExcelActionPicker(
   required String filename,
   Map<String, dynamic>? query,
 }) async {
-  await showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    builder: (ctx) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            Text(filename, style: Theme.of(ctx).textTheme.bodySmall),
-            const SizedBox(height: 16),
-            ListTile(
-              leading: CircleAvatar(
-                backgroundColor: NorinPalette.emerald.withValues(alpha: 0.16),
-                child: const Icon(Icons.open_in_new_rounded, color: NorinPalette.emeraldLight),
+  await ActionGuard.run('excel_sheet:$path', () async {
+    bool picked = false;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(20, 4, 20, screenBottomClearance(ctx, extra: 20)),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text(filename, style: Theme.of(ctx).textTheme.bodySmall),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: NorinPalette.emerald.withValues(alpha: 0.16),
+                  child: const Icon(Icons.open_in_new_rounded, color: NorinPalette.emeraldLight),
+                ),
+                title: const Text("Telefonda ochish"),
+                subtitle: const Text("Excel dasturida ko'rish"),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                onTap: () {
+                  if (picked) return;
+                  picked = true;
+                  Navigator.pop(ctx);
+                  runExcelAction(context, api, path: path, filename: filename, query: query, share: false);
+                },
               ),
-              title: const Text("Telefonda ochish"),
-              subtitle: const Text("Excel dasturida ko'rish"),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              onTap: () {
-                Navigator.pop(ctx);
-                runExcelAction(context, api, path: path, filename: filename, query: query, share: false);
-              },
-            ),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: CircleAvatar(
-                backgroundColor: NorinPalette.sky.withValues(alpha: 0.16),
-                child: const Icon(Icons.share_rounded, color: NorinPalette.sky),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: NorinPalette.sky.withValues(alpha: 0.16),
+                  child: const Icon(Icons.share_rounded, color: NorinPalette.sky),
+                ),
+                title: const Text("Ulashish (Telegram / WhatsApp)"),
+                subtitle: const Text("Faylni yuborish yoki saqlash"),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                onTap: () {
+                  if (picked) return;
+                  picked = true;
+                  Navigator.pop(ctx);
+                  runExcelAction(context, api, path: path, filename: filename, query: query, share: true);
+                },
               ),
-              title: const Text("Ulashish (Telegram / WhatsApp)"),
-              subtitle: const Text("Faylni yuborish yoki saqlash"),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              onTap: () {
-                Navigator.pop(ctx);
-                runExcelAction(context, api, path: path, filename: filename, query: query, share: true);
-              },
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  });
 }
 
 Future<bool> showConfirmDialog(
@@ -825,25 +834,37 @@ Future<bool> showConfirmDialog(
   String confirmLabel = "Tasdiqlash",
   bool destructive = false,
 }) async {
-  final res = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text(title),
-      content: Text(message),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: const Text("Bekor qilish"),
-        ),
-        FilledButton(
-          style: destructive
-              ? FilledButton.styleFrom(backgroundColor: NorinPalette.danger)
-              : null,
-          onPressed: () => Navigator.pop(ctx, true),
-          child: Text(confirmLabel),
-        ),
-      ],
-    ),
-  );
+  final res = await ActionGuard.run<bool>('confirm_dlg:$title', () async {
+    bool decided = false;
+    final out = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () {
+              if (decided) return;
+              decided = true;
+              Navigator.pop(ctx, false);
+            },
+            child: const Text("Bekor qilish"),
+          ),
+          FilledButton(
+            style: destructive
+                ? FilledButton.styleFrom(backgroundColor: NorinPalette.danger)
+                : null,
+            onPressed: () {
+              if (decided) return;
+              decided = true;
+              Navigator.pop(ctx, true);
+            },
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
+    );
+    return out == true;
+  });
   return res == true;
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -68,6 +69,59 @@ class ApiClient {
   int _baseTenantId = 1;
   int? _selectedTenantId;
   Completer<bool>? _refreshCompleter;
+
+  final Map<String, Future<dynamic>> _inFlightWrites = <String, Future<dynamic>>{};
+  final Map<String, ({DateTime at, dynamic data})> _recentWrites =
+      <String, ({DateTime at, dynamic data})>{};
+  static const Duration _writeDedupWindow = Duration(milliseconds: 1200);
+
+  static const _dedupExemptPaths = <String>{
+    '/auth/telegram-poll',
+    '/auth/refresh',
+  };
+
+  String _writeKey(String method, String path, dynamic data) {
+    String bodyStr = '';
+    if (data != null) {
+      try {
+        bodyStr = jsonEncode(data);
+      } catch (_) {
+        bodyStr = data.toString();
+      }
+    }
+    return '$method|${_selectedTenantId ?? _baseTenantId}|$path|$bodyStr';
+  }
+
+  Future<dynamic> _runDedupWrite(
+    String method,
+    String path,
+    dynamic data,
+    Future<dynamic> Function() exec,
+  ) {
+    final cleanPath = path.split('?').first;
+    if (_dedupExemptPaths.any((p) => cleanPath.endsWith(p))) {
+      return exec();
+    }
+    final key = _writeKey(method, path, data);
+    final existing = _inFlightWrites[key];
+    if (existing != null) {
+      return existing;
+    }
+    final now = DateTime.now();
+    _recentWrites.removeWhere((_, v) => now.difference(v.at) >= _writeDedupWindow);
+    final recent = _recentWrites[key];
+    if (recent != null && now.difference(recent.at) < _writeDedupWindow) {
+      return Future<dynamic>.value(recent.data);
+    }
+    final future = exec().then((res) {
+      _recentWrites[key] = (at: DateTime.now(), data: res);
+      return res;
+    }).whenComplete(() {
+      _inFlightWrites.remove(key);
+    });
+    _inFlightWrites[key] = future;
+    return future;
+  }
 
   static const _publicAuthPaths = <String>{
     '/auth/refresh',
@@ -220,37 +274,47 @@ class ApiClient {
     return resp.data;
   }
 
-  Future<dynamic> post(String path, {dynamic data}) async {
-    final resp = await _dio.post(path, data: data);
-    return resp.data;
+  Future<dynamic> post(String path, {dynamic data}) {
+    return _runDedupWrite('POST', path, data, () async {
+      final resp = await _dio.post(path, data: data);
+      return resp.data;
+    });
   }
 
-  Future<dynamic> patch(String path, {dynamic data}) async {
-    final resp = await _dio.patch(path, data: data);
-    return resp.data;
+  Future<dynamic> patch(String path, {dynamic data}) {
+    return _runDedupWrite('PATCH', path, data, () async {
+      final resp = await _dio.patch(path, data: data);
+      return resp.data;
+    });
   }
 
-  Future<dynamic> put(String path, {dynamic data}) async {
-    final resp = await _dio.put(path, data: data);
-    return resp.data;
+  Future<dynamic> put(String path, {dynamic data}) {
+    return _runDedupWrite('PUT', path, data, () async {
+      final resp = await _dio.put(path, data: data);
+      return resp.data;
+    });
   }
 
-  Future<dynamic> delete(String path) async {
-    final resp = await _dio.delete(path);
-    return resp.data;
+  Future<dynamic> delete(String path) {
+    return _runDedupWrite('DELETE', path, null, () async {
+      final resp = await _dio.delete(path);
+      return resp.data;
+    });
   }
 
   Future<dynamic> uploadFile(
     String path,
     String filePath, {
     String? caption,
-  }) async {
-    final form = FormData.fromMap({
-      'file': await MultipartFile.fromFile(filePath),
-      if (caption != null && caption.trim().isNotEmpty) 'caption': caption.trim(),
+  }) {
+    return _runDedupWrite('UPLOAD', path, {'file': filePath, 'caption': caption ?? ''}, () async {
+      final form = FormData.fromMap({
+        'file': await MultipartFile.fromFile(filePath),
+        if (caption != null && caption.trim().isNotEmpty) 'caption': caption.trim(),
+      });
+      final resp = await _dio.post(path, data: form);
+      return resp.data;
     });
-    final resp = await _dio.post(path, data: form);
-    return resp.data;
   }
 
   Future<void> downloadWithProgress(

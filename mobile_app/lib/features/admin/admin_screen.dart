@@ -60,123 +60,142 @@ class _AdminScreenState extends ConsumerState<AdminScreen> with SingleTickerProv
   }
 
   Future<void> _createTenantDialog() async {
-    final nameCtrl = TextEditingController();
-    final priceCtrl = TextEditingController(text: '300000');
-    final daysCtrl = TextEditingController(text: '30');
-    final ownerTgCtrl = TextEditingController();
-    final ownerNameCtrl = TextEditingController();
+    await ActionGuard.run('dlg:create_tenant', () async {
+      final nameCtrl = TextEditingController();
+      final priceCtrl = TextEditingController(text: '300000');
+      final daysCtrl = TextEditingController(text: '30');
+      final ownerTgCtrl = TextEditingController();
+      final ownerNameCtrl = TextEditingController();
+      bool decided = false;
 
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Yangi do'kon"),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Do'kon nomi *")),
-              const SizedBox(height: 10),
-              TextField(
-                controller: priceCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Oylik narx (so'm)"),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: daysCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Sinov kunlari"),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: ownerTgCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Egasi Telegram ID (ixtiyoriy)"),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: ownerNameCtrl,
-                decoration: const InputDecoration(labelText: "Egasi ismi (ixtiyoriy)"),
-              ),
-            ],
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Yangi do'kon"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Do'kon nomi *")),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: priceCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: "Oylik narx (so'm)"),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: daysCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: "Sinov kunlari"),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: ownerTgCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: "Egasi Telegram ID (ixtiyoriy)"),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: ownerNameCtrl,
+                  decoration: const InputDecoration(labelText: "Egasi ismi (ixtiyoriy)"),
+                ),
+              ],
+            ),
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Yaratish")),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    final name = nameCtrl.text.trim();
-    if (name.isEmpty) {
-      if (mounted) showSnack(context, "Do'kon nomini kiriting", error: true);
-      return;
-    }
-    try {
-      final api = ref.read(apiClientProvider);
-      final created = asMap(
-        await api.post(
-          '/admin/tenants',
-          data: {
-            'tenant_name': name,
-            'monthly_price': double.tryParse(priceCtrl.text.trim()) ?? 300000,
-            'trial_days': int.tryParse(daysCtrl.text.trim()) ?? 30,
-          },
+          actions: [
+            TextButton(
+              onPressed: () {
+                if (decided) return;
+                decided = true;
+                Navigator.pop(ctx, false);
+              },
+              child: const Text("Bekor"),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (decided) return;
+                decided = true;
+                Navigator.pop(ctx, true);
+              },
+              child: const Text("Yaratish"),
+            ),
+          ],
         ),
       );
-      final newTid = asInt(created['id']);
-      final ownerTg = int.tryParse(ownerTgCtrl.text.trim());
-      if (newTid > 0 && ownerTg != null && ownerTg > 0) {
-        await api.post(
-          '/admin/users',
-          data: {
-            'telegram_id': ownerTg,
-            'full_name': ownerNameCtrl.text.trim(),
-            'role': 'owner',
-            'tenant_id': newTid,
-          },
-        );
+      if (ok != true) return;
+      final name = nameCtrl.text.trim();
+      if (name.isEmpty) {
+        if (mounted) showSnack(context, "Do'kon nomini kiriting", error: true);
+        return;
       }
-      ref.invalidate(adminTenantsProvider);
-      ref.invalidate(adminAnalyticsProvider);
-      if (mounted) showSnack(context, "Do'kon \"$name\" yaratildi");
-    } catch (e) {
-      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
-    }
+      try {
+        final api = ref.read(apiClientProvider);
+        final created = asMap(
+          await api.post(
+            '/admin/tenants',
+            data: {
+              'tenant_name': name,
+              'monthly_price': parseNumberInput(priceCtrl.text) ?? 300000,
+              'trial_days': int.tryParse(daysCtrl.text.trim()) ?? 30,
+            },
+          ),
+        );
+        final newTid = asInt(created['id']);
+        final ownerTg = int.tryParse(ownerTgCtrl.text.trim());
+        if (newTid > 0 && ownerTg != null && ownerTg > 0) {
+          await api.post(
+            '/admin/users',
+            data: {
+              'telegram_id': ownerTg,
+              'full_name': ownerNameCtrl.text.trim(),
+              'role': 'owner',
+              'tenant_id': newTid,
+            },
+          );
+        }
+        ref.invalidate(adminTenantsProvider);
+        ref.invalidate(adminAnalyticsProvider);
+        if (mounted) showSnack(context, "Do'kon \"$name\" yaratildi");
+      } catch (e) {
+        if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+      }
+    });
   }
 
   Future<void> _sendBroadcast() async {
-    final txt = _broadcastCtrl.text.trim();
-    if (txt.isEmpty) {
-      showSnack(context, "E'lon matnini kiriting", error: true);
-      return;
-    }
-    final yes = await showConfirmDialog(
-      context,
-      title: "Barchaga e'lon",
-      message: "Xabar barcha faol foydalanuvchilarga yuborilsinmi?",
-      confirmLabel: "Yuborish",
-    );
-    if (!yes) return;
-    setState(() => _sendingBroadcast = true);
-    try {
-      final res = asMap(
-        await ref.read(apiClientProvider).post('/admin/broadcast', data: {'text': txt}),
-      );
-      _broadcastCtrl.clear();
-      await _loadAudit();
-      if (mounted) {
-        showSnack(
-          context,
-          "Yuborildi: ${asInt(res['sent'])} / ${asInt(res['total'])} ta",
-        );
+    await ActionGuard.run('act:admin_broadcast', () async {
+      final txt = _broadcastCtrl.text.trim();
+      if (txt.isEmpty) {
+        showSnack(context, "E'lon matnini kiriting", error: true);
+        return;
       }
-    } catch (e) {
-      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
-    } finally {
-      if (mounted) setState(() => _sendingBroadcast = false);
-    }
+      final yes = await showConfirmDialog(
+        context,
+        title: "Barchaga e'lon",
+        message: "Xabar barcha faol foydalanuvchilarga yuborilsinmi?",
+        confirmLabel: "Yuborish",
+      );
+      if (!yes) return;
+      setState(() => _sendingBroadcast = true);
+      try {
+        final res = asMap(
+          await ref.read(apiClientProvider).post('/admin/broadcast', data: {'text': txt}),
+        );
+        _broadcastCtrl.clear();
+        await _loadAudit();
+        if (mounted) {
+          showSnack(
+            context,
+            "Yuborildi: ${asInt(res['sent'])} / ${asInt(res['total'])} ta",
+          );
+        }
+      } catch (e) {
+        if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+      } finally {
+        if (mounted) setState(() => _sendingBroadcast = false);
+      }
+    });
   }
 
   @override

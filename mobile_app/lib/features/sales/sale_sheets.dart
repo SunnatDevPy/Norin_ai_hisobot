@@ -18,13 +18,15 @@ Future<void> openNewSaleSheet(
   WidgetRef ref, {
   int? initialClientId,
 }) async {
-  await showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    showDragHandle: true,
-    builder: (ctx) => _NewSaleSheet(initialClientId: initialClientId),
-  );
+  await ActionGuard.run('sheet:new_sale', () async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (ctx) => _NewSaleSheet(initialClientId: initialClientId),
+    );
+  });
 }
 
 Future<void> openSaleReviewSheet(
@@ -34,17 +36,19 @@ Future<void> openSaleReviewSheet(
   String? suggestedClientName,
   int? duplicateSaleId,
 }) async {
-  await showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    showDragHandle: true,
-    builder: (ctx) => _SaleReviewSheet(
-      initialSale: initialSale,
-      suggestedClientName: suggestedClientName,
-      duplicateSaleId: duplicateSaleId,
-    ),
-  );
+  await ActionGuard.run('sheet:sale_review:${asInt(initialSale['id'])}', () async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (ctx) => _SaleReviewSheet(
+        initialSale: initialSale,
+        suggestedClientName: suggestedClientName,
+        duplicateSaleId: duplicateSaleId,
+      ),
+    );
+  });
 }
 
 class _ManualLine {
