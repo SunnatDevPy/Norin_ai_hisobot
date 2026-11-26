@@ -63,13 +63,26 @@ Push-Location "$RootDir\mobile_app"
 
 try {
     Write-Host "=== 2. Kod tahlili & testlar (flutter analyze + flutter test) ===" -ForegroundColor Cyan
-    flutter analyze
+    flutter analyze --no-fatal-infos
+    if ($LASTEXITCODE -ne 0) {
+        throw "flutter analyze xatolik (exit $LASTEXITCODE)"
+    }
     flutter test
+    if ($LASTEXITCODE -ne 0) {
+        throw "flutter test xatolik (exit $LASTEXITCODE)"
+    }
+
+    $BuiltApk = "$RootDir\mobile_app\build\app\outputs\flutter-apk\app-release.apk"
+    if (Test-Path $BuiltApk) {
+        Remove-Item -Force $BuiltApk
+    }
 
     Write-Host "=== 3. Release APK yig'ilmoqda (v$NewVersion+$Build) ===" -ForegroundColor Cyan
     flutter build apk --release --target-platform android-arm,android-arm64 --build-name=$NewVersion --build-number=$Build
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $BuiltApk)) {
+        throw "flutter build apk xatolik (exit $LASTEXITCODE)"
+    }
 
-    $BuiltApk = "$RootDir\mobile_app\build\app\outputs\flutter-apk\app-release.apk"
     $DistApk = "$DistDir\norin_ai.apk"
     $VersionedApk = "$DistDir\Norin_AI_v$NewVersion.apk"
 
