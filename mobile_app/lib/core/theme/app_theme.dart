@@ -136,12 +136,16 @@ class AppTheme {
         style: FilledButton.styleFrom(
           backgroundColor: NorinPalette.emeraldDark,
           foregroundColor: Colors.white,
+          minimumSize: const Size(0, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: NorinPalette.emeraldDark,
+          minimumSize: const Size(0, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
           side: const BorderSide(color: NorinPalette.lightBorder),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
@@ -231,12 +235,16 @@ class AppTheme {
         style: FilledButton.styleFrom(
           backgroundColor: NorinPalette.emerald,
           foregroundColor: Colors.white,
+          minimumSize: const Size(0, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: const Color(0xFFEDE9FE),
+          minimumSize: const Size(0, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
           side: const BorderSide(color: NorinPalette.darkBorderGlow),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),

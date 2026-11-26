@@ -242,35 +242,41 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                         : null,
                   ),
                 ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    ChoiceChip(
-                      label: Text("Hammasi (${clients.length})"),
-                      selected: _filter == 'all',
-                      onSelected: (_) => setState(() => _filter = 'all'),
-                    ),
-                    ChoiceChip(
-                      label: Text("Qarzdorlar ($debtorsCount)"),
-                      selected: _filter == 'debt',
-                      onSelected: (_) => setState(() => _filter = 'debt'),
-                    ),
-                    if (advanceCount > 0)
-                      ChoiceChip(
-                        label: Text("Avans ($advanceCount)"),
-                        selected: _filter == 'advance',
-                        onSelected: (_) => setState(() => _filter = 'advance'),
-                      ),
-                    ChoiceChip(
-                      label: const Text("Guruhli"),
-                      selected: _filter == 'group',
-                      onSelected: (_) => setState(() => _filter = 'group'),
-                    ),
-                  ],
-                ),
                 const SizedBox(height: 12),
+                SizedBox(
+                  height: 40,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      ChoiceChip(
+                        label: Text("Hammasi (${clients.length})"),
+                        selected: _filter == 'all',
+                        onSelected: (_) => setState(() => _filter = 'all'),
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: Text("Qarzdorlar ($debtorsCount)"),
+                        selected: _filter == 'debt',
+                        onSelected: (_) => setState(() => _filter = 'debt'),
+                      ),
+                      if (advanceCount > 0) ...[
+                        const SizedBox(width: 8),
+                        ChoiceChip(
+                          label: Text("Avans ($advanceCount)"),
+                          selected: _filter == 'advance',
+                          onSelected: (_) => setState(() => _filter = 'advance'),
+                        ),
+                      ],
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text("Guruhli"),
+                        selected: _filter == 'group',
+                        onSelected: (_) => setState(() => _filter = 'group'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
                 if (filtered.isEmpty)
                   EmptyStateCard(
                     icon: Icons.people_outline_rounded,
@@ -304,7 +310,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                         invalidateOperationalData(ref);
                       },
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                   ],
               ],
             );

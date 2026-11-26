@@ -234,14 +234,15 @@ class _SpinningRefreshButtonState extends State<SpinningRefreshButton>
 }
 
 /// Dynamic bottom padding for tab screens that sit behind the floating dock,
-/// adapting to 3-button nav bars (~48dp), gesture pills (~20dp), or 0dp devices.
+/// adapting to 3-button nav bars (~48dp), gesture pills (~20dp), or 0dp devices
+/// with generous breathing room above the dock and center AI button.
 double dockBottomClearance(BuildContext context) {
   final inset = MediaQuery.viewPaddingOf(context).bottom;
-  return 108 + inset;
+  return 152 + inset;
 }
 
 /// Dynamic bottom padding for standalone screens & modal bottom sheets.
-double screenBottomClearance(BuildContext context, {double extra = 24}) {
+double screenBottomClearance(BuildContext context, {double extra = 44}) {
   return extra + MediaQuery.viewPaddingOf(context).bottom;
 }
 

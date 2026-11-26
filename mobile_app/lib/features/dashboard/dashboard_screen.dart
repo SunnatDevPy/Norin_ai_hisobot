@@ -511,13 +511,16 @@ class DashboardScreen extends ConsumerWidget {
                 );
               },
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
             const SectionHeader(title: "Excel Hisobotlar"),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
                   child: FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                    ),
                     onPressed: () {
                       final p = period == 'today' ? '30' : period;
                       showExcelActionPicker(
@@ -529,13 +532,16 @@ class DashboardScreen extends ConsumerWidget {
                         filename: 'SotuvAI_Davriy_$p.xlsx',
                       );
                     },
-                    icon: const Icon(Icons.table_chart_outlined),
-                    label: const Text("Davriy"),
+                    icon: const Icon(Icons.table_chart_outlined, size: 17),
+                    label: const FittedBox(fit: BoxFit.scaleDown, child: Text("Davriy")),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 Expanded(
                   child: FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                    ),
                     onPressed: () {
                       final sessId = asInt(asMap(todayAsync.valueOrNull?['session'])['id']);
                       if (sessId <= 0) {
@@ -550,13 +556,16 @@ class DashboardScreen extends ConsumerWidget {
                         filename: 'SotuvAI_Kunlik_$sessId.xlsx',
                       );
                     },
-                    icon: const Icon(Icons.today_outlined),
-                    label: const Text("Bugungi"),
+                    icon: const Icon(Icons.today_outlined, size: 17),
+                    label: const FittedBox(fit: BoxFit.scaleDown, child: Text("Bugungi")),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 Expanded(
                   child: FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                    ),
                     onPressed: () => showExcelActionPicker(
                       context,
                       ref.read(apiClientProvider),
@@ -564,8 +573,8 @@ class DashboardScreen extends ConsumerWidget {
                       path: '/export/history',
                       filename: 'SotuvAI_Kunlik_Tarix.xlsx',
                     ),
-                    icon: const Icon(Icons.history_rounded),
-                    label: const Text("Tarix"),
+                    icon: const Icon(Icons.history_rounded, size: 17),
+                    label: const FittedBox(fit: BoxFit.scaleDown, child: Text("Tarix")),
                   ),
                 ),
               ],
@@ -631,7 +640,7 @@ class _QuickActionsBar extends StatelessWidget {
     return Row(
       children: [
         for (int i = 0; i < items.length; i++) ...[
-          if (i > 0) const SizedBox(width: 8),
+          if (i > 0) const SizedBox(width: 10),
           Expanded(
             child: PressableScale(
               scaleFactor: 0.93,
@@ -639,7 +648,7 @@ class _QuickActionsBar extends StatelessWidget {
                 onTap: items[i].onTap,
                 borderRadius: BorderRadius.circular(16),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                  padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 6),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(16),
                     color: isDark ? NorinPalette.darkCard : NorinPalette.lightCard,

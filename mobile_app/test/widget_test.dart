@@ -144,8 +144,8 @@ void main() {
         ),
       ),
     );
-    expect(dockWithBar, 156);
-    expect(screenWithBar, 72);
+    expect(dockWithBar, 200);
+    expect(screenWithBar, 92);
 
     late double dockNoBar;
     late double screenNoBar;
@@ -161,8 +161,8 @@ void main() {
         ),
       ),
     );
-    expect(dockNoBar, 108);
-    expect(screenNoBar, 24);
+    expect(dockNoBar, 152);
+    expect(screenNoBar, 44);
   });
 
   testWidgets('PressableScale animates on press/release and fires callback', (tester) async {

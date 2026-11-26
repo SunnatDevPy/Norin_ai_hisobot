@@ -715,85 +715,122 @@ class _CashScreenState extends ConsumerState<CashScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                const SizedBox(height: 14),
+                Column(
                   children: [
-                    PressableScale(
-                      scaleFactor: 0.94,
-                      child: FilledButton.tonalIcon(
-                        onPressed: () => openQuickPaymentDialog(context, ref),
-                        icon: const Icon(Icons.payments_outlined, color: NorinPalette.profit),
-                        label: const Text("Pul oldim"),
-                      ),
-                    ),
-                    PressableScale(
-                      scaleFactor: 0.94,
-                      child: FilledButton.tonalIcon(
-                        onPressed: () => openQuickCashTxDialog(context, ref, 'expense'),
-                        icon: const Icon(Icons.remove_circle_outline, color: NorinPalette.danger),
-                        label: const Text("Xarajat"),
-                      ),
-                    ),
-                    PressableScale(
-                      scaleFactor: 0.94,
-                      child: FilledButton.tonalIcon(
-                        onPressed: () => openQuickCashTxDialog(context, ref, 'main_in'),
-                        icon: const Icon(Icons.add_circle_outline, color: NorinPalette.profit),
-                        label: const Text("Kirim"),
-                      ),
-                    ),
-                    PressableScale(
-                      scaleFactor: 0.94,
-                      child: OutlinedButton.icon(
-                        onPressed: () => openQuickCashTxDialog(context, ref, 'kassa_debt'),
-                        icon: const Icon(Icons.account_balance_outlined),
-                        label: const Text("Kassa qarz"),
-                      ),
-                    ),
-                    PressableScale(
-                      scaleFactor: 0.94,
-                      child: OutlinedButton.icon(
-                        onPressed: () => openQuickCashTxDialog(context, ref, 'kassa_repay'),
-                        icon: const Icon(Icons.keyboard_return_rounded),
-                        label: const Text("Qaytarish"),
-                      ),
-                    ),
-                    if (!isClosed)
-                      PressableScale(
-                        scaleFactor: 0.94,
-                        child: FilledButton.icon(
-                          onPressed: () => openCloseDayDialog(
-                            context,
-                            ref,
-                            sessionId: asInt(session['id']),
-                            reportDate: asStr(session['report_date']),
-                            expectedCash: expected,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: PressableScale(
+                            scaleFactor: 0.96,
+                            child: FilledButton.tonalIcon(
+                              onPressed: () => openQuickPaymentDialog(context, ref),
+                              icon: const Icon(Icons.payments_outlined, color: NorinPalette.profit, size: 19),
+                              label: const FittedBox(fit: BoxFit.scaleDown, child: Text("Pul oldim")),
+                            ),
                           ),
-                          icon: const Icon(Icons.lock_clock_outlined),
-                          label: const Text("Kunni yakunlash"),
                         ),
-                      )
-                    else
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          try {
-                            await ref
-                                .read(apiClientProvider)
-                                .post('/cash/reopen/${asInt(session['id'])}');
-                            invalidateOperationalData(ref);
-                            if (context.mounted) showSnack(context, "Smena qayta ochildi");
-                          } catch (e) {
-                            if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
-                          }
-                        },
-                        icon: const Icon(Icons.lock_open_rounded),
-                        label: const Text("Qayta ochish"),
-                      ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: PressableScale(
+                            scaleFactor: 0.96,
+                            child: FilledButton.tonalIcon(
+                              onPressed: () => openQuickCashTxDialog(context, ref, 'expense'),
+                              icon: const Icon(Icons.remove_circle_outline, color: NorinPalette.danger, size: 19),
+                              label: const FittedBox(fit: BoxFit.scaleDown, child: Text("Xarajat")),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: PressableScale(
+                            scaleFactor: 0.96,
+                            child: OutlinedButton.icon(
+                              onPressed: () => openQuickCashTxDialog(context, ref, 'main_in'),
+                              icon: const Icon(Icons.add_circle_outline, color: NorinPalette.profit, size: 19),
+                              label: const FittedBox(fit: BoxFit.scaleDown, child: Text("Kirim")),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: PressableScale(
+                            scaleFactor: 0.96,
+                            child: OutlinedButton.icon(
+                              onPressed: () => openQuickCashTxDialog(context, ref, 'kassa_debt'),
+                              icon: const Icon(Icons.account_balance_outlined, size: 19),
+                              label: const FittedBox(fit: BoxFit.scaleDown, child: Text("Kassa qarz")),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: PressableScale(
+                            scaleFactor: 0.96,
+                            child: OutlinedButton.icon(
+                              onPressed: () => openQuickCashTxDialog(context, ref, 'kassa_repay'),
+                              icon: const Icon(Icons.keyboard_return_rounded, size: 19),
+                              label: const FittedBox(fit: BoxFit.scaleDown, child: Text("Qaytarish")),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: !isClosed
+                              ? PressableScale(
+                                  scaleFactor: 0.96,
+                                  child: FilledButton.icon(
+                                    onPressed: () => openCloseDayDialog(
+                                      context,
+                                      ref,
+                                      sessionId: asInt(session['id']),
+                                      reportDate: asStr(session['report_date']),
+                                      expectedCash: expected,
+                                    ),
+                                    icon: const Icon(Icons.lock_clock_outlined, size: 19),
+                                    label: const FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text("Kunni yopish"),
+                                    ),
+                                  ),
+                                )
+                              : PressableScale(
+                                  scaleFactor: 0.96,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () async {
+                                      try {
+                                        await ref
+                                            .read(apiClientProvider)
+                                            .post('/cash/reopen/${asInt(session['id'])}');
+                                        invalidateOperationalData(ref);
+                                        if (context.mounted) showSnack(context, "Smena qayta ochildi");
+                                      } catch (e) {
+                                        if (context.mounted) {
+                                          showSnack(context, ApiClient.extractError(e), error: true);
+                                        }
+                                      }
+                                    },
+                                    icon: const Icon(Icons.lock_open_rounded, size: 19),
+                                    label: const FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text("Qayta ochish"),
+                                    ),
+                                  ),
+                                ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 18),
                 SizedBox(
                   height: 40,
                   child: ListView(
@@ -804,19 +841,19 @@ class _CashScreenState extends ConsumerState<CashScreen> {
                         selected: _segment == 0,
                         onSelected: (_) => setState(() => _segment = 0),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 10),
                       ChoiceChip(
                         label: Text("To'lovlar (${payments.length})"),
                         selected: _segment == 1,
                         onSelected: (_) => setState(() => _segment = 1),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 10),
                       ChoiceChip(
                         label: Text("Vozvrat (${returns.length})"),
                         selected: _segment == 2,
                         onSelected: (_) => setState(() => _segment = 2),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 10),
                       ChoiceChip(
                         label: Text("Xarajat/Kassa (${txs.length})"),
                         selected: _segment == 3,
@@ -825,7 +862,7 @@ class _CashScreenState extends ConsumerState<CashScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 200),
                   child: KeyedSubtree(
@@ -1161,7 +1198,7 @@ class _SessionHistorySheetState extends State<_SessionHistorySheet> {
           final sessions = snap.data ?? const [];
           return ListView.separated(
             controller: sc,
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+            padding: EdgeInsets.fromLTRB(20, 4, 20, screenBottomClearance(ctx, extra: 40)),
             itemCount: sessions.length + 1,
             separatorBuilder: (_, _) => const SizedBox(height: 8),
             itemBuilder: (ctx, i) {
@@ -1301,7 +1338,7 @@ class _SessionDetailSheetState extends State<_SessionDetailSheet> {
 
           return ListView(
             controller: sc,
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+            padding: EdgeInsets.fromLTRB(20, 4, 20, screenBottomClearance(ctx, extra: 40)),
             children: [
               Row(
                 children: [

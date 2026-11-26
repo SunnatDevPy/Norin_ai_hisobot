@@ -514,7 +514,7 @@ class _DevicesSheetState extends State<_DevicesSheet> {
         final devs = snap.data ?? const [];
         return ListView.separated(
           shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          padding: EdgeInsets.fromLTRB(20, 4, 20, screenBottomClearance(ctx, extra: 36)),
           itemCount: devs.length + 1,
           separatorBuilder: (_, _) => const SizedBox(height: 6),
           itemBuilder: (ctx, i) {

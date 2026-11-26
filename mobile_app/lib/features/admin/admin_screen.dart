@@ -853,53 +853,63 @@ class _TenantManageSheetState extends ConsumerState<_TenantManageSheet> {
           ),
           const SizedBox(height: 14),
           const Text("Obunani uzaytirish", style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          const SizedBox(height: 10),
+          Row(
             children: [
-              FilledButton.tonal(
-                onPressed: _busy ? null : () => _extend(7),
-                child: const Text("+7 kun"),
+              Expanded(
+                child: FilledButton.tonal(
+                  onPressed: _busy ? null : () => _extend(7),
+                  child: const Text("+7 kun"),
+                ),
               ),
-              FilledButton.tonal(
-                onPressed: _busy ? null : () => _extend(30),
-                child: const Text("+30 kun"),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.tonal(
+                  onPressed: _busy ? null : () => _extend(30),
+                  child: const Text("+30 kun"),
+                ),
               ),
-              FilledButton.tonal(
-                onPressed: _busy ? null : () => _extend(90),
-                child: const Text("+90 kun"),
-              ),
-              OutlinedButton.icon(
-                onPressed: _busy
-                    ? null
-                    : () async {
-                        setState(() => _busy = true);
-                        try {
-                          final res = asMap(
-                            await ref.read(apiClientProvider).post(
-                              '/admin/tenants/$_tid/suspend',
-                              data: {'is_suspended': !isSuspended},
-                            ),
-                          );
-                          setState(() => _t = {..._t, ...res});
-                          widget.onChanged();
-                          if (context.mounted) {
-                            showSnack(
-                              context,
-                              !isSuspended ? "Do'kon muzlatildi" : "Do'kon faollashtirildi",
-                            );
-                          }
-                        } catch (e) {
-                          if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
-                        } finally {
-                          if (mounted) setState(() => _busy = false);
-                        }
-                      },
-                icon: Icon(isSuspended ? Icons.play_arrow_rounded : Icons.pause_rounded),
-                label: Text(isSuspended ? "Faollashtirish" : "Muzlatish"),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.tonal(
+                  onPressed: _busy ? null : () => _extend(90),
+                  child: const Text("+90 kun"),
+                ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      setState(() => _busy = true);
+                      try {
+                        final res = asMap(
+                          await ref.read(apiClientProvider).post(
+                            '/admin/tenants/$_tid/suspend',
+                            data: {'is_suspended': !isSuspended},
+                          ),
+                        );
+                        setState(() => _t = {..._t, ...res});
+                        widget.onChanged();
+                        if (context.mounted) {
+                          showSnack(
+                            context,
+                            !isSuspended ? "Do'kon muzlatildi" : "Do'kon faollashtirildi",
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+                      } finally {
+                        if (mounted) setState(() => _busy = false);
+                      }
+                    },
+              icon: Icon(isSuspended ? Icons.play_arrow_rounded : Icons.pause_rounded),
+              label: Text(isSuspended ? "Faollashtirish" : "Muzlatish"),
+            ),
           ),
           const SizedBox(height: 16),
           SectionHeader(

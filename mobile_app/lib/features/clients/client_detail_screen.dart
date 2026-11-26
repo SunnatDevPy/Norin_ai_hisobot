@@ -135,7 +135,7 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
         top: false,
         child: ListView.separated(
           shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          padding: EdgeInsets.fromLTRB(20, 4, 20, screenBottomClearance(ctx, extra: 36)),
           itemCount: products.length + 1,
           separatorBuilder: (_, _) => const SizedBox(height: 8),
           itemBuilder: (ctx, i) {
@@ -396,7 +396,7 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
             return RefreshIndicator(
               onRefresh: () async => _refresh(),
               child: ListView(
-                padding: EdgeInsets.fromLTRB(16, 8, 16, screenBottomClearance(context, extra: 32)),
+                padding: EdgeInsets.fromLTRB(16, 10, 16, screenBottomClearance(context, extra: 48)),
                 children: [
                   SpotlightHeroCard(
                     padding: const EdgeInsets.all(18),
@@ -508,56 +508,100 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                  const SizedBox(height: 14),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      FilledButton.icon(
-                        onPressed: () => openQuickPaymentDialog(
-                          context,
-                          ref,
-                          initialClientId: widget.clientId,
-                          onSuccess: _refresh,
-                        ),
-                        icon: const Icon(Icons.payments_outlined),
-                        label: const Text("Pul oldim"),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: PressableScale(
+                              scaleFactor: 0.96,
+                              child: FilledButton.icon(
+                                onPressed: () => openQuickPaymentDialog(
+                                  context,
+                                  ref,
+                                  initialClientId: widget.clientId,
+                                  onSuccess: _refresh,
+                                ),
+                                icon: const Icon(Icons.payments_outlined, size: 19),
+                                label: const FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text("Pul oldim"),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: PressableScale(
+                              scaleFactor: 0.96,
+                              child: FilledButton.tonalIcon(
+                                onPressed: () => _addReturnDialog(card),
+                                icon: const Icon(Icons.assignment_return_outlined, size: 19),
+                                label: const FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text("Vozvrat"),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      FilledButton.tonalIcon(
-                        onPressed: () => _addReturnDialog(card),
-                        icon: const Icon(Icons.assignment_return_outlined),
-                        label: const Text("Vozvrat"),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 11),
+                              ),
+                              onPressed: () => _customPricesDialog(card),
+                              icon: const Icon(Icons.price_change_outlined, size: 17),
+                              label: const FittedBox(fit: BoxFit.scaleDown, child: Text("Narxlar")),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 11),
+                              ),
+                              onPressed: () => showExcelActionPicker(
+                                context,
+                                ref.read(apiClientProvider),
+                                title: "Akt Sverka Excel",
+                                path: '/export/client/${widget.clientId}',
+                                filename: 'Sverka_${asStr(card['name'])}.xlsx',
+                              ),
+                              icon: const Icon(Icons.table_chart_outlined, size: 17),
+                              label: const FittedBox(fit: BoxFit.scaleDown, child: Text("Excel")),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 11),
+                              ),
+                              onPressed: () => _shareStatementText(card, events),
+                              icon: const Icon(Icons.share_rounded, size: 17),
+                              label: const FittedBox(fit: BoxFit.scaleDown, child: Text("Ulashish")),
+                            ),
+                          ),
+                        ],
                       ),
-                      OutlinedButton.icon(
-                        onPressed: () => _customPricesDialog(card),
-                        icon: const Icon(Icons.price_change_outlined),
-                        label: const Text("Narxlar"),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () => showExcelActionPicker(
-                          context,
-                          ref.read(apiClientProvider),
-                          title: "Akt Sverka Excel",
-                          path: '/export/client/${widget.clientId}',
-                          filename: 'Sverka_${asStr(card['name'])}.xlsx',
-                        ),
-                        icon: const Icon(Icons.table_chart_outlined),
-                        label: const Text("Excel"),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () => _shareStatementText(card, events),
-                        icon: const Icon(Icons.share_rounded),
-                        label: const Text("Ulashish"),
-                      ),
-                      if (hasGroup)
+                      if (hasGroup) ...[
+                        const SizedBox(height: 10),
                         OutlinedButton.icon(
                           onPressed: _sendSverkaGroup,
-                          icon: const Icon(Icons.send_rounded),
-                          label: const Text("Guruhga Sverka"),
+                          icon: const Icon(Icons.send_rounded, size: 18),
+                          label: const Text("Telegram guruhga Sverka yuborish"),
                         ),
+                      ],
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
                   SegmentedButton<int>(
                     showSelectedIcon: false,
                     segments: [

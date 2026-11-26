@@ -330,7 +330,7 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
                 children: [
                   // 1. AI Chek
                   ListView(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 36),
                     children: [
                       if (_pickedImage != null)
                         ClipRRect(
@@ -411,7 +411,7 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
                   ),
                   // 2. Tezkor Matn (0 token)
                   ListView(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 36),
                     children: [
                       Card(
                         color: NorinPalette.emerald.withValues(alpha: 0.08),
@@ -468,7 +468,7 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
                   ),
                   // 3. Qo'lda (ko'p mahsulot qatorli)
                   ListView(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 36),
                     children: [
                       DropdownButtonFormField<int>(
                         key: ValueKey('cli_$_manualClientId'),
@@ -1004,7 +1004,7 @@ class _SaleReviewSheetState extends ConsumerState<_SaleReviewSheet> {
         maxChildSize: 0.94,
         builder: (ctx, sc) => ListView(
           controller: sc,
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+          padding: EdgeInsets.fromLTRB(20, 4, 20, screenBottomClearance(ctx, extra: 40)),
           children: [
             Row(
               children: [
