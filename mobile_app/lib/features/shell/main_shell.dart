@@ -26,6 +26,7 @@ class _MainShellState extends ConsumerState<MainShell> {
   bool _checkedUpdate = false;
   late final PageController _pageCtrl;
   bool _programmaticJump = false;
+  DateTime? _lastBackPress;
 
   @override
   void initState() {
@@ -82,33 +83,50 @@ class _MainShellState extends ConsumerState<MainShell> {
 
     final idx = rawIdx >= navItems.length ? 0 : rawIdx;
 
-    return Scaffold(
-      extendBody: true,
-      backgroundColor: Colors.transparent,
-      body: CosmicBackground(
-        child: PageView(
-          controller: _pageCtrl,
-          physics: const PageScrollPhysics(),
-          onPageChanged: (newIdx) {
-            if (_programmaticJump) return;
-            if (ref.read(shellTabIndexProvider) != newIdx) {
-              HapticFeedback.selectionClick();
-              ref.read(shellTabIndexProvider.notifier).state = newIdx;
-            }
-          },
-          children: const [
-            _KeepAlivePage(child: DashboardScreen()),
-            _KeepAlivePage(child: ClientsScreen()),
-            _KeepAlivePage(child: CashScreen()),
-            _KeepAlivePage(child: SettingsScreen()),
-          ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (idx != 0) {
+          ref.read(shellTabIndexProvider.notifier).state = 0;
+          return;
+        }
+        final now = DateTime.now();
+        if (_lastBackPress == null || now.difference(_lastBackPress!) > const Duration(seconds: 2)) {
+          _lastBackPress = now;
+          showSnack(context, "Chiqish uchun yana bir marta bosing");
+          return;
+        }
+        SystemNavigator.pop();
+      },
+      child: Scaffold(
+        extendBody: true,
+        backgroundColor: Colors.transparent,
+        body: CosmicBackground(
+          child: PageView(
+            controller: _pageCtrl,
+            physics: const PageScrollPhysics(),
+            onPageChanged: (newIdx) {
+              if (_programmaticJump) return;
+              if (ref.read(shellTabIndexProvider) != newIdx) {
+                HapticFeedback.selectionClick();
+                ref.read(shellTabIndexProvider.notifier).state = newIdx;
+              }
+            },
+            children: const [
+              _KeepAlivePage(child: DashboardScreen()),
+              _KeepAlivePage(child: ClientsScreen()),
+              _KeepAlivePage(child: CashScreen()),
+              _KeepAlivePage(child: SettingsScreen()),
+            ],
+          ),
         ),
-      ),
-      bottomNavigationBar: _FloatingGlassDock(
-        items: navItems,
-        selectedIndex: idx,
-        onTap: (v) => ref.read(shellTabIndexProvider.notifier).state = v,
-        onCenterAiTap: () => openNewSaleSheet(context, ref),
+        bottomNavigationBar: _FloatingGlassDock(
+          items: navItems,
+          selectedIndex: idx,
+          onTap: (v) => ref.read(shellTabIndexProvider.notifier).state = v,
+          onCenterAiTap: () => openNewSaleSheet(context, ref),
+        ),
       ),
     );
   }

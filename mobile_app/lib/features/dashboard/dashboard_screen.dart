@@ -12,6 +12,7 @@ import '../../core/widgets/metric_cards.dart';
 import '../../core/widgets/norin_widgets.dart';
 import '../cash/cash_screen.dart';
 import '../clients/client_detail_screen.dart';
+import '../sales/sale_sheets.dart';
 import '../shell/main_shell.dart';
 
 class DashboardScreen extends ConsumerWidget {
@@ -123,7 +124,7 @@ class DashboardScreen extends ConsumerWidget {
             onPressed: () {
               HapticFeedback.selectionClick();
               final next = isDark ? ThemeMode.light : ThemeMode.dark;
-              ref.read(themeModeProvider.notifier).state = next;
+              ref.read(themeModeProvider.notifier).setThemeMode(next);
             },
           ),
           const SizedBox(width: 6),
@@ -276,6 +277,29 @@ class DashboardScreen extends ConsumerWidget {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            _QuickActionsBar(
+              onSale: () => openNewSaleSheet(context, ref),
+              onPayment: () => openQuickPaymentDialog(context, ref),
+              onExpense: () => openQuickCashTxDialog(context, ref, 'expense'),
+              onCloseDay: () {
+                final todayData = todayAsync.valueOrNull;
+                final sess = asMap(todayData?['session']);
+                final cashMap = asMap(todayData?['cash']);
+                if (asStr(sess['status']) == 'closed') {
+                  showSnack(context, "Bugungi smena allaqachon yopilgan");
+                  ref.read(shellTabIndexProvider.notifier).state = 2;
+                  return;
+                }
+                openCloseDayDialog(
+                  context,
+                  ref,
+                  sessionId: asInt(sess['id']) > 0 ? asInt(sess['id']) : null,
+                  reportDate: asStr(sess['report_date']).isNotEmpty ? asStr(sess['report_date']) : null,
+                  expectedCash: cashMap.isNotEmpty ? asDouble(cashMap['expected_balance']) : null,
+                );
+              },
             ),
             const SizedBox(height: 14),
             summaryAsync.when(
@@ -578,6 +602,81 @@ class DashboardScreen extends ConsumerWidget {
     } else {
       ref.read(shellTabIndexProvider.notifier).state = 1;
     }
+  }
+}
+
+class _QuickActionsBar extends StatelessWidget {
+  const _QuickActionsBar({
+    required this.onSale,
+    required this.onPayment,
+    required this.onExpense,
+    required this.onCloseDay,
+  });
+
+  final VoidCallback onSale;
+  final VoidCallback onPayment;
+  final VoidCallback onExpense;
+  final VoidCallback onCloseDay;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <({IconData icon, String label, Color color, VoidCallback onTap})>[
+      (icon: Icons.add_shopping_cart_rounded, label: "Sotuv", color: NorinPalette.emeraldLight, onTap: onSale),
+      (icon: Icons.payments_outlined, label: "Pul oldim", color: NorinPalette.profit, onTap: onPayment),
+      (icon: Icons.receipt_long_outlined, label: "Xarajat", color: NorinPalette.amber, onTap: onExpense),
+      (icon: Icons.lock_clock_outlined, label: "Kun yopish", color: NorinPalette.sky, onTap: onCloseDay),
+    ];
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Row(
+      children: [
+        for (int i = 0; i < items.length; i++) ...[
+          if (i > 0) const SizedBox(width: 8),
+          Expanded(
+            child: PressableScale(
+              scaleFactor: 0.93,
+              child: InkWell(
+                onTap: items[i].onTap,
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    color: isDark ? NorinPalette.darkCard : NorinPalette.lightCard,
+                    border: Border.all(
+                      color: items[i].color.withValues(alpha: isDark ? 0.30 : 0.35),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: items[i].color.withValues(alpha: isDark ? 0.18 : 0.14),
+                        ),
+                        child: Icon(items[i].icon, size: 17, color: items[i].color),
+                      ),
+                      const SizedBox(height: 5),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          items[i].label,
+                          maxLines: 1,
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
   }
 }
 

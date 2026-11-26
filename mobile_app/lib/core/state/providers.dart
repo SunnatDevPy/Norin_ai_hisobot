@@ -1,12 +1,51 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../api/api_client.dart';
 
 final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
 
-final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.dark);
+class ThemeModeNotifier extends StateNotifier<ThemeMode> {
+  ThemeModeNotifier() : super(ThemeMode.dark);
+
+  static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+  static const _kThemeKey = 'norin_theme_mode';
+
+  Future<void> init() async {
+    try {
+      final raw = await _storage.read(key: _kThemeKey);
+      if (raw == 'light') {
+        state = ThemeMode.light;
+      } else if (raw == 'system') {
+        state = ThemeMode.system;
+      } else if (raw == 'dark') {
+        state = ThemeMode.dark;
+      }
+    } catch (_) {
+      // Fall back safely in tests or unsupported environments.
+    }
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    state = mode;
+    final val = switch (mode) {
+      ThemeMode.light => 'light',
+      ThemeMode.system => 'system',
+      ThemeMode.dark => 'dark',
+    };
+    try {
+      await _storage.write(key: _kThemeKey, value: val);
+    } catch (_) {}
+  }
+}
+
+final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>((ref) {
+  return ThemeModeNotifier();
+});
 
 enum AuthStage { loading, unauthenticated, authenticated }
 

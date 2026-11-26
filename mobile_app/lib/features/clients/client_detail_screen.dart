@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/api/api_client.dart';
+import '../../core/security/biometric_lock.dart';
 import '../../core/state/providers.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/widgets/metric_cards.dart';
 import '../../core/widgets/norin_widgets.dart';
+import '../cash/cash_screen.dart';
 import '../sales/sale_sheets.dart';
 
 final clientDetailProvider =
@@ -32,90 +35,6 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
   void _refresh() {
     ref.invalidate(clientDetailProvider(widget.clientId));
     invalidateOperationalData(ref);
-  }
-
-  Future<void> _addPaymentDialog(Map<String, dynamic> card) async {
-    final amountCtrl = TextEditingController();
-    final noteCtrl = TextEditingController();
-    String method = 'cash';
-    bool postGroup = card['group_chat_id'] != null;
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlg) => AlertDialog(
-          title: Text("Pul olish — ${asStr(card['name'])}"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: amountCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: "Summa (so'm) *"),
-                ),
-                const SizedBox(height: 12),
-                SegmentedButton<String>(
-                  showSelectedIcon: false,
-                  segments: const [
-                    ButtonSegment(value: 'cash', label: Text("Naqd")),
-                    ButtonSegment(value: 'card', label: Text("Karta")),
-                    ButtonSegment(value: 'transfer', label: Text("O'tkazma")),
-                  ],
-                  selected: {method},
-                  onSelectionChanged: (s) => setDlg(() => method = s.first),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: noteCtrl,
-                  decoration: const InputDecoration(labelText: "Izoh (ixtiyoriy)"),
-                ),
-                if (card['group_chat_id'] != null)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text("Guruhga yuborish"),
-                    value: postGroup,
-                    onChanged: (v) => setDlg(() => postGroup = v),
-                  ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Bekor")),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Saqlash")),
-          ],
-        ),
-      ),
-    );
-    if (ok != true) return;
-    final amount = double.tryParse(amountCtrl.text.trim().replaceAll(',', '.'));
-    if (amount == null || amount <= 0) {
-      if (mounted) showSnack(context, "Summa 0 dan katta bo'lishi kerak", error: true);
-      return;
-    }
-    try {
-      final res = asMap(
-        await ref.read(apiClientProvider).post(
-          '/payments',
-          data: {
-            'client_id': widget.clientId,
-            'amount': amount,
-            'payment_method': method,
-            'note': noteCtrl.text.trim(),
-            'post_to_group': postGroup,
-          },
-        ),
-      );
-      _refresh();
-      if (mounted) {
-        showSnack(
-          context,
-          res['group_posted'] == true ? "To'lov qayd etildi va guruhga yuborildi" : "To'lov saqlandi",
-        );
-      }
-    } catch (e) {
-      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
-    }
   }
 
   Future<void> _addReturnDialog(Map<String, dynamic> card) async {
@@ -181,7 +100,7 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
       ),
     );
     if (ok != true) return;
-    final kg = double.tryParse(kgCtrl.text.trim().replaceAll(',', '.'));
+    final kg = parseNumberInput(kgCtrl.text);
     if (kg == null || kg <= 0) {
       if (mounted) showSnack(context, "Vaznni to'g'ri kiriting", error: true);
       return;
@@ -265,7 +184,7 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
                 );
                 if (act == null) return;
                 try {
-                  final val = act == 'reset' ? null : double.tryParse(ctrl.text.trim());
+                  final val = act == 'reset' ? null : parseNumberInput(ctrl.text);
                   await ref.read(apiClientProvider).put(
                     '/clients/${widget.clientId}/prices/$pid',
                     data: {'sell_price': val},
@@ -325,7 +244,7 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
         data: {
           'name': nameCtrl.text.trim(),
           'phone': phoneCtrl.text.trim(),
-          'opening_debt': double.tryParse(debtCtrl.text.trim()) ?? 0,
+          'opening_debt': parseNumberInput(debtCtrl.text) ?? 0,
           'aliases': aliasCtrl.text.trim(),
         },
       );
@@ -334,6 +253,55 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
     } catch (e) {
       if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
     }
+  }
+
+  Future<void> _deleteClient(String name) async {
+    final yes = await showConfirmDialog(
+      context,
+      title: "Mijozni o'chirish",
+      message: "\"$name\" mijozini arxivga o'tkazasizmi?",
+      confirmLabel: "O'chirish",
+      destructive: true,
+    );
+    if (!yes) return;
+    try {
+      await ref.read(apiClientProvider).delete('/clients/${widget.clientId}');
+      invalidateOperationalData(ref);
+      if (mounted) {
+        Navigator.pop(context);
+        showSnack(context, "Mijoz o'chirildi");
+      }
+    } catch (e) {
+      if (mounted) showSnack(context, ApiClient.extractError(e), error: true);
+    }
+  }
+
+  Future<void> _shareStatementText(Map<String, dynamic> card, List<Map<String, dynamic>> events) async {
+    final name = asStr(card['name'], widget.initialName);
+    final debt = asDouble(card['current_debt']);
+    final statusLine = debt > 0
+        ? "Joriy qarz: ${formatUzs(debt)}"
+        : (debt < 0 ? "Avans (haqi): ${formatUzs(debt.abs())}" : "Balans: 0 so'm (toza)");
+    final buf = StringBuffer()
+      ..writeln("📄 Sotuv AI — Akt Sverka")
+      ..writeln("Mijoz: $name")
+      ..writeln(statusLine)
+      ..writeln("Jami savdo: ${formatUzs(asDouble(card['total_sales']))}")
+      ..writeln("Jami to'lov: ${formatUzs(asDouble(card['total_payments']))}");
+    if (asDouble(card['total_returns']) > 0) {
+      buf.writeln("Vozvrat: ${formatUzs(asDouble(card['total_returns']))}");
+    }
+    if (events.isNotEmpty) {
+      buf.writeln("\nSo'nggi harakatlar:");
+      final recent = events.length > 6 ? events.sublist(events.length - 6) : events;
+      for (final ev in recent.reversed) {
+        final debit = asDouble(ev['debit']);
+        final credit = asDouble(ev['credit']);
+        final amt = debit > 0 ? "+${formatUzs(debit)}" : "-${formatUzs(credit)}";
+        buf.writeln("• ${formatShortDate(asStr(ev['at']))} | ${asStr(ev['doc'])} | $amt");
+      }
+    }
+    await Share.share(buf.toString().trim());
   }
 
   Future<void> _sendSverkaGroup() async {
@@ -356,11 +324,13 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final asyncDetail = ref.watch(clientDetailProvider(widget.clientId));
+    final liveCard = asMap(asyncDetail.valueOrNull?['card']);
+    final liveName = asStr(liveCard['name'], widget.initialName);
 
     return Scaffold(
       extendBodyBehindAppBar: false,
       appBar: AppBar(
-        title: Text(widget.initialName, style: const TextStyle(fontWeight: FontWeight.w800)),
+        title: Text(liveName, style: const TextStyle(fontWeight: FontWeight.w800)),
         actions: [
           IconButton(
             tooltip: "Yangi sotuv",
@@ -375,282 +345,371 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
                   .catchError((_) => <String, dynamic>{});
             },
           ),
+          PopupMenuButton<String>(
+            onSelected: (act) {
+              if (act == 'edit' && liveCard.isNotEmpty) {
+                _editClientDialog(liveCard);
+              } else if (act == 'delete') {
+                _deleteClient(liveName);
+              }
+            },
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(
+                value: 'edit',
+                child: Row(
+                  children: [
+                    Icon(Icons.edit_outlined, size: 19),
+                    SizedBox(width: 10),
+                    Text("Tahrirlash"),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(
+                  children: [
+                    Icon(Icons.delete_outline, size: 19, color: NorinPalette.danger),
+                    SizedBox(width: 10),
+                    Text("O'chirish", style: TextStyle(color: NorinPalette.danger)),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
       ),
       body: CosmicBackground(
         child: asyncDetail.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => AsyncErrorCard(error: e, onRetry: _refresh),
-        data: (bundle) {
-          final card = asMap(bundle['card']);
-          final statement = asMap(bundle['statement']);
-          final events = asMapList(statement['events']);
-          final recentSales = asMapList(card['recent_sales']);
-          final recentPayments = asMapList(card['recent_payments']);
-          final recentReturns = asMapList(card['recent_returns']);
-          final debt = asDouble(card['current_debt']);
-          final hasGroup = card['group_chat_id'] != null;
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => AsyncErrorCard(error: e, onRetry: _refresh),
+          data: (bundle) {
+            final card = asMap(bundle['card']);
+            final statement = asMap(bundle['statement']);
+            final events = asMapList(statement['events']);
+            final recentSales = asMapList(card['recent_sales']);
+            final recentPayments = asMapList(card['recent_payments']);
+            final recentReturns = asMapList(card['recent_returns']);
+            final debt = asDouble(card['current_debt']);
+            final phone = asStr(card['phone']).trim();
+            final hasGroup = card['group_chat_id'] != null;
 
-          return RefreshIndicator(
-            onRefresh: () async => _refresh(),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
-              children: [
-                SpotlightHeroCard(
-                  padding: const EdgeInsets.all(18),
-                  borderRadius: 20,
-                  glowColor: debt > 0 ? NorinPalette.danger : NorinPalette.emeraldLight,
-                  accentColor: NorinPalette.indigo,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            debt > 0 ? "JORIY QARZ" : (debt < 0 ? "AVANS / HAQI" : "BALANS TOZA"),
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.7,
-                            ),
-                          ),
-                          const Spacer(),
-                          IconButton(
-                            tooltip: "Tahrirlash",
-                            visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.edit_outlined),
-                            onPressed: () => _editClientDialog(card),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        formatUzs(debt),
-                        style: tNumStyle.copyWith(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        "Savdo: ${formatCompactUzs(asDouble(card['total_sales']))}  •  To'lov: ${formatCompactUzs(asDouble(card['total_payments']))}  •  Vozvrat: ${formatCompactUzs(asDouble(card['total_returns']))}",
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          fontSize: 12,
-                        ),
-                      ),
-                      if (hasGroup) ...[
-                        const SizedBox(height: 8),
+            return RefreshIndicator(
+              onRefresh: () async => _refresh(),
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, screenBottomClearance(context, extra: 32)),
+                children: [
+                  SpotlightHeroCard(
+                    padding: const EdgeInsets.all(18),
+                    borderRadius: 20,
+                    glowColor: debt > 0 ? NorinPalette.danger : NorinPalette.emeraldLight,
+                    accentColor: NorinPalette.indigo,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Row(
                           children: [
-                            const Icon(Icons.groups_rounded, size: 16, color: NorinPalette.emerald),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                asStr(card['group_title'], "Guruh #${card['group_chat_id']}"),
-                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5),
+                            Text(
+                              debt > 0 ? "JORIY QARZ" : (debt < 0 ? "AVANS / HAQI" : "BALANS TOZA"),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.7,
                               ),
                             ),
-                            TextButton(
-                              style: TextButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              onPressed: () async {
-                                final yes = await showConfirmDialog(
-                                  context,
-                                  title: "Guruhni uzish",
-                                  message: "Bu mijozdan Telegram guruhi uzilsinmi?",
-                                  destructive: true,
-                                );
-                                if (!yes) return;
-                                await ref
-                                    .read(apiClientProvider)
-                                    .post('/clients/${widget.clientId}/unbind-group');
-                                _refresh();
-                              },
-                              child: const Text("Uzish"),
+                            const Spacer(),
+                            IconButton(
+                              tooltip: "Tahrirlash",
+                              visualDensity: VisualDensity.compact,
+                              icon: const Icon(Icons.edit_outlined),
+                              onPressed: () => _editClientDialog(card),
                             ),
                           ],
                         ),
+                        Text(
+                          formatUzs(debt),
+                          style: tNumStyle.copyWith(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          "Savdo: ${formatCompactUzs(asDouble(card['total_sales']))}  •  To'lov: ${formatCompactUzs(asDouble(card['total_payments']))}  •  Vozvrat: ${formatCompactUzs(asDouble(card['total_returns']))}",
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontSize: 12,
+                          ),
+                        ),
+                        if (phone.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () => NativeBridge.openExternalUrl('tel:$phone'),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.call_rounded, size: 16, color: NorinPalette.profit),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    phone,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13,
+                                      color: NorinPalette.profit,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                        if (hasGroup) ...[
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              const Icon(Icons.groups_rounded, size: 16, color: NorinPalette.emerald),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  asStr(card['group_title'], "Guruh #${card['group_chat_id']}"),
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5),
+                                ),
+                              ),
+                              TextButton(
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                onPressed: () async {
+                                  final yes = await showConfirmDialog(
+                                    context,
+                                    title: "Guruhni uzish",
+                                    message: "Bu mijozdan Telegram guruhi uzilsinmi?",
+                                    destructive: true,
+                                  );
+                                  if (!yes) return;
+                                  try {
+                                    await ref
+                                        .read(apiClientProvider)
+                                        .post('/clients/${widget.clientId}/unbind-group');
+                                    _refresh();
+                                    if (context.mounted) showSnack(context, "Guruh uzildi");
+                                  } catch (e) {
+                                    if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+                                  }
+                                },
+                                child: const Text("Uzish"),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: () => openQuickPaymentDialog(
+                          context,
+                          ref,
+                          initialClientId: widget.clientId,
+                          onSuccess: _refresh,
+                        ),
+                        icon: const Icon(Icons.payments_outlined),
+                        label: const Text("Pul oldim"),
+                      ),
+                      FilledButton.tonalIcon(
+                        onPressed: () => _addReturnDialog(card),
+                        icon: const Icon(Icons.assignment_return_outlined),
+                        label: const Text("Vozvrat"),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => _customPricesDialog(card),
+                        icon: const Icon(Icons.price_change_outlined),
+                        label: const Text("Narxlar"),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => showExcelActionPicker(
+                          context,
+                          ref.read(apiClientProvider),
+                          title: "Akt Sverka Excel",
+                          path: '/export/client/${widget.clientId}',
+                          filename: 'Sverka_${asStr(card['name'])}.xlsx',
+                        ),
+                        icon: const Icon(Icons.table_chart_outlined),
+                        label: const Text("Excel"),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => _shareStatementText(card, events),
+                        icon: const Icon(Icons.share_rounded),
+                        label: const Text("Ulashish"),
+                      ),
+                      if (hasGroup)
+                        OutlinedButton.icon(
+                          onPressed: _sendSverkaGroup,
+                          icon: const Icon(Icons.send_rounded),
+                          label: const Text("Guruhga Sverka"),
+                        ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.icon(
-                      onPressed: () => _addPaymentDialog(card),
-                      icon: const Icon(Icons.payments_outlined),
-                      label: const Text("Pul oldim"),
-                    ),
-                    FilledButton.tonalIcon(
-                      onPressed: () => _addReturnDialog(card),
-                      icon: const Icon(Icons.assignment_return_outlined),
-                      label: const Text("Vozvrat"),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _customPricesDialog(card),
-                      icon: const Icon(Icons.price_change_outlined),
-                      label: const Text("Narxlar"),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => showExcelActionPicker(
-                        context,
-                        ref.read(apiClientProvider),
-                        title: "Akt Sverka Excel",
-                        path: '/export/client/${widget.clientId}',
-                        filename: 'Sverka_${asStr(card['name'])}.xlsx',
+                  const SizedBox(height: 16),
+                  SegmentedButton<int>(
+                    showSelectedIcon: false,
+                    segments: [
+                      ButtonSegment(value: 0, label: Text("Akt Sverka (${events.length})")),
+                      ButtonSegment(
+                        value: 1,
+                        label: Text(
+                          "Operatsiyalar (${recentSales.length + recentPayments.length + recentReturns.length})",
+                        ),
                       ),
-                      icon: const Icon(Icons.table_chart_outlined),
-                      label: const Text("Excel"),
-                    ),
-                    if (hasGroup)
-                      OutlinedButton.icon(
-                        onPressed: _sendSverkaGroup,
-                        icon: const Icon(Icons.send_rounded),
-                        label: const Text("Guruhga Sverka"),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                SegmentedButton<int>(
-                  showSelectedIcon: false,
-                  segments: [
-                    ButtonSegment(value: 0, label: Text("Akt Sverka (${events.length})")),
-                    ButtonSegment(
-                      value: 1,
-                      label: Text("Operatsiyalar (${recentSales.length + recentPayments.length + recentReturns.length})"),
-                    ),
-                  ],
-                  selected: {_tab},
-                  onSelectionChanged: (s) => setState(() => _tab = s.first),
-                ),
-                const SizedBox(height: 12),
-                if (_tab == 0)
-                  if (events.isEmpty)
-                    const EmptyStateCard(
-                      icon: Icons.receipt_long_outlined,
-                      title: "Hali harakatlar yo'q",
-                    )
-                  else
-                    Card(
-                      child: Column(
-                        children: [
-                          for (int i = events.length - 1; i >= 0; i--) ...[
-                            if (i < events.length - 1) const Divider(),
-                            _StatementTile(ev: events[i]),
-                          ],
-                        ],
-                      ),
-                    )
-                else ...[
-                  if (recentSales.isEmpty && recentPayments.isEmpty && recentReturns.isEmpty)
-                    const EmptyStateCard(
-                      icon: Icons.history_outlined,
-                      title: "So'nggi operatsiyalar yo'q",
-                    ),
-                  for (final s in recentSales) ...[
-                    Card(
-                      child: ListTile(
-                        leading: const CircleAvatar(
-                          backgroundColor: Color(0x1A0284C7),
-                          child: Icon(Icons.shopping_bag_outlined, color: NorinPalette.sky),
-                        ),
-                        title: Text(
-                          "Sotuv #${asInt(s['id'])} • ${formatKg(asDouble(s['total_weight_kg']))}",
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        subtitle: Text(formatLocalDateTime(asStr(s['created_at']))),
-                        trailing: Text(
-                          formatUzs(asDouble(s['total_amount'])),
-                          style: tNumStyle.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                        onTap: () => openSaleReviewSheet(context, ref, s),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                  ],
-                  for (final p in recentPayments) ...[
-                    Card(
-                      child: ListTile(
-                        leading: const CircleAvatar(
-                          backgroundColor: Color(0x1A059669),
-                          child: Icon(Icons.payments_outlined, color: NorinPalette.profit),
-                        ),
-                        title: Text(
-                          "To'lov (${asStr(p['payment_method'])})",
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        subtitle: Text(formatLocalDateTime(asStr(p['created_at']))),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
+                    ],
+                    selected: {_tab},
+                    onSelectionChanged: (s) => setState(() => _tab = s.first),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_tab == 0)
+                    if (events.isEmpty)
+                      const EmptyStateCard(
+                        icon: Icons.receipt_long_outlined,
+                        title: "Hali harakatlar yo'q",
+                      )
+                    else
+                      Card(
+                        child: Column(
                           children: [
-                            Text(
-                              "-${formatUzs(asDouble(p['amount']))}",
-                              style: tNumStyle.copyWith(
-                                color: NorinPalette.profit,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, color: NorinPalette.danger, size: 20),
-                              onPressed: () async {
-                                final yes = await showConfirmDialog(
-                                  context,
-                                  title: "To'lovni o'chirish",
-                                  message: "Bu to'lov o'chirilsinmi?",
-                                  destructive: true,
-                                );
-                                if (!yes) return;
-                                await ref.read(apiClientProvider).delete('/payments/${asInt(p['id'])}');
-                                _refresh();
-                              },
-                            ),
+                            for (int i = events.length - 1; i >= 0; i--) ...[
+                              if (i < events.length - 1) const Divider(),
+                              _StatementTile(ev: events[i]),
+                            ],
                           ],
                         ),
+                      )
+                  else ...[
+                    if (recentSales.isEmpty && recentPayments.isEmpty && recentReturns.isEmpty)
+                      const EmptyStateCard(
+                        icon: Icons.history_outlined,
+                        title: "So'nggi operatsiyalar yo'q",
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                  ],
-                  for (final r in recentReturns) ...[
-                    Card(
-                      child: ListTile(
-                        leading: const CircleAvatar(
-                          backgroundColor: Color(0x1AF59E0B),
-                          child: Icon(Icons.assignment_return_outlined, color: NorinPalette.amber),
-                        ),
-                        title: Text(
-                          "Vozvrat: ${asStr(r['product_name'], 'Mahsulot')} (${formatKg(asDouble(r['weight_kg']))})",
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        subtitle: Text(formatLocalDateTime(asStr(r['created_at']))),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline, color: NorinPalette.danger, size: 20),
-                          onPressed: () async {
-                            final yes = await showConfirmDialog(
-                              context,
-                              title: "Vozvratni o'chirish",
-                              message: "Bu vozvrat o'chirilsinmi?",
-                              destructive: true,
-                            );
-                            if (!yes) return;
-                            await ref.read(apiClientProvider).delete('/returns/${asInt(r['id'])}');
-                            _refresh();
-                          },
+                    for (final s in recentSales) ...[
+                      Card(
+                        child: ListTile(
+                          leading: const CircleAvatar(
+                            backgroundColor: Color(0x1A0284C7),
+                            child: Icon(Icons.shopping_bag_outlined, color: NorinPalette.sky),
+                          ),
+                          title: Text(
+                            "Sotuv #${asInt(s['id'])} • ${formatKg(asDouble(s['total_weight_kg']))}",
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: Text(formatLocalDateTime(asStr(s['created_at']))),
+                          trailing: Text(
+                            formatUzs(asDouble(s['total_amount'])),
+                            style: tNumStyle.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          onTap: () => openSaleReviewSheet(context, ref, s),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 6),
+                      const SizedBox(height: 6),
+                    ],
+                    for (final p in recentPayments) ...[
+                      Card(
+                        child: ListTile(
+                          onTap: () => openEditPaymentDialog(context, ref, p, onSuccess: _refresh),
+                          leading: const CircleAvatar(
+                            backgroundColor: Color(0x1A059669),
+                            child: Icon(Icons.payments_outlined, color: NorinPalette.profit),
+                          ),
+                          title: Text(
+                            "To'lov (${formatPaymentMethod(asStr(p['payment_method']))})",
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: Text(
+                            joinMeta([asStr(p['note']), formatLocalDateTime(asStr(p['created_at']))]),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                "-${formatUzs(asDouble(p['amount']))}",
+                                style: tNumStyle.copyWith(
+                                  color: NorinPalette.profit,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, color: NorinPalette.danger, size: 20),
+                                onPressed: () async {
+                                  final yes = await showConfirmDialog(
+                                    context,
+                                    title: "To'lovni o'chirish",
+                                    message: "Bu to'lov o'chirilsinmi?",
+                                    destructive: true,
+                                  );
+                                  if (!yes) return;
+                                  try {
+                                    await ref.read(apiClientProvider).delete('/payments/${asInt(p['id'])}');
+                                    _refresh();
+                                    if (context.mounted) showSnack(context, "To'lov o'chirildi");
+                                  } catch (e) {
+                                    if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                    ],
+                    for (final r in recentReturns) ...[
+                      Card(
+                        child: ListTile(
+                          leading: const CircleAvatar(
+                            backgroundColor: Color(0x1AF59E0B),
+                            child: Icon(Icons.assignment_return_outlined, color: NorinPalette.amber),
+                          ),
+                          title: Text(
+                            "Vozvrat: ${asStr(r['product_name'], 'Mahsulot')} (${formatKg(asDouble(r['weight_kg']))})",
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: Text(
+                            joinMeta([asStr(r['reason']), formatLocalDateTime(asStr(r['created_at']))]),
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline, color: NorinPalette.danger, size: 20),
+                            onPressed: () async {
+                              final yes = await showConfirmDialog(
+                                context,
+                                title: "Vozvratni o'chirish",
+                                message: "Bu vozvrat o'chirilsinmi?",
+                                destructive: true,
+                              );
+                              if (!yes) return;
+                              try {
+                                await ref.read(apiClientProvider).delete('/returns/${asInt(r['id'])}');
+                                _refresh();
+                                if (context.mounted) showSnack(context, "Vozvrat o'chirildi");
+                              } catch (e) {
+                                if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                    ],
                   ],
                 ],
-              ],
-            ),
-          );
-        },
-      ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -677,7 +736,7 @@ class _StatementTile extends StatelessWidget {
       dense: true,
       leading: Icon(ic, color: col),
       title: Text(
-        "${asStr(ev['doc'])} • ${asStr(ev['detail'])}",
+        joinMeta([asStr(ev['doc']), asStr(ev['detail'])]),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),

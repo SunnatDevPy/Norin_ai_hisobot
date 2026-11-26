@@ -45,3 +45,30 @@ String formatShortDate(String? isoStr) {
   if (parsed == null) return isoStr;
   return DateFormat('dd.MM').format(parsed.toLocal());
 }
+
+String formatPaymentMethod(String? method) {
+  return switch ((method ?? '').trim().toLowerCase()) {
+    'cash' => 'Naqd',
+    'card' => 'Karta',
+    'transfer' => "O'tkazma",
+    '' => 'Naqd',
+    final other => other,
+  };
+}
+
+double? parseNumberInput(String raw) {
+  final cleaned = raw
+      .trim()
+      .replaceAll('\u00A0', '')
+      .replaceAll(' ', '')
+      .replaceAll(',', '.');
+  if (cleaned.isEmpty) return null;
+  return double.tryParse(cleaned);
+}
+
+String joinMeta(List<String?> parts, {String sep = ' • '}) {
+  return parts
+      .map((e) => (e ?? '').trim())
+      .where((e) => e.isNotEmpty)
+      .join(sep);
+}

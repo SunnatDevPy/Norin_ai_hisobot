@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/state/providers.dart';
@@ -195,8 +196,8 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
     final itemsPayload = <Map<String, dynamic>>[];
     for (final line in _manualLines) {
       final pid = line.productId ?? defaultPid;
-      final kg = double.tryParse(line.kgCtrl.text.trim().replaceAll(',', '.'));
-      final priceOverride = double.tryParse(line.priceCtrl.text.trim().replaceAll(',', '.'));
+      final kg = parseNumberInput(line.kgCtrl.text);
+      final priceOverride = parseNumberInput(line.priceCtrl.text);
       if (pid <= 0 || kg == null || kg <= 0) {
         showSnack(context, "Har bir qatorda mahsulot va vaznni to'g'ri kiriting", error: true);
         return;
@@ -260,8 +261,8 @@ class _NewSaleSheetState extends ConsumerState<_NewSaleSheet> with SingleTickerP
     double totalSum = 0;
     for (final line in _manualLines) {
       final pid = line.productId ?? (products.isNotEmpty ? asInt(products.first['id']) : 0);
-      final kg = double.tryParse(line.kgCtrl.text.trim().replaceAll(',', '.')) ?? 0;
-      double price = double.tryParse(line.priceCtrl.text.trim().replaceAll(',', '.')) ?? 0;
+      final kg = parseNumberInput(line.kgCtrl.text) ?? 0;
+      double price = parseNumberInput(line.priceCtrl.text) ?? 0;
       if (price <= 0) {
         for (final p in products) {
           if (asInt(p['id']) == pid) {
@@ -762,8 +763,8 @@ class _SaleReviewSheetState extends ConsumerState<_SaleReviewSheet> {
       ),
     );
     if (ok != true) return;
-    final kg = double.tryParse(kgCtrl.text.trim().replaceAll(',', '.'));
-    final price = double.tryParse(priceCtrl.text.trim().replaceAll(',', '.'));
+    final kg = parseNumberInput(kgCtrl.text);
+    final price = parseNumberInput(priceCtrl.text);
     if (kg == null || kg <= 0 || price == null || price <= 0) {
       if (mounted) showSnack(context, "Vazn va narx musbat bo'lishi kerak", error: true);
       return;
@@ -903,7 +904,7 @@ class _SaleReviewSheetState extends ConsumerState<_SaleReviewSheet> {
       ),
     );
     if (ok != true) return;
-    final amount = double.tryParse(amountCtrl.text.trim().replaceAll(',', '.'));
+    final amount = parseNumberInput(amountCtrl.text);
     if (amount == null || amount <= 0) {
       if (mounted) showSnack(context, "Summa 0 dan katta bo'lishi kerak", error: true);
       return;
@@ -936,6 +937,25 @@ class _SaleReviewSheetState extends ConsumerState<_SaleReviewSheet> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _shareReceipt() async {
+    final items = asMapList(_sale['items']);
+    final buf = StringBuffer()
+      ..writeln("🧾 Sotuv AI — Chek #${asInt(_sale['id'])}")
+      ..writeln("Mijoz: ${asStr(_sale['client_name'], 'Tanlanmagan')}")
+      ..writeln("Sana: ${formatLocalDateTime(asStr(_sale['created_at']))}")
+      ..writeln("");
+    for (final it in items) {
+      buf.writeln(
+        "• ${asStr(it['product_name'])}: ${formatKg(asDouble(it['weight_kg']), unit: asStr(it['unit'], 'kg'))} × ${formatUzs(asDouble(it['unit_sell_price']))} = ${formatUzs(asDouble(it['line_total']))}",
+      );
+    }
+    buf
+      ..writeln("")
+      ..writeln("Jami vazn: ${formatKg(asDouble(_sale['total_weight_kg']))}")
+      ..writeln("Jami summa: ${formatUzs(asDouble(_sale['total_amount']))}");
+    await Share.share(buf.toString().trim());
   }
 
   Future<void> _deleteSale() async {
@@ -998,6 +1018,11 @@ class _SaleReviewSheetState extends ConsumerState<_SaleReviewSheet> {
                   color: isConfirmed ? NorinPalette.profit : NorinPalette.amber,
                 ),
                 const Spacer(),
+                IconButton(
+                  tooltip: "Chekni ulashish",
+                  icon: const Icon(Icons.share_rounded),
+                  onPressed: _busy ? null : _shareReceipt,
+                ),
                 IconButton(
                   tooltip: "O'chirish",
                   icon: const Icon(Icons.delete_outline, color: NorinPalette.danger),

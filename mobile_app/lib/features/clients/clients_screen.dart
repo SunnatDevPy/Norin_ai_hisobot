@@ -7,6 +7,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/widgets/metric_cards.dart';
 import '../../core/widgets/norin_widgets.dart';
+import '../cash/cash_screen.dart';
 import 'client_detail_screen.dart';
 
 class ClientsScreen extends ConsumerStatefulWidget {
@@ -18,7 +19,8 @@ class ClientsScreen extends ConsumerStatefulWidget {
 
 class _ClientsScreenState extends ConsumerState<ClientsScreen> {
   final _searchCtrl = TextEditingController();
-  String _filter = 'all'; // all | debt | group
+  String _filter = 'all'; // all | debt | advance | group
+  bool _sortByDebt = true;
 
   @override
   void dispose() {
@@ -82,7 +84,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
         data: {
           'name': name,
           'phone': phoneCtrl.text.trim(),
-          'opening_debt': double.tryParse(debtCtrl.text.trim()) ?? 0,
+          'opening_debt': parseNumberInput(debtCtrl.text) ?? 0,
           'aliases': aliasCtrl.text.trim(),
         },
       );
@@ -103,6 +105,17 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
         title: const Text("Mijozlar", style: TextStyle(fontWeight: FontWeight.w800)),
         actions: [
           IconButton(
+            tooltip: _sortByDebt ? "Tartib: Qarz bo'yicha (A-Z ga o'tish)" : "Tartib: A-Z (Qarz bo'yicha)",
+            icon: Icon(_sortByDebt ? Icons.sort_rounded : Icons.sort_by_alpha_rounded),
+            onPressed: () {
+              setState(() => _sortByDebt = !_sortByDebt);
+              showSnack(
+                context,
+                _sortByDebt ? "Tartib: Eng katta qarzdan" : "Tartib: Alifbo (A-Z)",
+              );
+            },
+          ),
+          IconButton(
             tooltip: "Yangi mijoz",
             icon: const Icon(Icons.person_add_alt_1_rounded),
             onPressed: _showAddClientDialog,
@@ -121,7 +134,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
           await ref.read(clientsProvider.future);
         },
         child: clientsAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
+          loading: () => const _ClientsSkeleton(),
           error: (e, _) => AsyncErrorCard(
             error: e,
             onRetry: () => ref.invalidate(clientsProvider),
@@ -137,15 +150,25 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
               }
               final debt = asDouble(c['current_debt']);
               if (_filter == 'debt' && debt <= 0) return false;
+              if (_filter == 'advance' && debt >= 0) return false;
               if (_filter == 'group' && c['group_chat_id'] == null) return false;
               return true;
             }).toList();
+
+            if (_sortByDebt) {
+              filtered.sort((a, b) => asDouble(b['current_debt']).compareTo(asDouble(a['current_debt'])));
+            } else {
+              filtered.sort(
+                (a, b) => asStr(a['name']).toLowerCase().compareTo(asStr(b['name']).toLowerCase()),
+              );
+            }
 
             final totalDebt = clients.fold<double>(
               0,
               (sum, c) => sum + (asDouble(c['current_debt']) > 0 ? asDouble(c['current_debt']) : 0),
             );
             final debtorsCount = clients.where((c) => asDouble(c['current_debt']) > 0).length;
+            final advanceCount = clients.where((c) => asDouble(c['current_debt']) < 0).length;
 
             return ListView(
               padding: EdgeInsets.fromLTRB(16, 8, 16, dockBottomClearance(context)),
@@ -222,6 +245,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                 const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
+                  runSpacing: 6,
                   children: [
                     ChoiceChip(
                       label: Text("Hammasi (${clients.length})"),
@@ -233,6 +257,12 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                       selected: _filter == 'debt',
                       onSelected: (_) => setState(() => _filter = 'debt'),
                     ),
+                    if (advanceCount > 0)
+                      ChoiceChip(
+                        label: Text("Avans ($advanceCount)"),
+                        selected: _filter == 'advance',
+                        onSelected: (_) => setState(() => _filter = 'advance'),
+                      ),
                     ChoiceChip(
                       label: const Text("Guruhli"),
                       selected: _filter == 'group',
@@ -255,6 +285,13 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                   for (final c in filtered) ...[
                     _ClientCard(
                       client: c,
+                      onQuickPay: asDouble(c['current_debt']) > 0
+                          ? () => openQuickPaymentDialog(
+                                context,
+                                ref,
+                                initialClientId: asInt(c['id']),
+                              )
+                          : null,
                       onTap: () async {
                         await Navigator.of(context).push(
                           MaterialPageRoute(
@@ -278,10 +315,38 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
   }
 }
 
+class _ClientsSkeleton extends StatelessWidget {
+  const _ClientsSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: EdgeInsets.fromLTRB(16, 8, 16, dockBottomClearance(context)),
+      children: const [
+        CosmicShimmerBox(height: 82, borderRadius: 20),
+        SizedBox(height: 12),
+        CosmicShimmerBox(height: 52, borderRadius: 16),
+        SizedBox(height: 12),
+        CosmicShimmerBox(height: 74, borderRadius: 18),
+        SizedBox(height: 8),
+        CosmicShimmerBox(height: 74, borderRadius: 18),
+        SizedBox(height: 8),
+        CosmicShimmerBox(height: 74, borderRadius: 18),
+      ],
+    );
+  }
+}
+
 class _ClientCard extends StatelessWidget {
-  const _ClientCard({required this.client, required this.onTap});
+  const _ClientCard({
+    required this.client,
+    required this.onTap,
+    this.onQuickPay,
+  });
+
   final Map<String, dynamic> client;
   final VoidCallback onTap;
+  final VoidCallback? onQuickPay;
 
   @override
   Widget build(BuildContext context) {
@@ -296,7 +361,7 @@ class _ClientCard extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
               CircleAvatar(
@@ -371,6 +436,19 @@ class _ClientCard extends StatelessWidget {
                   ),
                 ],
               ),
+              if (onQuickPay != null) ...[
+                const SizedBox(width: 6),
+                IconButton(
+                  tooltip: "Tez pul olish",
+                  visualDensity: VisualDensity.compact,
+                  style: IconButton.styleFrom(
+                    backgroundColor: NorinPalette.profit.withValues(alpha: 0.14),
+                    foregroundColor: NorinPalette.profit,
+                  ),
+                  icon: const Icon(Icons.payments_outlined, size: 18),
+                  onPressed: onQuickPay,
+                ),
+              ],
             ],
           ),
         ),

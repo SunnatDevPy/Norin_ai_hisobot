@@ -36,6 +36,7 @@ class _NorinAiAppState extends ConsumerState<NorinAiApp> with WidgetsBindingObse
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     Future.microtask(() async {
+      await ref.read(themeModeProvider.notifier).init();
       await ref.read(biometricLockProvider.notifier).init();
       await ref.read(authProvider.notifier).bootstrap();
     });

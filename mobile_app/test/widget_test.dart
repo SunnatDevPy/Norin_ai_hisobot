@@ -19,6 +19,13 @@ void main() {
     expect(formatCompactUzs(450000), "450k");
     expect(formatKg(10.0), "10 kg");
     expect(formatKg(2.55, unit: 'dona'), "2.55 dona");
+    expect(formatPaymentMethod('cash'), "Naqd");
+    expect(formatPaymentMethod('card'), "Karta");
+    expect(formatPaymentMethod('transfer'), "O'tkazma");
+    expect(parseNumberInput("1 500 000"), 1500000);
+    expect(parseNumberInput("12,5"), 12.5);
+    expect(parseNumberInput("  "), isNull);
+    expect(joinMeta(["Naqd", "", null, "Izoh"]), "Naqd • Izoh");
   });
 
   test('AppUpdateInfo compares build numbers cleanly', () {

@@ -85,8 +85,8 @@ class SettingsScreen extends ConsumerWidget {
     );
     if (ok != true) return;
     final name = nameCtrl.text.trim();
-    final cost = double.tryParse(costCtrl.text.trim()) ?? -1;
-    final sell = double.tryParse(sellCtrl.text.trim()) ?? -1;
+    final cost = parseNumberInput(costCtrl.text) ?? -1;
+    final sell = parseNumberInput(sellCtrl.text) ?? -1;
     if (name.isEmpty || cost < 0 || sell <= 0) {
       if (context.mounted) showSnack(context, "Maydonlarni to'g'ri to'ldiring", error: true);
       return;
@@ -354,8 +354,15 @@ class SettingsScreen extends ConsumerWidget {
                                   destructive: true,
                                 );
                                 if (!yes) return;
-                                await api.delete('/products/${asInt(products[i]['id'])}');
-                                invalidateOperationalData(ref);
+                                try {
+                                  await api.delete('/products/${asInt(products[i]['id'])}');
+                                  invalidateOperationalData(ref);
+                                  if (context.mounted) showSnack(context, "Mahsulot o'chirildi");
+                                } catch (e) {
+                                  if (context.mounted) {
+                                    showSnack(context, ApiClient.extractError(e), error: true);
+                                  }
+                                }
                               },
                             ),
                           ),
@@ -382,7 +389,7 @@ class SettingsScreen extends ConsumerWidget {
                       DropdownMenuItem(value: ThemeMode.dark, child: Text("Qora")),
                     ],
                     onChanged: (m) {
-                      if (m != null) ref.read(themeModeProvider.notifier).state = m;
+                      if (m != null) ref.read(themeModeProvider.notifier).setThemeMode(m);
                     },
                   ),
                 ),
@@ -525,8 +532,13 @@ class _DevicesSheetState extends State<_DevicesSheet> {
               trailing: IconButton(
                 icon: const Icon(Icons.delete_outline, color: NorinPalette.danger),
                 onPressed: () async {
-                  await widget.api.delete('/auth/devices/${asInt(d['id'])}');
-                  setState(_load);
+                  try {
+                    await widget.api.delete('/auth/devices/${asInt(d['id'])}');
+                    setState(_load);
+                    if (context.mounted) showSnack(context, "Qurilma uzildi");
+                  } catch (e) {
+                    if (context.mounted) showSnack(context, ApiClient.extractError(e), error: true);
+                  }
                 },
               ),
             );
